@@ -83,6 +83,10 @@ python -m HERA.main --model megnet --dataset semi --mode sparse hetero
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 ```
 
+## ALIGNN Reference
+
+For ALIGNN-related experiments, we use the official GitHub implementation of ALIGNN rather than maintaining a separate local implementation in this repository. If you need to run or reproduce ALIGNN experiments, please refer directly to the upstream project: https://github.com/usnistgov/alignn
+
 ## Smoke Check
 
 There is currently no built-in automated test suite such as `pytest` or `unittest`.
