@@ -108,10 +108,10 @@ python -m HERA.main \
   --dataset native \
   --mode sparse \
   --device cpu \
-  --epochs 1 \
+  --epochs 500 \
   --seeds 42 \
   --atom-init HERA/atom_init.json \
-  --log-dir HERA/logs_smoke
+  --log-dir HERA/logs_sparse_cgcnn
 ```
 
 This smoke check helps verify:
