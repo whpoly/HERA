@@ -1,28 +1,29 @@
 # HERA
-<<<<<<< HEAD
 
-HERA: Heterogeneous Region-Aware Message Passing for Property Prediction of Crystalline Defects.
+HERA: Heterogeneous Region-Aware Message Passing Neural Network for Property Prediction of Crystalline Defects.
 
-This repository contains research code for training crystal graph neural networks on several defect-property datasets. It currently supports two backbones (`MEGNet` and `CGCNN`) and four graph construction modes:
+This repository contains research code for defect-property prediction on crystalline materials. The current training pipeline supports two backbone models and four graph construction modes.
 
-- `sparse`
-- `full`
-- `hetero`
-- `attention`
+| Item | Supported Options |
+| --- | --- |
+| Models | `megnet`, `cgcnn` |
+| Modes | `sparse`, `full`, `hetero`, `attention` |
+| Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi` |
 
-## What Is In This Repo
+## Repository Layout
 
-- `main.py`: command-line entry point for training experiments
-- `config/`: dataset- and mode-specific training configs
-- `data/`: dataset loading and graph conversion utilities
-- `models/`: MEGNet / CGCNN model definitions
-- `training/`: trainer, losses, and logging helpers
-- `utils/`: scaling utilities
+- `main.py`: training CLI entry point
+- `config/`: dataset and mode configuration
+- `data/`: dataset loading and graph conversion
+- `models/`: MEGNet and CGCNN implementations
+- `training/`: trainer, loss, and logging utilities
+- `utils/`: helper utilities
 
 ## Requirements
 
-The project is written for Python 3.10+ and depends on the following Python packages:
+Recommended environment:
 
+- Python 3.10+
 - `torch`
 - `torch-geometric`
 - `numpy`
@@ -31,7 +32,7 @@ The project is written for Python 3.10+ and depends on the following Python pack
 - `tqdm`
 - `pymatgen`
 
-Install `torch` and `torch-geometric` with versions that match your CPU/CUDA environment, then install the remaining packages, for example:
+Example installation:
 
 ```bash
 pip install torch
@@ -39,11 +40,11 @@ pip install torch-geometric
 pip install numpy pandas scikit-learn tqdm pymatgen
 ```
 
-## Data And Input Files
+## Data Preparation
 
-This repository does not bundle the raw datasets or `atom_init.json`.
+This repository does not include the raw datasets or `atom_init.json`.
 
-Before launching training, make sure the required files and directories exist in the locations expected by the loaders:
+Before training, make sure the following resources are available in the paths expected by the code:
 
 - `atom_init.json`
 - `2d-materials-point-defects-all/...` for `vacancy` and `2dmd_high`
@@ -51,29 +52,29 @@ Before launching training, make sure the required files and directories exist in
 - `../autodl-tmp/rs2re_h_ads/...` for `och`
 - `imp2d/imp2d/...` for `imp2d`
 
-If `atom_init.json` lives somewhere else, pass it explicitly with `--atom-init`.
+If `atom_init.json` is stored elsewhere, pass it with `--atom-init`.
 
-## How To Run Training
+## Quick Start
 
-Because the CLI uses package-relative imports, run commands from the parent directory of this repository.
+Because the CLI uses package-relative imports, run commands from the parent directory of `HERA`:
 
 ```bash
 cd path/to/parent/of/HERA
 python -m HERA.main --help
 ```
 
-Supported arguments:
+Common arguments:
 
 - `--model`: `megnet` or `cgcnn`
-- `--dataset`: `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`
+- `--dataset`: dataset name
 - `--mode`: one or more of `sparse`, `full`, `hetero`, `attention`
 - `--device`: for example `cpu`, `cuda:0`
-- `--epochs`: number of epochs per random seed
-- `--seeds`: one or more integer seeds
+- `--epochs`: number of epochs per seed
+- `--seeds`: one or more random seeds
 - `--atom-init`: path to `atom_init.json`
-- `--log-dir`: output directory for logs and summaries
+- `--log-dir`: output directory for logs
 
-Example commands:
+Example training commands:
 
 ```bash
 python -m HERA.main --model megnet --dataset vacancy
@@ -82,43 +83,20 @@ python -m HERA.main --model megnet --dataset semi --mode sparse hetero
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 ```
 
-## Quick Smoke Run
+## Smoke Check
 
-Once the dataset files are available, the smallest practical end-to-end check is a single mode, a single seed, and a single epoch:
+There is currently no built-in automated test suite such as `pytest` or `unittest`.
 
-```bash
-python -m HERA.main \
-  --model cgcnn \
-  --dataset native \
-  --mode sparse \
-  --device cpu \
-  --epochs 1 \
-  --seeds 42 \
-  --atom-init HERA/atom_init.json \
-  --log-dir HERA/logs_smoke
-```
+For a quick manual validation:
 
-This is useful to verify that:
-
-- the package imports correctly
-- the dataset paths are valid
-- graph conversion works
-- training and logging start without crashing
-
-## How To Run Tests
-
-There is currently no built-in automated test suite such as `pytest` or `unittest` in this repository.
-
-For now, the recommended way to validate the environment is:
-
-1. Check that the CLI can start correctly:
+1. Confirm the CLI starts normally:
 
 ```bash
 cd path/to/parent/of/HERA
 python -m HERA.main --help
 ```
 
-2. Run a minimal smoke experiment with a single mode, a single seed, and one epoch after preparing the required dataset files:
+2. Run a minimal one-epoch experiment after preparing the required dataset files:
 
 ```bash
 python -m HERA.main \
@@ -132,32 +110,28 @@ python -m HERA.main \
   --log-dir HERA/logs_smoke
 ```
 
-This manual check verifies that:
+This smoke check helps verify:
 
-- package imports work
+- imports are working
 - dataset paths are correct
-- graph conversion succeeds
-- training can start and write logs
+- graph conversion can run
+- training and logging can start
 
 ## Outputs
 
-Training writes logs to:
+Training logs are written under:
 
 ```text
 logs/{model}_{dataset}_{timestamp}/
 ```
 
-For each selected mode, the run directory contains:
+Each run may contain:
 
 - per-epoch CSV logs
 - per-mode `summary.txt`
-- a run-level `summary.txt`
+- one run-level `summary.txt`
 
 ## Notes
 
-- There is currently no automated test suite in the repository.
-- Full training requires the external datasets to be prepared exactly as expected by `data/datasets.py`.
-- If you want to inspect all CLI options, use `python -m HERA.main --help`.
-=======
-HERA: Heterogeneous Region-Aware Message Passing Neural Network for Property Prediction of Crystalline Defects
->>>>>>> 460391da3f7f4fa291c35ddf596d5c431e5acb3b
+- Full training depends on external datasets being placed exactly where `data/datasets.py` expects them.
+- Use `python -m HERA.main --help` to inspect all available CLI options.
