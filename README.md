@@ -1,4 +1,5 @@
 # HERA
+<<<<<<< HEAD
 
 HERA: Heterogeneous Region-Aware Message Passing for Property Prediction of Crystalline Defects.
 
@@ -157,3 +158,6 @@ For each selected mode, the run directory contains:
 - There is currently no automated test suite in the repository.
 - Full training requires the external datasets to be prepared exactly as expected by `data/datasets.py`.
 - If you want to inspect all CLI options, use `python -m HERA.main --help`.
+=======
+HERA: Heterogeneous Region-Aware Message Passing Neural Network for Property Prediction of Crystalline Defects
+>>>>>>> 460391da3f7f4fa291c35ddf596d5c431e5acb3b
