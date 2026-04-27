@@ -15,7 +15,7 @@ from ..data.converters import (
     AtomFeaturesExtractor,
 )
 from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
-from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN
+from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, DefiNet
 from ..utils.scaler import Scaler
 from .losses import MAELoss
 
@@ -112,6 +112,15 @@ class MEGNetTrainer:
                 n_heads=self.config['model'].get('n_heads', 4),
                 n_h=3,
             ).to(self.device)
+        elif task == 'definet_attention':
+            self.model = DefiNet(
+                orig_atom_fea_len=atom_converter.get_shape(),
+                nbr_fea_len=bond_converter.get_shape(eos=use_eos),
+                atom_fea_len=self.config['model']['embedding_size'],
+                n_conv=self.config['model']['nblocks'],
+                n_marker_types=self.config['model'].get('n_marker_types', 2),
+                n_h=3,
+            ).to(self.device)
         else:
             # default: cgcnn_full / cgcnn_sparse
             self.model = CGCNN(
@@ -194,6 +203,9 @@ class MEGNetTrainer:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
         elif task == 'cgcnn_attention':
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()
+        elif task == 'definet_attention':
+            marker = getattr(batch, 'defect_marker', getattr(batch, 'node_type', None))
+            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, defect_marker=marker).squeeze()
         elif task == 'megnet_attention':
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch, node_type=batch.node_type).squeeze()
         else:

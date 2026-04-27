@@ -235,7 +235,7 @@ def load_dataset(dataset_name: str, model_name: str):
 
     Args:
         dataset_name: one of vacancy, 2dmd_high, native, och, imp2d, semi
-        model_name: 'megnet' or 'cgcnn' (used as task prefix)
+        model_name: 'megnet', 'cgcnn', or 'definet' (used as task prefix)
 
     Returns:
         (dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets)

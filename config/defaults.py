@@ -171,7 +171,7 @@ _CONFIG_REGISTRY = {
 }
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
-VALID_MODELS = ['megnet', 'cgcnn']
+VALID_MODELS = ['megnet', 'cgcnn', 'definet']
 VALID_MODES = ['sparse', 'full', 'hetero', 'attention']
 
 
@@ -179,7 +179,7 @@ def get_config(model: str, dataset: str, mode: str):
     """Get the config dict for a specific model/dataset/mode combination.
 
     Args:
-        model: 'megnet' or 'cgcnn'
+        model: 'megnet', 'cgcnn', or 'definet'
         dataset: one of VALID_DATASETS
         mode: one of 'sparse', 'full', 'hetero', 'attention'
 
@@ -192,7 +192,14 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"Unknown model '{model}'. Choose from {VALID_MODELS}")
     if mode not in VALID_MODES:
         raise ValueError(f"Unknown mode '{mode}'. Choose from {VALID_MODES}")
+    if model == 'definet' and mode != 'attention':
+        raise ValueError("The definet model only supports the attention mode")
 
     config_sparse, config_full, config_hetero, config_attention = _CONFIG_REGISTRY[dataset](model)
-    return {'sparse': config_sparse, 'full': config_full,
-            'hetero': config_hetero, 'attention': config_attention}[mode]
+    config = {'sparse': config_sparse, 'full': config_full,
+              'hetero': config_hetero, 'attention': config_attention}[mode]
+    if model == 'definet':
+        config['model']['nblocks'] = 4
+        config['model']['n_marker_types'] = 2
+        config['model'].pop('n_heads', None)
+    return config

@@ -403,3 +403,68 @@ class AttentionCGConv(MessagePassing):
 
     def get_attention_weights(self):
         return self._attention_weights, self._edge_index
+
+
+# ------------------------------------------------------------------ #
+#  DeFiNet-style defect-aware gated convolution (scalar branch)
+# ------------------------------------------------------------------ #
+
+class DefectAwareGateConv(MessagePassing):
+    """Scalar DeFiNet-style message passing with marker-pair gates.
+
+    This implements the scalar part of the DeFiNet defect-aware message:
+    each neighbor message is re-weighted by distance features and by a
+    learnable gate of the marker pair (m_i, m_j). Unlike the existing
+    attention layers above, this layer does not apply neighbor softmax.
+    """
+
+    def __init__(self, channels, dim, n_marker_types=2, batch_norm=True):
+        super().__init__(aggr='add')
+        self.channels = channels
+        self.dim = dim
+        self.n_marker_types = n_marker_types
+
+        self.marker_emb = nn.Embedding(n_marker_types, channels)
+        self.phi_h = nn.Sequential(
+            nn.Linear(channels, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.lambda_h = nn.Sequential(
+            nn.Linear(dim, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.gamma_h = nn.Sequential(
+            nn.Linear(channels, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+            nn.Sigmoid(),
+        )
+        self.update_nn = nn.Sequential(
+            nn.Linear(2 * channels, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.bn = nn.BatchNorm1d(channels) if batch_norm else nn.Identity()
+
+        self._edge_index = None
+        self._markers = None
+        self._gate_weights = None
+
+    def forward(self, x, edge_index, edge_attr, defect_marker=None):
+        self._edge_index = edge_index
+        if defect_marker is None:
+            defect_marker = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        defect_marker = defect_marker.to(device=x.device, dtype=torch.long).view(-1)
+        self._markers = defect_marker.clamp(0, self.n_marker_types - 1)
+
+        msg = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr)
+        out = x + self.update_nn(torch.cat([x, msg], dim=-1))
+        return self.bn(out)
+
+    def message(self, x_j, edge_attr):
+        src, dst = self._edge_index
+        marker_pair = self.marker_emb(self._markers[src]) + self.marker_emb(self._markers[dst])
+        gate = self.gamma_h(marker_pair)
+        self._gate_weights = gate.detach()
+        return self.phi_h(x_j) * self.lambda_h(edge_attr) * gate
+
+    def get_attention_weights(self):
+        return self._gate_weights, self._edge_index

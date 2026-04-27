@@ -168,8 +168,14 @@ class SimpleCrystalConverter:
                 structure=d,
             )
         elif self.task == 'attention':
-            # Homogeneous graph with explicit node_type (0=host, 1=defect)
+            # Homogeneous graph with explicit node_type (0=host, 1=defect).
+            # defect_marker uses the same binary split: 0=pristine, 1=defect.
             node_type = torch.LongTensor([int(site.properties['type']) for site in d])
+            defect_marker = torch.LongTensor([
+                0 if int(site.properties['type']) == 0
+                else 1
+                for site in d
+            ])
 
             bond_index = [[], []]
             bond_attr = []
@@ -213,6 +219,7 @@ class SimpleCrystalConverter:
                 bond_batch=bond_batch,
                 weight=weight,
                 node_type=node_type,
+                defect_marker=defect_marker,
                 structure=d,
             )
         else:

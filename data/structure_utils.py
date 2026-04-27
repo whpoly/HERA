@@ -148,7 +148,7 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
     unit_cell = unit_cell.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_vacancy(structure, unit_cell, supercell_size)
@@ -208,7 +208,7 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
     unit_cell = unit_cell.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_2dmd_high(structure, unit_cell, supercell_size)
@@ -310,7 +310,7 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_native(structure, unit_cell, supercell_size)
@@ -384,7 +384,7 @@ def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_och(structure, unit_cell, supercell_size)
@@ -448,7 +448,7 @@ def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_imp2d(structure, unit_cell, supercell_size)
@@ -530,7 +530,7 @@ def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
     unit_cell = unit_cell.copy()
     if task == "cgcnn_hetero" or task == "megnet_hetero":
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_attention' or task == 'megnet_attention':
+    elif task.endswith('_attention'):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
     elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
         structure = get_sparse_semi(structure, unit_cell, supercell_size)

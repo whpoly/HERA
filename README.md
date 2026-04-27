@@ -6,9 +6,9 @@ This repository contains research code for defect-property prediction on crystal
 
 | Item | Supported Options |
 | --- | --- |
-| Models | `megnet`, `cgcnn` |
+| Models | `megnet`, `cgcnn`, `definet` |
 | Modes | `sparse`, `full`, `hetero`, `attention` |
-| Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi` |
+| Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
 
@@ -65,8 +65,8 @@ python -m HERA.main --help
 
 Common arguments:
 
-- `--model`: `megnet` or `cgcnn`
-- `--dataset`: dataset name
+- `--model`: `megnet`, `cgcnn`, or `definet`
+- `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `sparse`, `full`, `hetero`, `attention`
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed
@@ -81,7 +81,10 @@ python -m HERA.main --model megnet --dataset vacancy
 python -m HERA.main --model cgcnn --dataset 2dmd_high --mode sparse
 python -m HERA.main --model megnet --dataset semi --mode sparse hetero
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
+python -m HERA.main --model definet --dataset all
 ```
+
+The `definet` option runs the DeFiNet-style defect-aware attention/gating experiment in `attention` mode across the selected dataset(s). It uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
 ## ALIGNN Reference
 
