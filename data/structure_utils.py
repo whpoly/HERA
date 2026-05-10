@@ -36,6 +36,16 @@ def set_attr(structure, attr, name):
     return structure
 
 
+def copy_source_metadata(source, target):
+    """Preserve original CIF identity through structure transformations."""
+    if target is None:
+        return None
+    for attr in ("source_id", "source_name", "source_path"):
+        if hasattr(source, attr):
+            setattr(target, attr, getattr(source, attr))
+    return target
+
+
 def add_was(structure, unit_cell, supercell_size):
     structure = structure.copy()
     reference_supercell = unit_cell.copy()
@@ -144,13 +154,14 @@ def add_state_vacancy(structure, unit_cell):
 
 def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
                                skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_vacancy(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
@@ -162,7 +173,7 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_vacancy(structure, unit_cell)
-    return structure
+    return copy_source_metadata(source_structure, structure)
 
 
 # ================================================================== #
@@ -204,13 +215,14 @@ def add_state_2dmd_high(structure, unit_cell):
 
 def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, state,
                                  skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_2dmd_high(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
@@ -220,7 +232,7 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_2dmd_high(structure, unit_cell)
-    return structure
+    return copy_source_metadata(source_structure, structure)
 
 
 # ================================================================== #
@@ -307,12 +319,13 @@ def add_state_native(structure, unit_cell):
 
 def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
                               skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_native(structure, unit_cell, supercell_size)
     elif task == 'cgcnn_local' or task == 'megnet_local':
         structure = get_local_native(structure, unit_cell, supercell_size, state)
@@ -324,7 +337,7 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_native(structure, unit_cell)
-    return structure
+    return copy_source_metadata(source_structure, structure)
 
 
 # ================================================================== #
@@ -381,12 +394,13 @@ def add_state_och(structure, state):
 
 def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
                            skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_och(structure, unit_cell, supercell_size)
     elif task == 'cgcnn_local' or task == 'megnet_local':
         structure = get_local_och(structure, unit_cell, supercell_size)
@@ -398,7 +412,7 @@ def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_och(structure, state)
-    return structure
+    return copy_source_metadata(source_structure, structure)
 
 
 # ================================================================== #
@@ -445,12 +459,13 @@ def add_state_imp2d(structure, unit_cell):
 
 def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
                              skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_imp2d(structure, unit_cell, supercell_size)
     elif task == 'cgcnn_local' or task == 'megnet_local':
         structure = get_local_imp2d(structure, unit_cell, supercell_size, state)
@@ -462,7 +477,7 @@ def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_imp2d(structure, unit_cell)
-    return structure
+    return copy_source_metadata(source_structure, structure)
 
 
 # ================================================================== #
@@ -526,13 +541,14 @@ def add_state_semi(structure, unit_cell):
 
 def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
                             skip_was=False, copy_unit_cell_properties=False):
+    source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task == "cgcnn_hetero" or task == "megnet_hetero":
+    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
     elif task.endswith('_attention'):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
-    elif task == 'cgcnn_sparse' or task == 'megnet_sparse':
+    elif task in ('cgcnn_sparse', 'megnet_sparse'):
         structure = get_sparse_semi(structure, unit_cell, supercell_size)
     elif task == 'cgcnn_local' or task == 'megnet_local':
         structure = get_local_semi(structure, unit_cell, supercell_size, state)
@@ -544,4 +560,4 @@ def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
         structure = add_state_semi(structure, unit_cell)
-    return structure
+    return copy_source_metadata(source_structure, structure)

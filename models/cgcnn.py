@@ -5,7 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import CGConv, MeanAggregation
 
-from .modules import AttentionCGConv, DefectAwareGateConv, ShiftedSoftplus
+from .modules import (
+    AttentionCGConv,
+    AtomTypeGlobalAttentionReadout,
+    DefectAwareGateConv,
+    ShiftedSoftplus,
+)
 
 
 class CGCNN(nn.Module):
@@ -83,6 +88,7 @@ class Heterocgcnn(nn.Module):
         super().__init__()
         self.classification = classification
         self.base_model = base_model
+        self.atom_fea_len = atom_fea_len
         self.conv_to_fc = nn.Linear(2 * atom_fea_len, h_fea_len)
         self.pooling = MeanAggregation()
 
@@ -96,11 +102,27 @@ class Heterocgcnn(nn.Module):
         else:
             self.fc_out = nn.Linear(h_fea_len, 1)
 
+    def _pool_node_type(self, features, batch, dim_size, reference):
+        if features is None or batch is None or features.size(0) == 0:
+            return reference.new_zeros((dim_size, self.atom_fea_len))
+        try:
+            return self.pooling(features, batch, dim_size=dim_size)
+        except TypeError:
+            pooled = self.pooling(features, batch)
+            if pooled.size(0) == dim_size:
+                return pooled
+            padded = reference.new_zeros((dim_size, pooled.size(1)))
+            padded[:pooled.size(0)] = pooled[:dim_size]
+            return padded
+
     def forward(self, x, edge_index, edge_attr, batch):
         atom_fea = self.base_model(x, edge_index, edge_attr, batch)
+        defect_fea = atom_fea['defect']
+        defect_batch = batch['defect']
+        num_graphs = int(defect_batch.max().item()) + 1 if defect_batch.numel() > 0 else 1
         crys_fea = torch.cat((
-            self.pooling(atom_fea['defect'], batch['defect']),
-            self.pooling(atom_fea['atom'], batch['atom']),
+            self._pool_node_type(defect_fea, defect_batch, num_graphs, defect_fea),
+            self._pool_node_type(atom_fea.get('atom'), batch.get('atom'), num_graphs, defect_fea),
         ), 1)
 
         crys_fea = self.conv_to_fc(F.softplus(crys_fea))
@@ -134,7 +156,7 @@ class AttentionCGCNN(nn.Module):
         ])
 
         self.conv_to_fc = nn.Linear(atom_fea_len, h_fea_len)
-        self.pooling = MeanAggregation()
+        self.pooling = AtomTypeGlobalAttentionReadout(atom_fea_len)
 
         if n_h > 1:
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h - 1)])
@@ -151,7 +173,7 @@ class AttentionCGCNN(nn.Module):
         for conv_func in self.convs:
             atom_fea = conv_func(x=atom_fea, edge_index=edge_index, edge_attr=edge_attr, node_type=node_type)
 
-        crys_fea = self.pooling(atom_fea, batch)
+        crys_fea = self.pooling(atom_fea, batch, node_type=node_type)
         crys_fea = self.conv_to_fc(F.softplus(crys_fea))
         crys_fea = F.softplus(crys_fea)
 
@@ -170,6 +192,9 @@ class AttentionCGCNN(nn.Module):
             attn, ei = conv.get_attention_weights()
             if attn is not None:
                 results.append((f'conv_{i}', attn, ei))
+        attn = self.pooling.get_attention_weights()
+        if attn is not None:
+            results.append(('global_readout', attn, None))
         return results
 
 

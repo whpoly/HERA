@@ -4,6 +4,7 @@ Each function returns (dataset_full, dataset_hetero, dataset_sparse, dataset_att
 """
 
 import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -24,6 +25,15 @@ from .structure_utils import (
 elem_embedding = {}
 
 
+def tag_structure_source(structure, source_path, source_id=None):
+    """Attach source-file metadata so downstream explanations can use CIF names."""
+    source_path = str(source_path)
+    structure.source_path = source_path
+    structure.source_name = Path(source_path).stem
+    structure.source_id = str(source_id if source_id is not None else structure.source_name)
+    return structure
+
+
 def init_elem_embedding(path='atom_init.json'):
     """Load atom embeddings from JSON file."""
     global elem_embedding
@@ -39,9 +49,14 @@ def init_elem_embedding(path='atom_init.json'):
 def get_prepared(path, prepared, is_high=False):
     df_descriptors = pd.read_csv(f"{path}/descriptors.csv", index_col=0)
     df_targets = pd.read_csv(f"{path}/targets.csv.gz", index_col=0)
+    missing_files = []
     for index, row in tqdm(df_targets.iterrows()):
-        file = f'{path}/initial/{index}.cif'
+        file = Path(path) / 'initial' / f'{index}.cif'
+        if not file.exists():
+            missing_files.append(str(index))
+            continue
         structure = Structure.from_file(file)
+        tag_structure_source(structure, file, index)
         if is_high:
             base = df_descriptors.loc[row['descriptor_id']]['base'] + '_500'
             weight = 0.3132058
@@ -55,6 +70,10 @@ def get_prepared(path, prepared, is_high=False):
         prepared['id'].append(index)
         prepared['base'].append(base)
         prepared['cell'].append(cell)
+    if missing_files:
+        preview = ', '.join(missing_files[:5])
+        suffix = '' if len(missing_files) <= 5 else ', ...'
+        print(f'Skipped {len(missing_files)} missing CIF(s) in {path}/initial: {preview}{suffix}')
 
 
 # ------------------------------------------------------------------ #
@@ -63,31 +82,32 @@ def get_prepared(path, prepared, is_high=False):
 
 def load_data_vacancy(task_prefix):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
-    get_prepared('2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
-    get_prepared('2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
     df = pd.DataFrame(prepared)
     df.set_index(["id"], inplace=True)
     unit_cells = {
-        'MoS2': CifParser("2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2': CifParser("2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
-        'MoS2_500': CifParser("2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2_500': CifParser("2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
-        'BN_500': CifParser("2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
-        'GaSe_500': CifParser("2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
-        'P_500': CifParser("2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
+        'MoS2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
+        'MoS2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
+        'BN_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
+        'GaSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
+        'P_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
         'InSe_500': CifParser("2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    skip_full_was = task_prefix != 'cgcnn'
 
-    dataset_full = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
+    dataset_full = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, skip_full_was, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False) for p in tqdm(prep)]
     dataset_sparse = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_sparse', [1], False, False) for p in tqdm(prep)]
     dataset_attn = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
 
@@ -100,29 +120,30 @@ def load_data_vacancy(task_prefix):
 
 def load_data_2dmd_high(task_prefix):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
-    get_prepared('2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
-    get_prepared('2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
+    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
     df = pd.DataFrame(prepared)
     df.set_index(["id"], inplace=True)
     unit_cells = {
-        'MoS2': CifParser("2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2': CifParser("2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
-        'MoS2_500': CifParser("2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2_500': CifParser("2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
-        'BN_500': CifParser("2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
-        'GaSe_500': CifParser("2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
-        'P_500': CifParser("2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
-        'InSe_500': CifParser("2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
+        'MoS2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
+        'MoS2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
+        'BN_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
+        'GaSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
+        'P_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
+        'InSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    skip_full_was = task_prefix != 'cgcnn'
 
-    dataset_full = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
+    dataset_full = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, skip_full_was, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False) for p in tqdm(prep)]
     dataset_sparse = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_sparse', [1], False, False) for p in tqdm(prep)]
     dataset_attn = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
 
@@ -132,11 +153,13 @@ def load_data_2dmd_high(task_prefix):
 
 
 def load_data_native(task_prefix):
-    df_descriptors = pd.read_csv('Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
+    df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
-        struct = Structure.from_file('Dataset_1/Dataset_1/A_rich/Neutral/' + j)
+        source_path = 'D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/' + j
+        struct = Structure.from_file(source_path)
+        tag_structure_source(struct, source_path, j)
         defect = 'vacancy' if j.split('-')[2].split('_')[0] == 'V' else 'others'
         prep.append([struct, defect])
         targets.append(df_descriptors[1][i])
@@ -152,12 +175,14 @@ def load_data_native(task_prefix):
 
 
 def load_data_och(task_prefix):
-    df_descriptors = pd.read_csv('../autodl-tmp/rs2re_h_ads/id_prop.csv', header=None)
+    df_descriptors = pd.read_csv('D:/defects/dataset/rs2re_h/id_prop.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         if df_descriptors[1][i] > -1.5 and df_descriptors[1][i] < 0.5:
-            struct = Structure.from_file('../autodl-tmp/rs2re_h_ads/' + j + '.cif')
+            source_path = 'D:/defects/dataset/rs2re_h/' + j + '.cif'
+            struct = Structure.from_file(source_path)
+            tag_structure_source(struct, source_path, j)
             prep.append([struct, 'H'])
             targets.append(df_descriptors[1][i])
 
@@ -170,14 +195,16 @@ def load_data_och(task_prefix):
 
 
 def load_data_imp2d(task_prefix):
-    df_descriptors = pd.read_csv('imp2d/imp2d/id_prop.csv', header=None)
+    df_descriptors = pd.read_csv('D:/defects/dataset/imp2d/imp2d/id_prop.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         base, impurity, _ = j.split('_')
         if impurity not in base:
             if df_descriptors[1][i] > -10 and df_descriptors[1][i] < 10:
-                struct = Structure.from_file('imp2d/imp2d/' + j + '.cif')
+                source_path = 'D:/defects/dataset/imp2d/imp2d/' + j + '.cif'
+                struct = Structure.from_file(source_path)
+                tag_structure_source(struct, source_path, j)
                 prep.append([struct, impurity])
                 targets.append(df_descriptors[1][i])
 
@@ -190,13 +217,15 @@ def load_data_imp2d(task_prefix):
 
 
 def load_data_semi(task_prefix):
-    df_descriptors = pd.read_csv('Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
+    df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         base = j.split('-')[1]
         try:
-            struct = Structure.from_file('Dataset_1/Dataset_1/Neutral/Neutral/' + j)
+            source_path = 'D:/defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/' + j
+            struct = Structure.from_file(source_path)
+            tag_structure_source(struct, source_path, j)
             base_structure = Structure.from_file('Dataset_1/host_configurations/' + base + '.vasp')
             base_species = {site.species_string for site in base_structure}
             defect_species = {site.species_string for site in struct}

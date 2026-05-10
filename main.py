@@ -14,6 +14,9 @@ Usage examples:
   # Train MEGNet on semi dataset with sparse + hetero modes
   python -m HERA.main --model megnet --dataset semi --mode sparse hetero
 
+  # Run local radius/cutoff ablation; r=0 is sparse-equivalent local input
+  python -m HERA.main --model cgcnn --dataset vacancy --mode local --r 0 3 4 5 6 7
+
   # Run the DeFiNet-style attention experiment on every dataset
   python -m HERA.main --model definet --dataset all
 
@@ -22,11 +25,12 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet
-  Modes   : sparse, full, hetero, attention
+  Modes   : sparse, full, hetero, local, attention, was, hetero_was
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
 """
 
 import argparse
+import copy
 import os
 import random
 import warnings
@@ -42,6 +46,9 @@ from .training.trainer import MEGNetTrainer
 from .training.history import TrainingLogger
 
 
+LOCAL_CUTOFF_CHOICES = [0, 3, 4, 5, 6, 7]
+
+
 def set_seed(seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
@@ -53,15 +60,27 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def with_local_cutoff(config, cutoff):
+    config = copy.deepcopy(config)
+    config['model']['cutoff'] = cutoff
+    config['model']['local_radius'] = cutoff
+    return config
+
+
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
-                      model_name, dataset_name, log_dir='logs'):
+                      model_name, dataset_name, log_dir='logs', explain_options=None,
+                      run_label=None):
     """Train a single mode across multiple random seeds and return per-seed test losses."""
     mode_to_dataset_key = {
         'sparse': 2,    # dataset_sparse
         'full': 0,      # dataset_full
         'hetero': 1,    # dataset_hetero
+        'local': 1,     # dataset_hetero, cropped by SimpleCrystalConverter at conversion time
         'attention': 3, # dataset_attn
+        'was': 0,       # dataset_full with current+reference atom embeddings
+        'hetero_was': 1, # dataset_hetero with current+reference atom embeddings
     }
+    log_mode = run_label or mode
     data = dataset[mode_to_dataset_key[mode]]
     data_targets = [(s, y) for s, y in zip(data, targets) if s is not None]
     if not data_targets:
@@ -77,7 +96,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         trainer = MEGNetTrainer(config, device)
         trainer.prepare_data(train_X, train_y, val_X, val_y, 'formation_energy')
 
-        logger = TrainingLogger(log_dir, model_name, dataset_name, mode, rs)
+        logger = TrainingLogger(log_dir, model_name, dataset_name, log_mode, rs)
 
         min_loss = 1e8
         model_best = None
@@ -88,12 +107,34 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             print(f'  [seed={rs}] Epoch {epoch + 1}/{epochs}  train_mae={mae:.4f}  val_mae={loss:.4f}')
             if loss < min_loss:
                 min_loss = loss
-                model_best = trainer.model.state_dict()
+                model_best = copy.deepcopy(trainer.model.state_dict())
             logger.log(epoch + 1, mae, mse, loss, min_loss, cur_lr)
 
         loss_test = trainer.predict_structures(test_X, test_y, model_best)
         logger.log_test_result(loss_test)
         print(f'  [seed={rs}] Test MAE: {loss_test:.4f}')
+
+        if explain_options is not None:
+            from .explain.batch import explain_trainer_predictions
+
+            explain_dir = os.path.join(explain_options['root_dir'], f'seed_{rs}')
+            print(f'  [seed={rs}] Explaining {dataset_name}/{log_mode} test predictions -> {explain_dir}')
+            summary = explain_trainer_predictions(
+                trainer,
+                output_dir=explain_dir,
+                device=device,
+                max_samples=explain_options.get('max_samples'),
+                formats=explain_options.get('formats'),
+                epochs=explain_options.get('epochs', 100),
+                lr=explain_options.get('lr', 0.01),
+                cmap=explain_options.get('cmap', 'viridis_r'),
+                strict=explain_options.get('strict', False),
+            )
+            print(
+                f'  [seed={rs}] Explanations saved: '
+                f'{summary.succeeded}/{summary.total} ok, {summary.failed} failed '
+                f'({summary.index_csv})'
+            )
         losses.append(loss_test)
 
     return losses
@@ -141,10 +182,29 @@ def main():
     parser.add_argument('--seeds', nargs='+', type=int,
                         default=[123, 11, 1245, 34, 42, 80, 13232, 8, 99, 101],
                         help='Random seeds for train/test splits')
-    parser.add_argument('--atom-init', default='atom_init.json',
+    parser.add_argument('--atom-init', default='./HERA/atom_init.json',
                         help='Path to atom_init.json (default: atom_init.json)')
     parser.add_argument('--log-dir', default='logs',
                         help='Directory to save training history CSVs (default: logs)')
+    parser.add_argument('--r', nargs='+', type=int, choices=LOCAL_CUTOFF_CHOICES, default=None,
+                        help='Local radius/cutoff values for --mode local. Default: 0 3 4 5 6 7')
+    parser.add_argument('--explain', action='store_true',
+                        help='Run GNNExplainer after each seed prediction and save batch visualizations')
+    parser.add_argument('--explain-dir', default=None,
+                        help='Optional root directory for explanations (default: under each mode log directory)')
+    parser.add_argument('--explain-max-samples', type=int, default=None,
+                        help='Maximum test samples to explain per seed (default: all)')
+    parser.add_argument('--explain-epochs', type=int, default=100,
+                        help='GNNExplainer optimization epochs per sample (default: 100)')
+    parser.add_argument('--explain-lr', type=float, default=0.01,
+                        help='GNNExplainer learning rate (default: 0.01)')
+    parser.add_argument('--explain-formats', nargs='+', choices=['csv', 'html', 'png'],
+                        default=['csv', 'html', 'png'],
+                        help='Explanation outputs to save (default: csv html png)')
+    parser.add_argument('--explain-cmap', default='viridis_r',
+                        help='Matplotlib colormap for attribution colors (default: viridis_r)')
+    parser.add_argument('--explain-strict', action='store_true',
+                        help='Stop immediately if any sample explanation fails')
 
     args = parser.parse_args()
     warnings.filterwarnings('ignore')
@@ -153,9 +213,16 @@ def main():
     dataset_names = VALID_DATASETS if args.dataset == 'all' else [args.dataset]
     modes = args.mode
     if modes is None:
-        modes = ['attention'] if args.model == 'definet' else VALID_MODES
+        if args.model == 'definet':
+            modes = ['attention']
+        elif args.model == 'cgcnn':
+            modes = VALID_MODES
+        else:
+            modes = ['sparse', 'full', 'hetero', 'attention']
     if args.model == 'definet' and any(mode != 'attention' for mode in modes):
         parser.error('The definet model is the paper-style attention experiment and only supports --mode attention')
+    if args.model != 'cgcnn' and any(mode in ('was', 'hetero_was') for mode in modes):
+        parser.error('The was and hetero_was modes are only supported with --model cgcnn')
 
     init_elem_embedding(args.atom_init)
 
@@ -184,33 +251,66 @@ def main():
         dataset = (dataset_full, dataset_hetero, dataset_sparse, dataset_attn)
 
         results = {}
+        result_labels = []
         for mode in modes:
-            print(f'\n{"=" * 60}')
-            print(f'  Training {args.model.upper()} - {mode.upper()} mode')
-            print(f'{"=" * 60}')
-            config = get_config(args.model, dataset_name, mode)
-            mode_dir = os.path.join(dataset_dir, mode)
-            os.makedirs(mode_dir, exist_ok=True)
-            losses = train_single_mode(
-                mode, config, dataset, targets, args.seeds, args.epochs, args.device,
-                model_name=args.model, dataset_name=dataset_name,
-                log_dir=mode_dir,
-            )
-            results[mode] = losses
+            mode_runs = [(mode, get_config(args.model, dataset_name, mode))]
+            if mode == 'local':
+                radii = args.r if args.r is not None else LOCAL_CUTOFF_CHOICES
+                mode_runs = [
+                    (f'local_r{radius}', with_local_cutoff(get_config(args.model, dataset_name, 'local'), radius))
+                    for radius in radii
+                ]
 
-            mode_summary = [
-                f'{args.model.upper()} | {dataset_name} | {mode.upper()}',
-                f'Epochs: {args.epochs} | Seeds: {args.seeds}',
-                f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
-                f'Per-seed losses: {losses}',
-            ]
-            mode_summary_path = os.path.join(mode_dir, 'summary.txt')
-            with open(mode_summary_path, 'w') as f:
-                f.write('\n'.join(mode_summary) + '\n')
+            for run_label, config in mode_runs:
+                train_mode = 'local' if mode == 'local' else mode
+                result_labels.append(run_label)
+
+                print(f'\n{"=" * 60}')
+                print(f'  Training {args.model.upper()} - {run_label.upper()} mode')
+                if mode == 'local':
+                    print(f'  local_radius = cutoff = {config["model"]["cutoff"]}')
+                print(f'{"=" * 60}')
+                mode_dir = os.path.join(dataset_dir, run_label)
+                os.makedirs(mode_dir, exist_ok=True)
+                explain_options = None
+                if args.explain:
+                    explain_root = (
+                        os.path.join(args.explain_dir, dataset_name, run_label)
+                        if args.explain_dir is not None
+                        else os.path.join(mode_dir, 'explanations')
+                    )
+                    explain_options = {
+                        'root_dir': explain_root,
+                        'max_samples': args.explain_max_samples,
+                        'epochs': args.explain_epochs,
+                        'lr': args.explain_lr,
+                        'formats': args.explain_formats,
+                        'cmap': args.explain_cmap,
+                        'strict': args.explain_strict,
+                    }
+                losses = train_single_mode(
+                    train_mode, config, dataset, targets, args.seeds, args.epochs, args.device,
+                    model_name=args.model, dataset_name=dataset_name,
+                    log_dir=mode_dir, explain_options=explain_options,
+                    run_label=run_label,
+                )
+                results[run_label] = losses
+
+                mode_summary = [
+                    f'{args.model.upper()} | {dataset_name} | {run_label.upper()}',
+                    f'Epochs: {args.epochs} | Seeds: {args.seeds}',
+                    f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
+                    f'Per-seed losses: {losses}',
+                ]
+                if mode == 'local':
+                    mode_summary.insert(1, f'local_radius = cutoff = {config["model"]["cutoff"]}')
+                mode_summary_path = os.path.join(mode_dir, 'summary.txt')
+                with open(mode_summary_path, 'w') as f:
+                    f.write('\n'.join(mode_summary) + '\n')
 
         all_results[dataset_name] = results
         write_dataset_summary(
-            args.model, dataset_name, modes, results,
+            args.model, dataset_name, result_labels, results,
             args.epochs, args.seeds, args.device, dataset_dir,
         )
 

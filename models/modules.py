@@ -164,6 +164,9 @@ class HeteroMegnetLayer(nn.Module):
         for etype in self.edge_types:
             k = '__'.join(etype)
             src, rel, dst = etype
+            if x_dict[src].size(0) == 0 or x_dict[dst].size(0) == 0:
+                edge_out_dict[etype] = edge_attr_dict[etype]
+                continue
             x_src = torch.cat([x_dict[src], x_dict[dst]], dim=0) if src != dst else x_dict[src]
             edge_index = edge_index_dict[etype]
             edge_attr = edge_attr_dict[etype]
@@ -403,6 +406,55 @@ class AttentionCGConv(MessagePassing):
 
     def get_attention_weights(self):
         return self._attention_weights, self._edge_index
+
+
+# ------------------------------------------------------------------ #
+#  Atom-type-aware global attention readout
+# ------------------------------------------------------------------ #
+
+class AtomTypeGlobalAttentionReadout(nn.Module):
+    """Graph-level attention readout conditioned on atom type.
+
+    Local attention layers decide which neighboring bonds are important for
+    each center atom. This readout learns which atoms are important for the
+    whole-structure prediction, similar in spirit to GATGNN's global
+    attention layer, while also conditioning on pristine/defect node labels.
+    """
+
+    def __init__(self, channels, n_node_types=2, hidden_channels=None, use_context=True):
+        super().__init__()
+        hidden_channels = hidden_channels or channels
+        self.channels = channels
+        self.use_context = use_context
+        self.type_emb = nn.Embedding(n_node_types, channels)
+        attn_in_size = 3 * channels if use_context else 2 * channels
+        self.attn_nn = nn.Sequential(
+            nn.Linear(attn_in_size, hidden_channels),
+            ShiftedSoftplus(),
+            nn.Linear(hidden_channels, 1),
+        )
+        self._attention_weights = None
+
+    def forward(self, x, batch, node_type=None):
+        from torch_geometric.utils import softmax as pyg_softmax
+
+        if node_type is None:
+            node_type = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        node_type = node_type.to(device=x.device, dtype=torch.long).view(-1)
+        type_emb = self.type_emb(node_type.clamp(0, self.type_emb.num_embeddings - 1))
+
+        attn_inputs = [x, type_emb]
+        if self.use_context:
+            graph_context = global_mean_pool(x, batch)
+            attn_inputs.append(graph_context[batch])
+
+        scores = self.attn_nn(torch.cat(attn_inputs, dim=-1))
+        alpha = pyg_softmax(scores, batch)
+        self._attention_weights = alpha.detach()
+        return global_add_pool(alpha * x, batch)
+
+    def get_attention_weights(self):
+        return self._attention_weights
 
 
 # ------------------------------------------------------------------ #

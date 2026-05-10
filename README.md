@@ -2,12 +2,12 @@
 
 HERA: Heterogeneous Region-Aware Message Passing Neural Network for Property Prediction of Crystalline Defects.
 
-This repository contains research code for defect-property prediction on crystalline materials. The current training pipeline supports two backbone models and four graph construction modes.
+This repository contains research code for defect-property prediction on crystalline materials. The current training pipeline supports multiple graph construction and ablation modes.
 
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet` |
-| Modes | `sparse`, `full`, `hetero`, `attention` |
+| Modes | `sparse`, `full`, `hetero`, `local`, `attention`, `was`, `hetero_was` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -23,7 +23,7 @@ This repository contains research code for defect-property prediction on crystal
 
 Recommended environment:
 
-- Python 3.10+
+- Python 3.12
 - `torch`
 - `torch-geometric`
 - `numpy`
@@ -32,13 +32,17 @@ Recommended environment:
 - `tqdm`
 - `pymatgen`
 
-Example installation:
+Conda installation:
 
 ```bash
-pip install torch
-pip install torch-geometric
-pip install numpy pandas scikit-learn tqdm pymatgen
+conda env create -f environment.yml
+conda activate hera
 ```
+
+The provided `environment.yml` follows the known-working pip environment in
+`requirements.txt`: Python 3.12, PyTorch 2.5.1 with CUDA 12.4 wheels, matching
+PyTorch Geometric CUDA wheels, and only the dependencies needed for HERA
+training, explanation, and visualization.
 
 ## Data Preparation
 
@@ -67,7 +71,15 @@ Common arguments:
 
 - `--model`: `megnet`, `cgcnn`, or `definet`
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `sparse`, `full`, `hetero`, `attention`
+- `--mode`: one or more of `sparse`, `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`
+- `--r`: local radius/cutoff values for `--mode local`; valid values are `0 3 4 5 6 7`
+- `local` uses the same heterogeneous architecture as hetero mode, but keeps only
+  the defect neighborhood within radius `r`. `r=0` is the sparse-equivalent local
+  input expanded into the local/hetero format.
+- CGCNN also supports ablation modes `was` (`cgcnn_was`) and `hetero_was`
+  (`hetero_cgcnn_was`), which concatenate the current atom embedding and
+  previous/reference atom embedding from `atom_init.json`. `cgcnn_was` uses the
+  complete CGCNN crystal graph, not the sparse graph.
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed
 - `--seeds`: one or more random seeds
@@ -80,6 +92,7 @@ Example training commands:
 python -m HERA.main --model megnet --dataset vacancy
 python -m HERA.main --model cgcnn --dataset 2dmd_high --mode sparse
 python -m HERA.main --model megnet --dataset semi --mode sparse hetero
+python -m HERA.main --model cgcnn --dataset vacancy --mode local --r 0 3 4 5 6 7
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 python -m HERA.main --model definet --dataset all
 ```
@@ -137,6 +150,47 @@ Each run may contain:
 - per-epoch CSV logs
 - per-mode `summary.txt`
 - one run-level `summary.txt`
+
+## Batch Explanations
+
+The training CLI can run `GNNExplainer` after each seed's test prediction and
+save notebook-free visualizations for every selected dataset/mode:
+
+```bash
+python -m HERA.main \
+  --model cgcnn \
+  --dataset all \
+  --mode full hetero \
+  --device cuda:0 \
+  --explain
+```
+
+By default, each seed writes explanations under:
+
+```text
+logs/{model}_{dataset}_{timestamp}/{mode}/explanations/seed_{seed}/
+logs/{model}_all_{timestamp}/{dataset}/{mode}/explanations/seed_{seed}/
+```
+
+Each explanation folder contains:
+
+- `index.csv`: target, prediction, absolute error, attribution range, and file paths
+- `{cif_name}.csv`: per-atom attribution values and colors
+- `{cif_name}.html`: standalone browser visualization using the same atom-color idea as the notebook
+- `{cif_name}.png`: static batch-friendly preview
+
+If two samples share the same CIF stem, the later files get suffixes such as
+`_02` to avoid overwriting.
+
+Useful options:
+
+```bash
+--explain-max-samples 20      # explain only the first 20 test samples per seed
+--explain-epochs 50           # faster GNNExplainer optimization
+--explain-formats csv html    # skip PNG generation
+--explain-cmap viridis_r      # reversed viridis attribution colors
+--explain-dir explain_runs    # write explanations outside the log directory
+```
 
 ## Notes
 

@@ -44,6 +44,7 @@ class MEGNetTrainer:
             bond_converter=bond_converter,
             atom_converter=atom_converter,
             cutoff=self.config["model"]["cutoff"],
+            local_radius=self.config["model"].get("local_radius", self.config["model"]["cutoff"]),
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
         )
@@ -76,7 +77,7 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
             ).to(self.device)
-        elif task == 'cgcnn_hetero' or task == 'cgcnn_local':
+        elif task in ('cgcnn_hetero', 'cgcnn_local', 'hetero_cgcnn_was'):
             model = CrystalGraphConvNet(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -194,12 +195,12 @@ class MEGNetTrainer:
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.state, batch.batch_dict, batch.bond_batch_dict,
             ).squeeze()
-        elif task in ('cgcnn_hetero', 'cgcnn_local'):
+        elif task in ('cgcnn_hetero', 'cgcnn_local', 'hetero_cgcnn_was'):
             return self.model(
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.batch_dict,
             ).squeeze()
-        elif task in ('cgcnn_sparse', 'cgcnn_full'):
+        elif task in ('cgcnn_sparse', 'cgcnn_full', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
         elif task == 'cgcnn_attention':
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()

@@ -11,6 +11,7 @@ from .modules import (
     MegnetModule,
     HeteroMegnetLayer,
     AtomTypeAttentionMegnetModule,
+    AtomTypeGlobalAttentionReadout,
 )
 
 
@@ -90,6 +91,7 @@ class HeteroMEGNet(nn.Module):
         super().__init__()
         self.node_type = metadata[0]
         self.edge_type = metadata[1]
+        self.embedding_size = embedding_size
         self.embedded = node_input_shape is None
         if self.embedded:
             node_input_shape = node_embedding_size
@@ -118,6 +120,21 @@ class HeteroMEGNet(nn.Module):
             nn.Linear(embedding_size, 1),
         )
 
+    @staticmethod
+    def _set2set_or_zeros(pooling, features, batch, dim_size, reference):
+        out_dim = 2 * reference.size(1)
+        if features is None or batch is None or features.size(0) == 0:
+            return reference.new_zeros((dim_size, out_dim))
+        try:
+            return pooling(features, batch, dim_size=dim_size)
+        except TypeError:
+            pooled = pooling(features, batch)
+            if pooled.size(0) == dim_size:
+                return pooled
+            padded = reference.new_zeros((dim_size, pooled.size(1)))
+            padded[:pooled.size(0)] = pooled[:dim_size]
+            return padded
+
     def forward(self, x, edge_index, edge_attr, state, batch, bond_batch):
         if self.embedded:
             x = {k: self.emb(v.long()).squeeze() for k, v in x.items()}
@@ -128,12 +145,13 @@ class HeteroMEGNet(nn.Module):
         for block in self.blocks:
             x, edge_attr, state = block(x, edge_index, edge_attr, state, batch, bond_batch)
 
-        x_atom = self.sv(x['atom'], batch['atom'])
-        x_defect = self.sv_2(x['defect'], batch['defect'])
+        num_graphs = state.size(0)
+        x_defect = self._set2set_or_zeros(self.sv_2, x.get('defect'), batch.get('defect'), num_graphs, state)
+        x_atom = self._set2set_or_zeros(self.sv, x.get('atom'), batch.get('atom'), num_graphs, state)
 
         edge_attr = torch.cat([edge_attr[self.edge_type[i]] for i in range(len(self.edge_type))], dim=0)
         bond_batch = torch.cat([bond_batch[self.edge_type[i]] for i in range(len(self.edge_type))], dim=0)
-        edge_attr = self.se(edge_attr, bond_batch)
+        edge_attr = self._set2set_or_zeros(self.se, edge_attr, bond_batch, num_graphs, state)
 
         tmp_shape = x_atom.shape[0] - edge_attr.shape[0]
         edge_attr = F.pad(edge_attr, (0, 0, 0, tmp_shape), value=0.0)
@@ -179,8 +197,9 @@ class AttentionMEGNet(nn.Module):
 
         self.se = Set2Set(embedding_size, 1)
         self.sv = Set2Set(embedding_size, 1)
+        self.global_readout = AtomTypeGlobalAttentionReadout(embedding_size)
         self.hiddens = nn.Sequential(
-            nn.Linear(5 * embedding_size, embedding_size), ShiftedSoftplus(),
+            nn.Linear(6 * embedding_size, embedding_size), ShiftedSoftplus(),
             nn.Linear(embedding_size, embedding_size // 2), ShiftedSoftplus(),
             nn.Linear(embedding_size // 2, 1),
         )
@@ -195,11 +214,12 @@ class AttentionMEGNet(nn.Module):
         for block in self.blocks:
             x, edge_attr, state = block(x, edge_index, edge_attr, state, batch, bond_batch, node_type=node_type)
 
+        x_global = self.global_readout(x, batch, node_type=node_type)
         x = self.sv(x, batch)
         edge_attr = self.se(edge_attr, bond_batch)
         tmp_shape = x.shape[0] - edge_attr.shape[0]
         edge_attr = F.pad(edge_attr, (0, 0, 0, tmp_shape), value=0.0)
-        tmp = torch.cat((x, edge_attr, state), 1)
+        tmp = torch.cat((x, x_global, edge_attr, state), 1)
         return self.hiddens(tmp)
 
     def get_all_attention_weights(self):
@@ -211,4 +231,7 @@ class AttentionMEGNet(nn.Module):
             attn, ei = block.get_attention_weights()
             if attn is not None:
                 results.append((f'block_{i+1}', attn, ei))
+        attn = self.global_readout.get_attention_weights()
+        if attn is not None:
+            results.append(('global_readout', attn, None))
         return results

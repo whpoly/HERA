@@ -1,5 +1,7 @@
 """Default configuration generators for each dataset."""
 
+import copy
+
 
 def _base_optim():
     return {
@@ -10,6 +12,20 @@ def _base_optim():
         'lr_initial': 1e-3,
         'scheduler': 'ReduceLROnPlateau',
     }
+
+
+def _was_config(base_config, task):
+    config = copy.deepcopy(base_config)
+    config['task'] = task
+    config['model']['atom_features'] = 'was_species'
+    return config
+
+
+def _local_config(base_config, task):
+    config = copy.deepcopy(base_config)
+    config['task'] = task
+    config['model']['local_radius'] = config['model']['cutoff']
+    return config
 
 
 def get_configs_2dmd(task_prefix):
@@ -83,7 +99,18 @@ def get_configs_2dmd(task_prefix):
         },
         'optim': _base_optim(),
     }
-    return config_sparse, config_full, config_hetero, config_attention
+    config_local = _local_config(config_hetero, f'{task_prefix}_local')
+    config_was = _was_config(config_full, f'{task_prefix}_was')
+    config_hetero_was = _was_config(config_hetero, f'hetero_{task_prefix}_was')
+    return (
+        config_sparse,
+        config_full,
+        config_hetero,
+        config_attention,
+        config_local,
+        config_was,
+        config_hetero_was,
+    )
 
 
 def get_configs_default(task_prefix):
@@ -157,7 +184,18 @@ def get_configs_default(task_prefix):
         },
         'optim': _base_optim(),
     }
-    return config_sparse, config_full, config_hetero, config_attention
+    config_local = _local_config(config_hetero, f'{task_prefix}_local')
+    config_was = _was_config(config_full, f'{task_prefix}_was')
+    config_hetero_was = _was_config(config_hetero, f'hetero_{task_prefix}_was')
+    return (
+        config_sparse,
+        config_full,
+        config_hetero,
+        config_attention,
+        config_local,
+        config_was,
+        config_hetero_was,
+    )
 
 
 # Maps dataset name -> config generator
@@ -172,7 +210,7 @@ _CONFIG_REGISTRY = {
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['megnet', 'cgcnn', 'definet']
-VALID_MODES = ['sparse', 'full', 'hetero', 'attention']
+VALID_MODES = ['sparse', 'full', 'hetero', 'local', 'attention', 'was', 'hetero_was']
 
 
 def get_config(model: str, dataset: str, mode: str):
@@ -181,7 +219,7 @@ def get_config(model: str, dataset: str, mode: str):
     Args:
         model: 'megnet', 'cgcnn', or 'definet'
         dataset: one of VALID_DATASETS
-        mode: one of 'sparse', 'full', 'hetero', 'attention'
+        mode: one of 'sparse', 'full', 'hetero', 'local', 'attention', 'was', 'hetero_was'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -194,10 +232,23 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"Unknown mode '{mode}'. Choose from {VALID_MODES}")
     if model == 'definet' and mode != 'attention':
         raise ValueError("The definet model only supports the attention mode")
+    if model != 'cgcnn' and mode in ('was', 'hetero_was'):
+        raise ValueError("The was and hetero_was modes are only supported for cgcnn")
 
-    config_sparse, config_full, config_hetero, config_attention = _CONFIG_REGISTRY[dataset](model)
+    (
+        config_sparse,
+        config_full,
+        config_hetero,
+        config_attention,
+        config_local,
+        config_was,
+        config_hetero_was,
+    ) = _CONFIG_REGISTRY[dataset](model)
     config = {'sparse': config_sparse, 'full': config_full,
-              'hetero': config_hetero, 'attention': config_attention}[mode]
+              'hetero': config_hetero, 'local': config_local,
+              'attention': config_attention,
+              'was': config_was,
+              'hetero_was': config_hetero_was}[mode]
     if model == 'definet':
         config['model']['nblocks'] = 4
         config['model']['n_marker_types'] = 2
