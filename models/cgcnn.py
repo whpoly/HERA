@@ -14,7 +14,7 @@ from .modules import (
 
 
 class CGCNN(nn.Module):
-    """Homogeneous CGCNN for full / sparse modes."""
+    """Homogeneous CGCNN for full and WAS modes."""
 
     def __init__(self, orig_atom_fea_len, nbr_fea_len,
                  atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,

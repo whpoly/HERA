@@ -116,10 +116,13 @@ class AtomFeaturesExtractor:
             for site in structure.sites:
                 current_z = self._current_z(site)
                 previous_z = site.properties.get('was', current_z)
-                features.append(
-                    self._embedding_from_z(current_z, elem_embedding)
-                    + self._embedding_from_z(previous_z, elem_embedding)
-                )
+                if self.task == 'megnet':
+                    features.append([float(current_z), float(previous_z)])
+                else:
+                    features.append(
+                        self._embedding_from_z(current_z, elem_embedding)
+                        + self._embedding_from_z(previous_z, elem_embedding)
+                    )
             return np.array(features)
         else:
             raise NotImplementedError
@@ -133,6 +136,8 @@ class AtomFeaturesExtractor:
         elif self.atom_features == 'werespecies':
             return 2
         elif self.atom_features == 'was_species':
+            if self.task == 'megnet':
+                return 2
             return 184
         else:
             return None
@@ -150,6 +155,8 @@ class SimpleCrystalConverter:
         ('atom', 'ad', 'defect'),
         ('defect', 'da', 'atom'),
     ]
+    LOCAL_STRUCTURE_MODES = ('local', 'attention_local', 'attention_local_was')
+    ATTENTION_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
 
     def __init__(
             self,
@@ -180,7 +187,7 @@ class SimpleCrystalConverter:
 
     @staticmethod
     def _copy_structure_metadata(source, target):
-        for attr in ("source_id", "source_name", "source_path"):
+        for attr in ("source_id", "source_name", "source_path", "state", "y", "weight"):
             if hasattr(source, attr):
                 setattr(target, attr, getattr(source, attr))
         return target
@@ -220,7 +227,13 @@ class SimpleCrystalConverter:
         return data
 
     def convert(self, d):
-        if self.task in ('sparse', 'full', 'was'):
+        if self.task == 'sparse':
+            raise ValueError("Sparse mode has been removed; use local mode with --r 0 instead.")
+
+        if self.task in self.LOCAL_STRUCTURE_MODES:
+            d = self._local_radius_structure(d)
+
+        if self.task in ('full', 'was'):
             bond_index = [[], []]
             bond_attr = []
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
@@ -264,7 +277,7 @@ class SimpleCrystalConverter:
                 weight=weight,
                 structure=d,
             )
-        elif self.task == 'attention':
+        elif self.task in self.ATTENTION_MODES:
             # Homogeneous graph with explicit node_type (0=host, 1=defect).
             # defect_marker uses the same binary split: 0=pristine, 1=defect.
             node_type = torch.LongTensor([int(site.properties['type']) for site in d])
@@ -321,8 +334,6 @@ class SimpleCrystalConverter:
             )
         else:
             # hetero / local mode
-            if self.task == 'local':
-                d = self._local_radius_structure(d)
             bond_index = [[], []]
             bond_attr = []
             indexs = torch.LongTensor([site.properties['type'] for site in d])

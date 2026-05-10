@@ -1,6 +1,6 @@
 """Dataset loading functions.
 
-Each function returns (dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets).
+Each function returns (dataset_full, dataset_hetero, dataset_attn, targets).
 """
 
 import json
@@ -80,7 +80,7 @@ def get_prepared(path, prepared, is_high=False):
 #  Per-dataset loaders
 # ------------------------------------------------------------------ #
 
-def load_data_vacancy(task_prefix):
+def load_data_vacancy(task_prefix, local_cutoff=None):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
     get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
     get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
@@ -100,25 +100,24 @@ def load_data_vacancy(task_prefix):
         'BN_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
         'GaSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
         'P_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
-        'InSe_500': CifParser("2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
+        'InSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
-    skip_full_was = task_prefix != 'cgcnn'
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet')
 
     dataset_full = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, skip_full_was, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_sparse', [1], False, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
 
     targets = df['target'].values
-    pairs = [(xi, yi, ki, ai, mi) for xi, yi, ki, ai, mi in zip(dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets) if xi is not None]
-    dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [], [])
+    pairs = [(xi, yi, ai, mi) for xi, yi, ai, mi in zip(dataset_hetero, dataset_full, dataset_attn, targets) if xi is not None]
+    dataset_hetero, dataset_full, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [])
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
-def load_data_2dmd_high(task_prefix):
+def load_data_2dmd_high(task_prefix, local_cutoff=None):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
     get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
     get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
@@ -140,19 +139,18 @@ def load_data_2dmd_high(task_prefix):
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
-    skip_full_was = task_prefix != 'cgcnn'
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet')
 
     dataset_full = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_full', None, skip_full_was, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_sparse', [1], False, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
 
     targets = df['target'].values
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
-def load_data_native(task_prefix):
+def load_data_native(task_prefix, local_cutoff=None):
     df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
@@ -165,16 +163,15 @@ def load_data_native(task_prefix):
         targets.append(df_descriptors[1][i])
 
     dataset_full = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_sparse', None, True, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
-    pairs = [(xi, yi, ki, ai, zi) for xi, yi, ki, ai, zi in zip(dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets) if xi is not None]
-    dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [], [])
+    dataset_hetero = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    pairs = [(xi, yi, ai, zi) for xi, yi, ai, zi in zip(dataset_hetero, dataset_full, dataset_attn, targets) if xi is not None]
+    dataset_hetero, dataset_full, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [])
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
-def load_data_och(task_prefix):
+def load_data_och(task_prefix, local_cutoff=None):
     df_descriptors = pd.read_csv('D:/defects/dataset/rs2re_h/id_prop.csv', header=None)
     prep = []
     targets = []
@@ -187,14 +184,13 @@ def load_data_och(task_prefix):
             targets.append(df_descriptors[1][i])
 
     dataset_full = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_sparse', None, True, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
-def load_data_imp2d(task_prefix):
+def load_data_imp2d(task_prefix, local_cutoff=None):
     df_descriptors = pd.read_csv('D:/defects/dataset/imp2d/imp2d/id_prop.csv', header=None)
     prep = []
     targets = []
@@ -209,14 +205,13 @@ def load_data_imp2d(task_prefix):
                 targets.append(df_descriptors[1][i])
 
     dataset_full = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_sparse', None, True, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
+    dataset_hetero = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
-def load_data_semi(task_prefix):
+def load_data_semi(task_prefix, local_cutoff=None):
     df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
@@ -236,13 +231,12 @@ def load_data_semi(task_prefix):
             continue
 
     dataset_full = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_full', None, True, False) for p in tqdm(prep)]
-    dataset_hetero = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False) for p in tqdm(prep)]
-    dataset_sparse = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_sparse', None, True, False) for p in tqdm(prep)]
-    dataset_attn = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False) for p in tqdm(prep)]
-    pairs = [(xi, yi, ki, ai, zi) for xi, yi, ki, ai, zi in zip(dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets) if xi is not None]
-    dataset_hetero, dataset_full, dataset_sparse, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [], [])
+    dataset_hetero = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    pairs = [(xi, yi, ai, zi) for xi, yi, ai, zi in zip(dataset_hetero, dataset_full, dataset_attn, targets) if xi is not None]
+    dataset_hetero, dataset_full, dataset_attn, targets = (list(t) for t in zip(*pairs)) if pairs else ([], [], [], [])
     targets = torch.tensor(targets).float()
-    return dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets
+    return dataset_full, dataset_hetero, dataset_attn, targets
 
 
 # ------------------------------------------------------------------ #
@@ -259,16 +253,17 @@ _LOADER_REGISTRY = {
 }
 
 
-def load_dataset(dataset_name: str, model_name: str):
+def load_dataset(dataset_name: str, model_name: str, local_cutoff=None):
     """Load and return all four graph representations for a dataset.
 
     Args:
         dataset_name: one of vacancy, 2dmd_high, native, och, imp2d, semi
         model_name: 'megnet', 'cgcnn', or 'definet' (used as task prefix)
+        local_cutoff: optional local/host boundary radius for hetero and attention structures
 
     Returns:
-        (dataset_full, dataset_hetero, dataset_sparse, dataset_attn, targets)
+        (dataset_full, dataset_hetero, dataset_attn, targets)
     """
     if dataset_name not in _LOADER_REGISTRY:
         raise ValueError(f"Unknown dataset '{dataset_name}'. Choose from {list(_LOADER_REGISTRY.keys())}")
-    return _LOADER_REGISTRY[dataset_name](model_name)
+    return _LOADER_REGISTRY[dataset_name](model_name, local_cutoff=local_cutoff)

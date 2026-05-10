@@ -16,7 +16,7 @@ from .modules import (
 
 
 class MEGNet(nn.Module):
-    """Homogeneous MEGNet for full / sparse modes."""
+    """Homogeneous MEGNet for full and WAS modes."""
 
     def __init__(self,
                  edge_input_shape,

@@ -1,7 +1,7 @@
 """Structure manipulation utilities for each dataset type.
 
-Each dataset has its own convert_to_sparse_* function that produces the
-appropriate graph representation (sparse / full / hetero / local / attention).
+Each dataset has its own legacy convert_to_sparse_* helper that produces the
+appropriate graph representation (full / hetero / local / attention).
 """
 
 import numpy as np
@@ -44,6 +44,52 @@ def copy_source_metadata(source, target):
         if hasattr(source, attr):
             setattr(target, attr, getattr(source, attr))
     return target
+
+
+def mark_local_region(structure, local_cutoff):
+    if local_cutoff is None or structure is None:
+        return structure
+
+    structure = structure.copy()
+    defect_indices = [
+        idx for idx, site in enumerate(structure)
+        if int(site.properties.get('type', 0)) == 1
+    ]
+    if not defect_indices:
+        return structure
+
+    for idx, site in enumerate(structure):
+        if idx in defect_indices:
+            site.properties['type'] = True
+            continue
+        min_distance = min(structure.get_distance(idx, defect_idx) for defect_idx in defect_indices)
+        site.properties['type'] = bool(local_cutoff > 0 and min_distance <= local_cutoff)
+    return structure
+
+
+def is_hetero_task(task):
+    return (
+        task.endswith('_hetero')
+        or task.endswith('_hetero_was')
+        or task == 'hetero_cgcnn_was'
+    )
+
+
+def is_attention_task(task):
+    return (
+        task.endswith('_attention')
+        or task.endswith('_attention_local')
+        or task.endswith('_attention_was')
+        or task.endswith('_attention_local_was')
+    )
+
+
+def is_sparse_task(task):
+    return task.endswith('_sparse')
+
+
+def is_local_task(task):
+    return task.endswith('_local')
 
 
 def add_was(structure, unit_cell, supercell_size):
@@ -153,15 +199,18 @@ def add_state_vacancy(structure, unit_cell):
 
 
 def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
-                               skip_was=False, copy_unit_cell_properties=False):
+                               skip_was=False, copy_unit_cell_properties=False,
+                               local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_vacancy(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
@@ -214,15 +263,18 @@ def add_state_2dmd_high(structure, unit_cell):
 
 
 def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, state,
-                                 skip_was=False, copy_unit_cell_properties=False):
+                                 skip_was=False, copy_unit_cell_properties=False,
+                                 local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_2dmd_high(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
@@ -282,7 +334,7 @@ def get_hetero_native(structure, unit_cell, supercell_size, state):
     return Structure.from_sites(sites_raw)
 
 
-def get_local_native(structure, unit_cell, supercell_size, state):
+def get_local_native(structure, unit_cell, supercell_size, state, local_cutoff=5):
     structure = structure.copy()
     reference_supercell = unit_cell.copy()
     base_species = [site.species_string for site in reference_supercell]
@@ -299,7 +351,7 @@ def get_local_native(structure, unit_cell, supercell_size, state):
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
         distance = structure.get_distance(index, defect_idx)
-        if distance <= 5:
+        if distance <= local_cutoff:
             cur_site = structure_dict[coords]
             cur_site.properties['type'] = True
             sites_raw.append(cur_site)
@@ -318,17 +370,21 @@ def add_state_native(structure, unit_cell):
 
 
 def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
-                              skip_was=False, copy_unit_cell_properties=False):
+                              skip_was=False, copy_unit_cell_properties=False,
+                              local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_native(structure, unit_cell, supercell_size)
-    elif task == 'cgcnn_local' or task == 'megnet_local':
-        structure = get_local_native(structure, unit_cell, supercell_size, state)
+    elif is_local_task(task):
+        cutoff = 5 if local_cutoff is None else local_cutoff
+        structure = get_local_native(structure, unit_cell, supercell_size, state, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
     if not skip_was:
@@ -364,7 +420,7 @@ def get_hetero_och(structure, unit_cell, supercell_size, state):
     return Structure.from_sites(sites_raw)
 
 
-def get_local_och(structure, unit_cell, supercell_size):
+def get_local_och(structure, unit_cell, supercell_size, local_cutoff=0):
     structure = structure.copy()
     sites_raw = []
     base_species = unit_cell
@@ -376,7 +432,7 @@ def get_local_och(structure, unit_cell, supercell_size):
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
         distance = structure.get_distance(index, defect_idx)
-        if distance == 0:
+        if distance <= local_cutoff:
             cur_site = structure_dict[coords]
             cur_site.properties['type'] = True
             sites_raw.append(cur_site)
@@ -393,17 +449,21 @@ def add_state_och(structure, state):
 
 
 def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
-                           skip_was=False, copy_unit_cell_properties=False):
+                           skip_was=False, copy_unit_cell_properties=False,
+                           local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_och(structure, unit_cell, supercell_size)
-    elif task == 'cgcnn_local' or task == 'megnet_local':
-        structure = get_local_och(structure, unit_cell, supercell_size)
+    elif is_local_task(task):
+        cutoff = 0 if local_cutoff is None else local_cutoff
+        structure = get_local_och(structure, unit_cell, supercell_size, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
     if not skip_was:
@@ -427,7 +487,7 @@ def get_hetero_imp2d(structure, unit_cell, supercell_size, state):
     return get_hetero_och(structure, unit_cell, supercell_size, state)
 
 
-def get_local_imp2d(structure, unit_cell, supercell_size, state):
+def get_local_imp2d(structure, unit_cell, supercell_size, state, local_cutoff=0):
     structure = structure.copy()
     sites_raw = []
     base_species = unit_cell
@@ -439,7 +499,7 @@ def get_local_imp2d(structure, unit_cell, supercell_size, state):
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
         distance = structure.get_distance(index, defect_idx)
-        if distance == 0:
+        if distance <= local_cutoff:
             cur_site = structure_dict[coords]
             cur_site.properties['type'] = True
             sites_raw.append(cur_site)
@@ -458,17 +518,21 @@ def add_state_imp2d(structure, unit_cell):
 
 
 def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
-                             skip_was=False, copy_unit_cell_properties=False):
+                             skip_was=False, copy_unit_cell_properties=False,
+                             local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_imp2d(structure, unit_cell, supercell_size)
-    elif task == 'cgcnn_local' or task == 'megnet_local':
-        structure = get_local_imp2d(structure, unit_cell, supercell_size, state)
+    elif is_local_task(task):
+        cutoff = 0 if local_cutoff is None else local_cutoff
+        structure = get_local_imp2d(structure, unit_cell, supercell_size, state, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
     if not skip_was:
@@ -507,7 +571,7 @@ def get_hetero_semi(structure, unit_cell, supercell_size, state):
     return Structure.from_sites(sites_raw)
 
 
-def get_local_semi(structure, unit_cell, supercell_size, state):
+def get_local_semi(structure, unit_cell, supercell_size, state, local_cutoff=0):
     structure = structure.copy()
     reference_supercell = unit_cell.copy()
     base_species = [site.species_string for site in reference_supercell]
@@ -521,7 +585,7 @@ def get_local_semi(structure, unit_cell, supercell_size, state):
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
         distance = structure.get_distance(index, defect_idx)
-        if distance == 0:
+        if distance <= local_cutoff:
             cur_site = structure_dict[coords]
             cur_site.properties['type'] = True
             sites_raw.append(cur_site)
@@ -540,18 +604,22 @@ def add_state_semi(structure, unit_cell):
 
 
 def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
-                            skip_was=False, copy_unit_cell_properties=False):
+                            skip_was=False, copy_unit_cell_properties=False,
+                            local_cutoff=None):
     source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
-    if task in ("cgcnn_hetero", "megnet_hetero", "hetero_cgcnn_was"):
+    if is_hetero_task(task):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
-    elif task.endswith('_attention'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_attention_task(task):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
-    elif task in ('cgcnn_sparse', 'megnet_sparse'):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
         structure = get_sparse_semi(structure, unit_cell, supercell_size)
-    elif task == 'cgcnn_local' or task == 'megnet_local':
-        structure = get_local_semi(structure, unit_cell, supercell_size, state)
+    elif is_local_task(task):
+        cutoff = 0 if local_cutoff is None else local_cutoff
+        structure = get_local_semi(structure, unit_cell, supercell_size, state, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
     if not skip_was:

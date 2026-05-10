@@ -19,9 +19,39 @@ from torch_geometric.loader import DataLoader
 HETERO_TASKS = {
     "megnet_hetero",
     "megnet_local",
+    "megnet_hetero_was",
     "cgcnn_hetero",
     "cgcnn_local",
     "hetero_cgcnn_was",
+}
+
+HETERO_NODE_TYPES = ("atom", "defect")
+HETERO_EDGE_TYPES = (
+    ("atom", "aa", "atom"),
+    ("defect", "dd", "defect"),
+    ("atom", "ad", "defect"),
+    ("defect", "da", "atom"),
+)
+
+CGCNN_ATTENTION_TASKS = {
+    "cgcnn_attention",
+    "cgcnn_attention_local",
+    "cgcnn_attention_was",
+    "cgcnn_attention_local_was",
+}
+
+MEGNET_ATTENTION_TASKS = {
+    "megnet_attention",
+    "megnet_attention_local",
+    "megnet_attention_was",
+    "megnet_attention_local_was",
+}
+
+DEFINET_ATTENTION_TASKS = {
+    "definet_attention",
+    "definet_attention_local",
+    "definet_attention_was",
+    "definet_attention_local_was",
 }
 
 
@@ -55,18 +85,24 @@ class PredictionWrapper(nn.Module):
             node_type=None,
             defect_marker=None,
     ):
-        if self.task in ("megnet_hetero", "megnet_local"):
+        if self.task in ("megnet_hetero", "megnet_local", "megnet_hetero_was"):
+            x, edge_index, edge_attr, batch, bond_batch = _complete_hetero_inputs(
+                x, edge_index, edge_attr, batch, bond_batch
+            )
             pred = self.model(x, edge_index, edge_attr, state, batch, bond_batch)
         elif self.task in ("cgcnn_hetero", "cgcnn_local", "hetero_cgcnn_was"):
+            x, edge_index, edge_attr, batch, _ = _complete_hetero_inputs(
+                x, edge_index, edge_attr, batch, None
+            )
             pred = self.model(x, edge_index, edge_attr, batch)
         elif self.task in ("cgcnn_sparse", "cgcnn_full", "cgcnn_was"):
             pred = self.model(x, edge_index, edge_attr, batch)
-        elif self.task == "cgcnn_attention":
+        elif self.task in CGCNN_ATTENTION_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, node_type=node_type)
-        elif self.task == "definet_attention":
+        elif self.task in DEFINET_ATTENTION_TASKS:
             marker = defect_marker if defect_marker is not None else node_type
             pred = self.model(x, edge_index, edge_attr, batch, defect_marker=marker)
-        elif self.task == "megnet_attention":
+        elif self.task in MEGNET_ATTENTION_TASKS:
             pred = self.model(
                 x, edge_index, edge_attr, state, batch, bond_batch, node_type=node_type
             )
@@ -80,7 +116,7 @@ def explain_trainer_predictions(
         output_dir,
         device,
         max_samples=None,
-        formats=("csv", "html", "png"),
+        formats=("ovito",),
         epochs=100,
         lr=0.01,
         cmap="viridis_r",
@@ -137,6 +173,7 @@ def explain_trainer_predictions(
                 "value_max": "",
                 "value_mean": "",
                 "top_atom_indices": "",
+                "ovito": "",
                 "csv": "",
                 "html": "",
                 "png": "",
@@ -152,7 +189,7 @@ def explain_trainer_predictions(
                 explanation = _call_explainer(explainer, batch, task, target)
                 structure, type_index = _extract_structure_and_types(batch, task)
                 source_meta = _source_metadata(structure, sample_idx)
-                sample_name = _unique_output_name(source_meta["source_name"], used_names)
+                sample_name = _unique_output_name(_explain_output_stem(source_meta), used_names)
                 row.update(source_meta)
                 row["output_name"] = sample_name
                 values, node_types = _extract_node_values(explanation, batch, task, type_index)
@@ -173,6 +210,10 @@ def explain_trainer_predictions(
                     "top_atom_indices": ";".join(str(i) for i in top_atoms),
                 })
 
+                if "ovito" in formats:
+                    ovito_path = output_dir / f"{sample_name}.xyz"
+                    _write_ovito_xyz(ovito_path, structure, atoms)
+                    row["ovito"] = ovito_path.name
                 if "csv" in formats:
                     csv_path = output_dir / f"{sample_name}.csv"
                     _write_atom_csv(csv_path, atoms)
@@ -210,14 +251,16 @@ def _batch_target(batch, device):
 
 def _model_args(batch, task):
     if task in HETERO_TASKS:
+        edge_index_dict = _nonempty_edge_dict(batch.edge_index_dict)
+        edge_attr_dict = _select_dict_keys(batch.edge_attr_dict, edge_index_dict.keys())
         kwargs = {
-            "edge_attr": batch.edge_attr_dict,
+            "edge_attr": edge_attr_dict,
             "batch": batch.batch_dict,
         }
         if task.startswith("megnet"):
             kwargs["state"] = batch.state
-            kwargs["bond_batch"] = batch.bond_batch_dict
-        return (batch.x_dict, batch.edge_index_dict), kwargs
+            kwargs["bond_batch"] = _select_dict_keys(batch.bond_batch_dict, edge_index_dict.keys())
+        return (batch.x_dict, edge_index_dict), kwargs
 
     kwargs = {
         "edge_attr": batch.edge_attr,
@@ -226,7 +269,12 @@ def _model_args(batch, task):
     if task.startswith("megnet"):
         kwargs["state"] = batch.state
         kwargs["bond_batch"] = batch.bond_batch
-    if task.endswith("_attention"):
+    if (
+            task.endswith("_attention")
+            or task in CGCNN_ATTENTION_TASKS
+            or task in MEGNET_ATTENTION_TASKS
+            or task in DEFINET_ATTENTION_TASKS
+    ):
         kwargs["node_type"] = getattr(batch, "node_type", None)
         kwargs["defect_marker"] = getattr(batch, "defect_marker", None)
     return (batch.x, batch.edge_index), kwargs
@@ -242,18 +290,87 @@ def _call_explainer(explainer, batch, task, target):
     return explainer(*args, **kwargs, target=target)
 
 
+def _nonempty_edge_dict(edge_index_dict):
+    return {
+        edge_type: edge_index
+        for edge_type, edge_index in edge_index_dict.items()
+        if edge_index.size(1) > 0
+    }
+
+
+def _select_dict_keys(value_dict, keys):
+    return {key: value_dict[key] for key in keys if key in value_dict}
+
+
+def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict=None):
+    x_dict = dict(x_dict)
+    edge_index_dict = dict(edge_index_dict)
+    edge_attr_dict = dict(edge_attr_dict)
+    batch_dict = dict(batch_dict)
+    bond_batch_dict = None if bond_batch_dict is None else dict(bond_batch_dict)
+
+    ref_x = next(iter(x_dict.values()))
+    node_feature_dim = ref_x.shape[1] if ref_x.dim() > 1 else 1
+    for node_type in HETERO_NODE_TYPES:
+        if node_type not in x_dict:
+            x_dict[node_type] = ref_x.new_empty((0, node_feature_dim))
+        if node_type not in batch_dict:
+            batch_dict[node_type] = torch.empty((0,), dtype=torch.long, device=ref_x.device)
+
+    if edge_attr_dict:
+        ref_edge_attr = next(iter(edge_attr_dict.values()))
+        edge_feature_dim = ref_edge_attr.shape[1] if ref_edge_attr.dim() > 1 else 1
+    else:
+        ref_edge_attr = ref_x.new_empty((0, 1))
+        edge_feature_dim = 1
+
+    for edge_type in HETERO_EDGE_TYPES:
+        if edge_type not in edge_index_dict:
+            edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, device=ref_x.device)
+        if edge_type not in edge_attr_dict:
+            edge_attr_dict[edge_type] = ref_edge_attr.new_empty((0, edge_feature_dim))
+        if bond_batch_dict is not None and edge_type not in bond_batch_dict:
+            bond_batch_dict[edge_type] = torch.empty((0,), dtype=torch.long, device=ref_x.device)
+
+    return x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict
+
+
 def _extract_structure_and_types(batch, task):
     payload = getattr(batch, "structure")
     if task in HETERO_TASKS:
-        if isinstance(payload, (list, tuple)) and len(payload) == 1:
-            payload = payload[0]
+        payload = _unwrap_singletons(payload)
         if isinstance(payload, (list, tuple)) and len(payload) >= 2:
-            return payload[0], payload[1]
+            structure = _structure_from_payload(payload[0])
+            type_index = _unwrap_singletons(payload[1])
+            return structure, type_index
         raise ValueError("Could not extract hetero structure payload from batch.structure")
 
-    if isinstance(payload, (list, tuple)) and len(payload) == 1:
-        payload = payload[0]
-    return payload, None
+    return _structure_from_payload(payload), None
+
+
+def _unwrap_singletons(value):
+    while isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    return value
+
+
+def _structure_from_payload(payload):
+    payload = _unwrap_singletons(payload)
+    if hasattr(payload, "sites") and hasattr(payload, "lattice"):
+        return payload
+
+    if hasattr(payload, "coords") and hasattr(payload, "lattice"):
+        from pymatgen.core import Structure
+
+        return Structure.from_sites([payload])
+
+    # PyG may collate pymatgen Structure as a nested list of PeriodicSite objects.
+    if isinstance(payload, (list, tuple)) and payload and all(hasattr(site, "coords") for site in payload):
+        from pymatgen.core import Structure
+
+        return Structure.from_sites(list(payload))
+
+    raise ValueError(f"Could not extract pymatgen Structure from batch.structure payload: {type(payload)}")
 
 
 def _source_metadata(structure, sample_idx):
@@ -271,6 +388,15 @@ def _source_metadata(structure, sample_idx):
         "source_name": source_name,
         "source_path": source_path,
     }
+
+
+def _explain_output_stem(source_meta):
+    """Prefer the input dataset id for explanation filenames."""
+    for key in ("source_id", "source_name", "source_path"):
+        value = str(source_meta.get(key, "") or "").strip()
+        if value:
+            return Path(value).stem
+    return "sample"
 
 
 def _unique_output_name(source_name, used_names):
@@ -434,6 +560,35 @@ def _write_atom_csv(path, atoms):
         writer.writerows(atoms)
 
 
+def _write_ovito_xyz(path, structure, atoms):
+    lattice = np.asarray(structure.lattice.matrix, dtype=float).reshape(-1)
+    with Path(path).open("w", newline="", encoding="utf-8") as handle:
+        handle.write(f"{len(atoms)}\n")
+        handle.write(
+            'Lattice="{}" '.format(" ".join(f"{value:.10f}" for value in lattice))
+            + "Properties=species:S:1:pos:R:3:id:I:1:importance:R:1:Color:R:3:Radius:R:1 "
+            + 'pbc="T T T"\n'
+        )
+        for atom in atoms:
+            red, green, blue = _hex_to_rgb01(atom["color"])
+            handle.write(
+                f"{atom['element']} "
+                f"{float(atom['x']):.10f} {float(atom['y']):.10f} {float(atom['z']):.10f} "
+                f"{int(atom['index'])} {float(atom['value']):.10f} "
+                f"{red:.6f} {green:.6f} {blue:.6f} {float(atom['radius']):.6f}\n"
+            )
+
+
+def _hex_to_rgb01(value):
+    raw = str(value or "#808080").strip().lstrip("#")
+    if len(raw) != 6:
+        return 0.5, 0.5, 0.5
+    try:
+        return tuple(int(raw[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    except ValueError:
+        return 0.5, 0.5, 0.5
+
+
 def _write_index(path, rows):
     fieldnames = [
         "sample_index",
@@ -449,6 +604,7 @@ def _write_index(path, rows):
         "value_max",
         "value_mean",
         "top_atom_indices",
+        "ovito",
         "csv",
         "html",
         "png",
@@ -470,19 +626,23 @@ def _write_html(path, structure, atoms, row, cmap):
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
-  <script src="https://unpkg.com/ngl@2.0.0-dev.38/dist/ngl.js"></script>
   <style>
-    html, body {{ margin: 0; height: 100%; font-family: Arial, sans-serif; }}
-    #viewport {{ width: 100%; height: 86vh; }}
-    .meta {{ padding: 10px 14px; font-size: 13px; line-height: 1.45; }}
+    html, body {{ margin: 0; height: 100%; font-family: Arial, sans-serif; color: #1f2933; }}
+    body {{ display: flex; flex-direction: column; background: #ffffff; }}
+    #viewport {{ flex: 1 1 auto; width: 100%; min-height: 360px; display: block; cursor: grab; }}
+    #viewport:active {{ cursor: grabbing; }}
+    .meta {{ flex: 0 0 auto; padding: 10px 14px; font-size: 13px; line-height: 1.45; border-top: 1px solid #d9dee5; }}
     .bar {{ height: 10px; width: 240px; background: {legend_gradient}; }}
     .legend {{ display: flex; align-items: center; gap: 10px; margin-top: 4px; }}
+    .reset {{ float: right; border: 1px solid #c8d0da; background: #fff; border-radius: 4px; padding: 4px 8px; cursor: pointer; }}
   </style>
 </head>
 <body>
-  <div id="viewport"></div>
+  <canvas id="viewport"></canvas>
   <div class="meta">
+    <button class="reset" id="reset" type="button">Reset</button>
     <strong>{html.escape(title)}</strong>
     target={row['target']} prediction={row['prediction']} abs_error={row['abs_error']}
     <div class="legend">
@@ -493,34 +653,172 @@ def _write_html(path, structure, atoms, row, cmap):
   <script>
     const atoms = {atoms_json};
     const cellEdges = {cell_json};
-    function hexToRgb01(hex) {{
-      const value = hex.replace("#", "");
-      return [
-        parseInt(value.slice(0, 2), 16) / 255,
-        parseInt(value.slice(2, 4), 16) / 255,
-        parseInt(value.slice(4, 6), 16) / 255,
-      ];
-    }}
-    document.addEventListener("DOMContentLoaded", function () {{
-      const stage = new NGL.Stage("viewport", {{ backgroundColor: "white" }});
-      const shape = new NGL.Shape("node attribution");
-      atoms.forEach(function (atom) {{
-        shape.addSphere(
-          [atom.x, atom.y, atom.z],
-          hexToRgb01(atom.color),
-          atom.radius,
-          atom.index + ":" + atom.element + " value=" + atom.value.toFixed(5)
-        );
-      }});
-      cellEdges.forEach(function (edge) {{
-        shape.addCylinder(edge[0], edge[1], [0.25, 0.25, 0.25], 0.035, "cell");
-      }});
-      stage.addComponentFromObject(shape).then(function (component) {{
-        component.addRepresentation("buffer");
-        stage.autoView();
-      }});
-      window.addEventListener("resize", function () {{ stage.handleResize(); }});
+    const canvas = document.getElementById("viewport");
+    const ctx = canvas.getContext("2d");
+    let rotX = -0.55;
+    let rotY = 0.72;
+    let zoom = 1.0;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    const points = atoms.map(atom => [atom.x, atom.y, atom.z]);
+    cellEdges.forEach(edge => {{
+      points.push(edge[0], edge[1]);
     }});
+    const bounds = points.reduce((acc, point) => {{
+      for (let i = 0; i < 3; i += 1) {{
+        acc.min[i] = Math.min(acc.min[i], point[i]);
+        acc.max[i] = Math.max(acc.max[i], point[i]);
+      }}
+      return acc;
+    }}, {{ min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }});
+    const center = [0, 1, 2].map(i => (bounds.min[i] + bounds.max[i]) / 2);
+    const span = Math.max(...[0, 1, 2].map(i => bounds.max[i] - bounds.min[i]), 1);
+
+    function resize() {{
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      draw();
+    }}
+
+    function rotate(point) {{
+      const x0 = point[0] - center[0];
+      const y0 = point[1] - center[1];
+      const z0 = point[2] - center[2];
+      const cx = Math.cos(rotX);
+      const sx = Math.sin(rotX);
+      const cy = Math.cos(rotY);
+      const sy = Math.sin(rotY);
+      const y1 = y0 * cx - z0 * sx;
+      const z1 = y0 * sx + z0 * cx;
+      const x2 = x0 * cy + z1 * sy;
+      const z2 = -x0 * sy + z1 * cy;
+      return [x2, y1, z2];
+    }}
+
+    function project(point) {{
+      const rect = canvas.getBoundingClientRect();
+      const scale = Math.min(rect.width, rect.height) * 0.78 * zoom / span;
+      const rotated = rotate(point);
+      return {{
+        x: rect.width / 2 + rotated[0] * scale,
+        y: rect.height / 2 - rotated[1] * scale,
+        z: rotated[2],
+        scale,
+      }};
+    }}
+
+    function drawCell() {{
+      ctx.save();
+      ctx.strokeStyle = "#8a94a6";
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.75;
+      cellEdges.forEach(edge => {{
+        const a = project(edge[0]);
+        const b = project(edge[1]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }});
+      ctx.restore();
+    }}
+
+    function drawAtom(item) {{
+      const atom = item.atom;
+      const point = item.point;
+      const radius = Math.max(5, atom.radius * point.scale * 0.18);
+      const shade = Math.max(0.72, Math.min(1.15, 0.92 + point.z / span * 0.18));
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = atom.color;
+      ctx.shadowColor = "rgba(17, 24, 39, 0.22)";
+      ctx.shadowBlur = Math.max(2, radius * 0.18);
+      ctx.shadowOffsetY = Math.max(1, radius * 0.08);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.fillStyle = `rgba(255, 255, 255, ${{Math.max(0, shade - 1)}})`;
+      ctx.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = "#17202a";
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+      ctx.restore();
+    }}
+
+    function drawLabels(projectedAtoms) {{
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width < 560 || atoms.length > 80) {{
+        return;
+      }}
+      ctx.save();
+      ctx.font = "11px Arial, sans-serif";
+      ctx.fillStyle = "#1f2933";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.lineWidth = 3;
+      projectedAtoms.slice(-40).forEach(item => {{
+        const text = `${{item.atom.index}}:${{item.atom.element}}`;
+        const x = item.point.x + 7;
+        const y = item.point.y - 7;
+        ctx.strokeText(text, x, y);
+        ctx.fillText(text, x, y);
+      }});
+      ctx.restore();
+    }}
+
+    function draw() {{
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      drawCell();
+      const projectedAtoms = atoms
+        .map(atom => ({{ atom, point: project([atom.x, atom.y, atom.z]) }}))
+        .sort((a, b) => a.point.z - b.point.z);
+      projectedAtoms.forEach(drawAtom);
+      drawLabels(projectedAtoms);
+    }}
+
+    canvas.addEventListener("pointerdown", event => {{
+      dragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+    }});
+    canvas.addEventListener("pointermove", event => {{
+      if (!dragging) {{
+        return;
+      }}
+      rotY += (event.clientX - lastX) * 0.01;
+      rotX += (event.clientY - lastY) * 0.01;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      draw();
+    }});
+    canvas.addEventListener("pointerup", event => {{
+      dragging = false;
+      canvas.releasePointerCapture(event.pointerId);
+    }});
+    canvas.addEventListener("wheel", event => {{
+      event.preventDefault();
+      zoom *= event.deltaY < 0 ? 1.08 : 0.92;
+      zoom = Math.max(0.25, Math.min(5.0, zoom));
+      draw();
+    }}, {{ passive: false }});
+    document.getElementById("reset").addEventListener("click", () => {{
+      rotX = -0.55;
+      rotY = 0.72;
+      zoom = 1.0;
+      draw();
+    }});
+    window.addEventListener("resize", resize);
+    resize();
   </script>
 </body>
 </html>

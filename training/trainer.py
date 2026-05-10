@@ -20,6 +20,31 @@ from ..utils.scaler import Scaler
 from .losses import MAELoss
 
 
+CGCNN_ATTENTION_TASKS = (
+    'cgcnn_attention',
+    'cgcnn_attention_local',
+    'cgcnn_attention_was',
+    'cgcnn_attention_local_was',
+)
+MEGNET_HETERO_TASKS = (
+    'megnet_hetero',
+    'megnet_local',
+    'megnet_hetero_was',
+)
+MEGNET_ATTENTION_TASKS = (
+    'megnet_attention',
+    'megnet_attention_local',
+    'megnet_attention_was',
+    'megnet_attention_local_was',
+)
+DEFINET_ATTENTION_TASKS = (
+    'definet_attention',
+    'definet_attention_local',
+    'definet_attention_was',
+    'definet_attention_local_was',
+)
+
+
 def set_attr(structure, attr, name):
     setattr(structure, name, attr)
     return structure
@@ -52,7 +77,7 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task == 'megnet_full' or task == 'megnet_sparse':
+        if task in ('megnet_full', 'megnet_was'):
             self.model = MEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
@@ -62,10 +87,10 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
             ).to(self.device)
-        elif task == 'megnet_hetero' or task == 'megnet_local':
+        elif task in MEGNET_HETERO_TASKS:
             self.model = HeteroMEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
-                node_input_shape=None,
+                node_input_shape=atom_converter.get_shape(),
                 embedding_size=self.config['model']['embedding_size'],
                 metadata=(['atom', 'defect'],
                           [('atom', 'aa', 'atom'),
@@ -94,7 +119,7 @@ class MEGNetTrainer:
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
                 n_h=3,
             ).to(self.device)
-        elif task == 'megnet_attention':
+        elif task in MEGNET_ATTENTION_TASKS:
             self.model = AttentionMEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
@@ -105,7 +130,7 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
             ).to(self.device)
-        elif task == 'cgcnn_attention':
+        elif task in CGCNN_ATTENTION_TASKS:
             self.model = AttentionCGCNN(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -113,7 +138,7 @@ class MEGNetTrainer:
                 n_heads=self.config['model'].get('n_heads', 4),
                 n_h=3,
             ).to(self.device)
-        elif task == 'definet_attention':
+        elif task in DEFINET_ATTENTION_TASKS:
             self.model = DefiNet(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -123,7 +148,7 @@ class MEGNetTrainer:
                 n_h=3,
             ).to(self.device)
         else:
-            # default: cgcnn_full / cgcnn_sparse
+            # default: cgcnn_full / cgcnn_was
             self.model = CGCNN(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -143,7 +168,6 @@ class MEGNetTrainer:
                 patience=self.config["optim"]["patience"],
                 threshold=self.config["optim"]["threshold"],
                 min_lr=self.config["optim"]["min_lr"],
-                verbose=True,
             )
         else:
             raise ValueError("Unknown scheduler")
@@ -190,7 +214,7 @@ class MEGNetTrainer:
 
     def _forward(self, batch):
         task = self.config['task']
-        if task in ('megnet_hetero', 'megnet_local'):
+        if task in MEGNET_HETERO_TASKS:
             return self.model(
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.state, batch.batch_dict, batch.bond_batch_dict,
@@ -200,14 +224,14 @@ class MEGNetTrainer:
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.batch_dict,
             ).squeeze()
-        elif task in ('cgcnn_sparse', 'cgcnn_full', 'cgcnn_was'):
+        elif task in ('cgcnn_full', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
-        elif task == 'cgcnn_attention':
+        elif task in CGCNN_ATTENTION_TASKS:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()
-        elif task == 'definet_attention':
+        elif task in DEFINET_ATTENTION_TASKS:
             marker = getattr(batch, 'defect_marker', getattr(batch, 'node_type', None))
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, defect_marker=marker).squeeze()
-        elif task == 'megnet_attention':
+        elif task in MEGNET_ATTENTION_TASKS:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch, node_type=batch.node_type).squeeze()
         else:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch).squeeze()

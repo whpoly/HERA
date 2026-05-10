@@ -6,8 +6,8 @@ This repository contains research code for defect-property prediction on crystal
 
 | Item | Supported Options |
 | --- | --- |
-| Models | `megnet`, `cgcnn`, `definet` |
-| Modes | `sparse`, `full`, `hetero`, `local`, `attention`, `was`, `hetero_was` |
+| Models | `megnet`, `cgcnn`, `definet`, `all` |
+| Modes | `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -69,20 +69,33 @@ python -m HERA.main --help
 
 Common arguments:
 
-- `--model`: `megnet`, `cgcnn`, or `definet`
+- `--model`: `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the MEGNet
+  and CGCNN suites, with DeFiNet included as CGCNN modes
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `sparse`, `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`
-- `--r`: local radius/cutoff values for `--mode local`; valid values are `0 3 4 5 6 7`
+- `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
+- `--r`: shared radius values for local graph cropping and hetero local/host
+  cutoff sweeps; valid values are `0 3 4 5 6 7` or `all`
 - `local` uses the same heterogeneous architecture as hetero mode, but keeps only
   the defect neighborhood within radius `r`. `r=0` is the sparse-equivalent local
   input expanded into the local/hetero format.
-- CGCNN also supports ablation modes `was` (`cgcnn_was`) and `hetero_was`
-  (`hetero_cgcnn_was`), which concatenate the current atom embedding and
-  previous/reference atom embedding from `atom_init.json`. `cgcnn_was` uses the
-  complete CGCNN crystal graph, not the sparse graph.
+- `attention_local` and `attention_local_was` use the same direct local graph
+  cropping as `local`.
+- `hetero` and `hetero_was` use the same `--r` values as the local/host boundary
+  cutoff while keeping the model graph cutoff from the config.
+- CGCNN and MEGNet also support ablation modes `was` and `hetero_was`, which
+  concatenate current and previous/reference atom features. CGCNN uses
+  `atom_init.json` embeddings; MEGNet uses direct float atomic-number pairs.
+- Attention ablations for CGCNN and MEGNet are `attention`, `attention_local`,
+  `attention_was`, and `attention_local_was`. DeFiNet is run inside the CGCNN
+  attention suite as `definet`, `definet_local`, `definet_was`, and
+  `definet_local_was`.
 - `--device`: for example `cpu`, `cuda:0`
-- `--epochs`: number of epochs per seed
-- `--seeds`: one or more random seeds
+- `--epochs`: number of epochs per seed or CV fold
+- `--seeds`: one or more random seeds for ordinary train/val/test splits; with
+  `--cv5`, pass exactly one random state
+- `--cv5` / `--five-fold-cv`: use 5-fold cross validation. Each run uses one
+  fold for test, the next fold for validation, and the remaining three folds
+  for training, so the train/val/test split is roughly 60/20/20.
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
 
@@ -90,14 +103,16 @@ Example training commands:
 
 ```bash
 python -m HERA.main --model megnet --dataset vacancy
-python -m HERA.main --model cgcnn --dataset 2dmd_high --mode sparse
-python -m HERA.main --model megnet --dataset semi --mode sparse hetero
-python -m HERA.main --model cgcnn --dataset vacancy --mode local --r 0 3 4 5 6 7
+python -m HERA.main --model cgcnn --dataset 2dmd_high --mode local --r 0
+python -m HERA.main --model megnet --dataset semi --mode local hetero --r 0
+python -m HERA.main --model megnet --dataset vacancy --mode full was local hetero hetero_was attention attention_local attention_was attention_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model cgcnn --dataset vacancy --mode full was local hetero hetero_was attention attention_local attention_was attention_local_was definet definet_local definet_was definet_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model all --dataset all --mode all --r all
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
-python -m HERA.main --model definet --dataset all
+python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
 ```
 
-The `definet` option runs the DeFiNet-style defect-aware attention/gating experiment in `attention` mode across the selected dataset(s). It uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
+The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
 ## ALIGNN Reference
 
@@ -122,12 +137,13 @@ python -m HERA.main --help
 python -m HERA.main \
   --model cgcnn \
   --dataset native \
-  --mode sparse \
+  --mode local \
+  --r 0 \
   --device cpu \
   --epochs 500 \
   --seeds 42 \
   --atom-init HERA/atom_init.json \
-  --log-dir HERA/logs_sparse_cgcnn
+  --log-dir HERA/logs_local_r0_cgcnn
 ```
 
 This smoke check helps verify:
@@ -142,8 +158,12 @@ This smoke check helps verify:
 Training logs are written under:
 
 ```text
-logs/{model}_{dataset}_{timestamp}/
+logs/run_{timestamp}/{model}/{dataset}/{mode}/
+logs/run_{timestamp}/{model}/{dataset}/{mode}/r{radius}/
 ```
+
+The `r{radius}` layer is used for local graph and hetero local/host cutoff
+sweeps.
 
 Each run may contain:
 
@@ -168,16 +188,14 @@ python -m HERA.main \
 By default, each seed writes explanations under:
 
 ```text
-logs/{model}_{dataset}_{timestamp}/{mode}/explanations/seed_{seed}/
-logs/{model}_all_{timestamp}/{dataset}/{mode}/explanations/seed_{seed}/
+logs/run_{timestamp}/{model}/{dataset}/{mode}/explanations/seed_{seed}/
+logs/run_{timestamp}/{model}/{dataset}/{mode}/r{radius}/explanations/seed_{seed}/
 ```
 
 Each explanation folder contains:
 
 - `index.csv`: target, prediction, absolute error, attribution range, and file paths
-- `{cif_name}.csv`: per-atom attribution values and colors
-- `{cif_name}.html`: standalone browser visualization using the same atom-color idea as the notebook
-- `{cif_name}.png`: static batch-friendly preview
+- `{cif_name}.xyz`: OVITO extended XYZ with per-atom `importance`, `Color`, and `Radius`
 
 If two samples share the same CIF stem, the later files get suffixes such as
 `_02` to avoid overwriting.
@@ -187,7 +205,8 @@ Useful options:
 ```bash
 --explain-max-samples 20      # explain only the first 20 test samples per seed
 --explain-epochs 50           # faster GNNExplainer optimization
---explain-formats csv html    # skip PNG generation
+--explain-formats ovito       # default: OVITO extended XYZ only
+--explain-formats csv html png # optionally request the legacy outputs
 --explain-cmap viridis_r      # reversed viridis attribution colors
 --explain-dir explain_runs    # write explanations outside the log directory
 ```
