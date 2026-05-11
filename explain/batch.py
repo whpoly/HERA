@@ -446,7 +446,7 @@ def _extract_node_values(explanation, batch, task, type_index):
         defect_i = 0
         values = []
         for label in type_labels:
-            if int(label) == 0:
+            if _node_type_to_int(label, default=0) == 0:
                 values.append(float(atom_mask[atom_i]) if atom_i < len(atom_mask) else 0.0)
                 atom_i += 1
             else:
@@ -488,9 +488,9 @@ def _atoms_from_structure(structure, values, node_types, cmap):
     for idx, site in enumerate(structure.sites):
         node_type = None
         if node_types is not None and idx < len(node_types):
-            node_type = int(node_types[idx])
+            node_type = _node_type_to_int(node_types[idx], default=None)
         elif "type" in site.properties:
-            node_type = int(site.properties["type"])
+            node_type = _node_type_to_int(site.properties["type"], default=None)
         atoms.append({
             "index": idx,
             "element": elements[idx],
@@ -503,6 +503,20 @@ def _atoms_from_structure(structure, values, node_types, cmap):
             "radius": radii[elements[idx]],
         })
     return atoms
+
+
+def _node_type_to_int(value, default=None):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("", "none", "null", "nan"):
+            return default
+        if normalized in ("false", "f", "no"):
+            return 0
+        if normalized in ("true", "t", "yes"):
+            return 1
+    return int(value)
 
 
 def _site_element(site):

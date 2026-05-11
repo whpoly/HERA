@@ -11,7 +11,7 @@ class TrainingLogger:
     One CSV file is created per (model, dataset, mode, seed) combination.
     """
 
-    HEADER = ["epoch", "train_mae", "train_mse", "val_mae", "best_val_mae", "lr"]
+    HEADER = ["epoch", "train_mae", "train_mse", "val_mae", "best_val_mae", "lr", "test_mae"]
 
     def __init__(self, log_dir, model_name, dataset_name, mode, seed):
         os.makedirs(log_dir, exist_ok=True)
@@ -24,6 +24,9 @@ class TrainingLogger:
             with open(self.filepath, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    if row.get("epoch") == "TEST" and not row.get("test_mae") and row.get("lr"):
+                        row["test_mae"] = row["lr"]
+                        row["lr"] = ""
                     self.rows.append(row)
 
     def log(self, epoch, train_mae, train_mse, val_mae, best_val_mae, lr):
@@ -35,6 +38,7 @@ class TrainingLogger:
             "val_mae": f"{val_mae:.6f}",
             "best_val_mae": f"{best_val_mae:.6f}",
             "lr": f"{lr:.2e}",
+            "test_mae": "",
         })
         # Write full file each time (atomic, safe for interruption)
         self._flush()
@@ -47,7 +51,8 @@ class TrainingLogger:
             "train_mse": "",
             "val_mae": "",
             "best_val_mae": "",
-            "lr": f"{test_mae:.6f}",
+            "lr": "",
+            "test_mae": f"{test_mae:.6f}",
         })
         self._flush()
 

@@ -46,6 +46,19 @@ def copy_source_metadata(source, target):
     return target
 
 
+def site_type_flag(site, default=False):
+    raw = site.properties.get('type', default)
+    if raw is None:
+        return default
+    if isinstance(raw, str):
+        value = raw.strip().lower()
+        if value in ('true', 't', 'yes'):
+            return True
+        if value in ('false', 'f', 'no', ''):
+            return False
+    return bool(int(raw))
+
+
 def mark_local_region(structure, local_cutoff):
     if local_cutoff is None or structure is None:
         return structure
@@ -53,7 +66,7 @@ def mark_local_region(structure, local_cutoff):
     structure = structure.copy()
     defect_indices = [
         idx for idx, site in enumerate(structure)
-        if int(site.properties.get('type', 0)) == 1
+        if site_type_flag(site)
     ]
     if not defect_indices:
         return structure
@@ -148,6 +161,9 @@ def get_full(structure, unit_cell, supercell_size, state):
 
 def add_vacancy_dummy_sites(structure, source_structure, unit_cell, supercell_size, include_was=False):
     structure = structure.copy()
+    for site in structure:
+        if site.properties.get('type') is None:
+            site.properties['type'] = False
     reference_supercell = unit_cell.copy()
     reference_supercell.make_supercell(supercell_size)
     structure_dict = strucure_to_dict(source_structure)
