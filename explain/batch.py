@@ -188,7 +188,7 @@ def explain_trainer_predictions(
 
                 explanation = _call_explainer(explainer, batch, task, target)
                 structure, type_index = _extract_structure_and_types(batch, task)
-                source_meta = _source_metadata(structure, sample_idx)
+                source_meta = _source_metadata(structure, sample_idx, batch)
                 sample_name = _unique_output_name(_explain_output_stem(source_meta), used_names)
                 row.update(source_meta)
                 row["output_name"] = sample_name
@@ -373,10 +373,10 @@ def _structure_from_payload(payload):
     raise ValueError(f"Could not extract pymatgen Structure from batch.structure payload: {type(payload)}")
 
 
-def _source_metadata(structure, sample_idx):
-    source_path = str(getattr(structure, "source_path", "") or "")
-    source_id = str(getattr(structure, "source_id", "") or "")
-    source_name = str(getattr(structure, "source_name", "") or "")
+def _source_metadata(structure, sample_idx, batch=None):
+    source_path = _metadata_value(batch, "source_path") or str(getattr(structure, "source_path", "") or "")
+    source_id = _metadata_value(batch, "source_id") or str(getattr(structure, "source_id", "") or "")
+    source_name = _metadata_value(batch, "source_name") or str(getattr(structure, "source_name", "") or "")
     if not source_name and source_path:
         source_name = Path(source_path).stem
     if not source_name and source_id:
@@ -390,9 +390,22 @@ def _source_metadata(structure, sample_idx):
     }
 
 
+def _metadata_value(source, attr):
+    if source is None or not hasattr(source, attr):
+        return ""
+    value = getattr(source, attr)
+    value = _unwrap_singletons(value)
+    if torch.is_tensor(value):
+        raw = value.detach().cpu().view(-1).tolist()
+        return str(raw[0]) if raw else ""
+    if isinstance(value, (list, tuple)):
+        return str(value[0]) if value else ""
+    return str(value or "")
+
+
 def _explain_output_stem(source_meta):
-    """Prefer the input dataset id for explanation filenames."""
-    for key in ("source_id", "source_name", "source_path"):
+    """Prefer the input CIF stem for explanation filenames."""
+    for key in ("source_name", "source_path", "source_id"):
         value = str(source_meta.get(key, "") or "").strip()
         if value:
             return Path(value).stem

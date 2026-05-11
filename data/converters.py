@@ -192,6 +192,14 @@ class SimpleCrystalConverter:
                 setattr(target, attr, getattr(source, attr))
         return target
 
+    @staticmethod
+    def _source_metadata_kwargs(structure):
+        return {
+            "source_id": getattr(structure, "source_id", ""),
+            "source_name": getattr(structure, "source_name", ""),
+            "source_path": getattr(structure, "source_path", ""),
+        }
+
     def _local_radius_structure(self, structure):
         defect_indices = [
             idx for idx, site in enumerate(structure)
@@ -276,6 +284,7 @@ class SimpleCrystalConverter:
                 bond_batch=bond_batch,
                 weight=weight,
                 structure=d,
+                **self._source_metadata_kwargs(d),
             )
         elif self.task in self.ATTENTION_MODES:
             # Homogeneous graph with explicit node_type (0=host, 1=defect).
@@ -331,6 +340,7 @@ class SimpleCrystalConverter:
                 node_type=node_type,
                 defect_marker=defect_marker,
                 structure=d,
+                **self._source_metadata_kwargs(d),
             )
         else:
             # hetero / local mode
@@ -384,6 +394,7 @@ class SimpleCrystalConverter:
                 bond_batch=bond_batch,
                 weight=weight,
                 structure=(d, indexs),
+                **self._source_metadata_kwargs(d),
             ).to_heterogeneous(
                 node_type=indexs,
                 edge_type=edge_incidies,
