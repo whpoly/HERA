@@ -146,6 +146,26 @@ def get_full(structure, unit_cell, supercell_size, state):
     return structure.copy()
 
 
+def add_vacancy_dummy_sites(structure, source_structure, unit_cell, supercell_size, include_was=False):
+    structure = structure.copy()
+    reference_supercell = unit_cell.copy()
+    reference_supercell.make_supercell(supercell_size)
+    structure_dict = strucure_to_dict(source_structure)
+    reference_structure_dict = strucure_to_dict(reference_supercell)
+    for coords, reference_site in reference_structure_dict.items():
+        if coords not in structure_dict:
+            properties = {'type': True}
+            if include_was:
+                properties['was'] = reference_site.specie.Z
+            structure.append(
+                DummySpecies(),
+                coords,
+                coords_are_cartesian=False,
+                properties=properties,
+            )
+    return structure
+
+
 # ================================================================== #
 #  Vacancy
 # ================================================================== #
@@ -204,6 +224,7 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
     source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
+    add_graph_vacancies = False
     if is_hetero_task(task):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -214,10 +235,15 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
         structure = get_sparse_vacancy(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
+        add_graph_vacancies = True
     if structure is None:
         return None
     if not skip_was:
         structure = add_was(structure, unit_cell, supercell_size)
+    if add_graph_vacancies:
+        structure = add_vacancy_dummy_sites(
+            structure, source_structure, unit_cell, supercell_size, include_was=not skip_was
+        )
     if copy_unit_cell_properties:
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
@@ -268,6 +294,7 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
     source_structure = structure
     structure = structure.copy()
     unit_cell = unit_cell.copy()
+    add_graph_vacancies = False
     if is_hetero_task(task):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -278,8 +305,13 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
         structure = get_sparse_2dmd_high(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
+        add_graph_vacancies = True
     if not skip_was:
         structure = add_was(structure, unit_cell, supercell_size)
+    if add_graph_vacancies:
+        structure = add_vacancy_dummy_sites(
+            structure, source_structure, unit_cell, supercell_size, include_was=not skip_was
+        )
     if copy_unit_cell_properties:
         structure = add_unit_cell_properties(structure, unit_cell, supercell_size)
     if state is not None:
@@ -332,6 +364,19 @@ def get_hetero_native(structure, unit_cell, supercell_size, state):
             cur_site.properties['type'] = False
             sites_raw.append(cur_site)
     return Structure.from_sites(sites_raw)
+
+
+def add_native_vacancy_dummy_site(structure, unit_cell):
+    if unit_cell != 'vacancy':
+        return structure
+    structure = structure.copy()
+    structure.append(
+        DummySpecies(),
+        (0.5, 0.5, 0.5),
+        coords_are_cartesian=False,
+        properties={'type': True},
+    )
+    return structure
 
 
 def get_local_native(structure, unit_cell, supercell_size, state, local_cutoff=5):
@@ -387,6 +432,7 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
         structure = get_local_native(structure, unit_cell, supercell_size, state, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
+        structure = add_native_vacancy_dummy_site(structure, unit_cell)
     if not skip_was:
         structure = add_was(structure, unit_cell, supercell_size)
     if copy_unit_cell_properties:
