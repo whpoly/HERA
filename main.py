@@ -41,6 +41,8 @@ import random
 import warnings
 from datetime import datetime
 
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import numpy as np
 import torch
 from sklearn.model_selection import KFold, train_test_split
@@ -109,6 +111,7 @@ MEGNET_DEFAULT_MODES = [
 
 
 def set_seed(seed):
+    seed = int(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -117,6 +120,9 @@ def set_seed(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 def with_radius(config, radius, update_graph_cutoff=False):
@@ -160,6 +166,7 @@ def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
                 'display': f'seed={random_state} fold={fold_idx + 1}/5',
                 'logger_id': f'{random_state}_fold{fold_idx + 1}',
                 'explain_id': f'seed_{random_state}_fold_{fold_idx + 1}',
+                'seed': int(random_state) + fold_idx,
                 'train_X': subset_by_indices(data, train_idx),
                 'train_y': subset_by_indices(targets, train_idx),
                 'val_X': subset_by_indices(data, val_idx),
@@ -176,6 +183,7 @@ def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
             'display': f'seed={rs}',
             'logger_id': rs,
             'explain_id': f'seed_{rs}',
+            'seed': int(rs),
             'train_X': train_X,
             'train_y': train_y,
             'val_X': val_X,
@@ -214,7 +222,8 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     losses = []
 
     for split in iter_train_val_test_splits(data, targets, random_seeds, cv5=cv5):
-        trainer = MEGNetTrainer(config, device)
+        set_seed(split['seed'])
+        trainer = MEGNetTrainer(config, device, seed=split['seed'])
         trainer.prepare_data(
             split['train_X'],
             split['train_y'],

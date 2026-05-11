@@ -51,9 +51,10 @@ def set_attr(structure, attr, name):
 
 
 class MEGNetTrainer:
-    def __init__(self, config, device):
+    def __init__(self, config, device, seed=None):
         self.config = config
         self.device = device
+        self.seed = None if seed is None else int(seed)
 
         if self.config["model"]["add_z_bond_coord"]:
             bond_converter = FlattenGaussianDistanceConverter(
@@ -172,6 +173,13 @@ class MEGNetTrainer:
         else:
             raise ValueError("Unknown scheduler")
 
+    def _make_generator(self, offset=0):
+        if self.seed is None:
+            return None
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + int(offset))
+        return generator
+
     # -------------------------------------------------------------- #
     #  Data preparation
     # -------------------------------------------------------------- #
@@ -191,7 +199,11 @@ class MEGNetTrainer:
 
         self.sampler = None
         if train_weights is not None:
-            self.sampler = WeightedRandomSampler(torch.tensor(train_weights).float(), len(train_weights))
+            self.sampler = WeightedRandomSampler(
+                torch.tensor(train_weights).float(),
+                len(train_weights),
+                generator=self._make_generator(1),
+            )
 
         self.trainloader = DataLoader(
             self.train_structures,
@@ -199,12 +211,14 @@ class MEGNetTrainer:
             shuffle=False if train_weights is not None else True,
             num_workers=0,
             sampler=self.sampler,
+            generator=self._make_generator(2),
         )
         self.testloader = DataLoader(
             self.test_structures,
             batch_size=self.config["model"]["test_batch_size"],
             shuffle=False,
             num_workers=0,
+            generator=self._make_generator(3),
         )
         self.target_name = target_name
 
