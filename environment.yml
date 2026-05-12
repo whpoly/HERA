@@ -5,20 +5,22 @@ channels:
 dependencies:
   - python=3.12
   - pip
+  - libstdcxx-ng>=15
+  - libgcc-ng>=15
+  - spglib
   - pymatgen
   - matminer
   - ase
   - pip:
-      # CUDA/PyTorch stack from the known-working requirements.txt.
-      - --extra-index-url https://download.pytorch.org/whl/cu124
-      - --find-links https://data.pyg.org/whl/torch-2.5.0+cu124.html
-      - torch==2.5.1+cu124
-      - torch-geometric==2.6.1
-      - pyg-lib==0.4.0+pt25cu124
-      - torch-scatter==2.1.2+pt25cu124
-      - torch-sparse==0.6.18+pt25cu124
-      - torch-cluster==1.6.3
-      - torch-spline-conv==1.2.2+pt25cu124
+      # CUDA/PyTorch/PyG stack for heterogeneous GNNExplainer support.
+      - --prefer-binary
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - --find-links https://data.pyg.org/whl/torch-2.11.0+cu128.html
+      - torch==2.11.0+cu128
+      - torch-geometric==2.7.0
+      - pyg-lib
+      - torch-scatter
+      - torch-sparse
 
       # Core HERA runtime.
       - numpy==1.26.0

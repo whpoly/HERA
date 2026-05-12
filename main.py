@@ -26,6 +26,9 @@ Usage examples:
   # Five-fold cross validation; --seeds must contain exactly one random state
   python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
 
+  # Resume an existing run; completed seed/fold history CSVs are skipped
+  python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
+
 Supported combinations:
   Models  : megnet, cgcnn, definet, all
   Modes   : full, hetero, local, attention, was, hetero_was,
@@ -195,7 +198,7 @@ def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
 
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
-                      run_label=None, cv5=False):
+                      run_label=None, cv5=False, resume=False):
     """Train a single mode and return per-split test losses."""
     mode_to_dataset_key = {
         'full': 0,      # dataset_full
@@ -220,8 +223,20 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     data, targets = zip(*data_targets)
     targets = torch.stack(list(targets)) if isinstance(data_targets[0][1], torch.Tensor) else list(targets)
     losses = []
+    skipped = 0
+    trained = 0
 
     for split in iter_train_val_test_splits(data, targets, random_seeds, cv5=cv5):
+        completed_loss = TrainingLogger.completed_test_mae(log_dir, split['logger_id']) if resume else None
+        if completed_loss is not None:
+            print(
+                f'  [{split["display"]}] Resume: completed history found, '
+                f'skipping train/test (test_mae={completed_loss:.4f})'
+            )
+            losses.append(completed_loss)
+            skipped += 1
+            continue
+
         set_seed(split['seed'])
         trainer = MEGNetTrainer(config, device, seed=split['seed'])
         trainer.prepare_data(
@@ -249,6 +264,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         loss_test = trainer.predict_structures(split['test_X'], split['test_y'], model_best)
         logger.log_test_result(loss_test)
         print(f'  [{split["display"]}] Test MAE: {loss_test:.4f}')
+        trained += 1
 
         if explain_options is not None:
             from .explain.batch import explain_trainer_predictions
@@ -273,6 +289,10 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             )
         losses.append(loss_test)
 
+    if resume and skipped:
+        total = skipped + trained
+        print(f'  Resume: skipped {skipped}/{total} completed split(s) for {log_mode}')
+
     return losses
 
 
@@ -280,6 +300,20 @@ def split_run_summary(seeds, cv5):
     if cv5:
         return f'5-fold CV random_state: {seeds[0]}'
     return f'Seeds: {seeds}'
+
+
+def latest_run_dir(log_dir):
+    if not os.path.isdir(log_dir):
+        return None
+
+    candidates = [
+        os.path.join(log_dir, name)
+        for name in os.listdir(log_dir)
+        if name.startswith('run_') and os.path.isdir(os.path.join(log_dir, name))
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (os.path.getmtime(path), path))
 
 
 def default_modes_for_model(model_name):
@@ -382,6 +416,10 @@ def main():
                         help='Path to atom_init.json (default: atom_init.json)')
     parser.add_argument('--log-dir', default='logs',
                         help='Directory to save training history CSVs (default: logs)')
+    parser.add_argument('--run-dir', default=None,
+                        help='Specific run directory to write/read instead of creating logs/run_{timestamp}')
+    parser.add_argument('--resume', action='store_true',
+                        help='Skip completed seed/fold tasks whose history CSV already has a TEST result')
     parser.add_argument('--r', nargs='+', default=None,
                         help=('Shared radius values for local graph and local/host cutoff sweeps. '
                               "Use all for 0 3 4 5 6 7"))
@@ -423,8 +461,19 @@ def main():
     print(f'    Device: {args.device} | Epochs: {args.epochs} | {split_run_summary(args.seeds, args.cv5)}')
     print()
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(args.log_dir, f'run_{timestamp}')
+    if args.run_dir is not None:
+        run_dir = args.run_dir
+    elif args.resume:
+        run_dir = latest_run_dir(args.log_dir)
+        if run_dir is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            run_dir = os.path.join(args.log_dir, f'run_{timestamp}')
+            print(f'No existing run_* directory found under {args.log_dir}; starting a new run.')
+        else:
+            print(f'Resuming latest run directory under {args.log_dir}: {run_dir}')
+    else:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        run_dir = os.path.join(args.log_dir, f'run_{timestamp}')
     os.makedirs(run_dir, exist_ok=True)
     print(f'Run directory: {run_dir}\n')
 
@@ -545,7 +594,7 @@ def main():
                         train_mode, config, run_dataset[:3], targets, args.seeds, args.epochs, args.device,
                         model_name=model_name, dataset_name=dataset_name,
                         log_dir=mode_dir, explain_options=explain_options,
-                        run_label=run_label, cv5=args.cv5,
+                        run_label=run_label, cv5=args.cv5, resume=args.resume,
                     )
                     results[run_label] = losses
 

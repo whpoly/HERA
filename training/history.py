@@ -1,6 +1,7 @@
 """Training history logger — records per-epoch metrics to CSV files."""
 
 import csv
+import math
 import os
 
 
@@ -13,21 +14,40 @@ class TrainingLogger:
 
     HEADER = ["epoch", "train_mae", "train_mse", "val_mae", "best_val_mae", "lr", "test_mae"]
 
-    def __init__(self, log_dir, model_name, dataset_name, mode, seed):
-        os.makedirs(log_dir, exist_ok=True)
-        filename = f"seed{seed}_history.csv"
-        self.filepath = os.path.join(log_dir, filename)
-        self.rows = []
+    @staticmethod
+    def filepath_for(log_dir, seed):
+        return os.path.join(log_dir, f"seed{seed}_history.csv")
 
-        # If resuming, load existing rows
-        if os.path.isfile(self.filepath):
-            with open(self.filepath, "r", newline="") as f:
+    @classmethod
+    def completed_test_mae(cls, log_dir, seed):
+        """Return the completed test MAE for a split, or None if incomplete."""
+        filepath = cls.filepath_for(log_dir, seed)
+        if not os.path.isfile(filepath):
+            return None
+
+        completed_mae = None
+        try:
+            with open(filepath, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if row.get("epoch") == "TEST" and not row.get("test_mae") and row.get("lr"):
-                        row["test_mae"] = row["lr"]
-                        row["lr"] = ""
-                    self.rows.append(row)
+                    if row.get("epoch") != "TEST":
+                        continue
+                    value = row.get("test_mae") or row.get("lr")
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(value):
+                        completed_mae = value
+        except (OSError, csv.Error):
+            return None
+
+        return completed_mae
+
+    def __init__(self, log_dir, model_name, dataset_name, mode, seed):
+        os.makedirs(log_dir, exist_ok=True)
+        self.filepath = self.filepath_for(log_dir, seed)
+        self.rows = []
 
     def log(self, epoch, train_mae, train_mse, val_mae, best_val_mae, lr):
         """Append one epoch's metrics."""

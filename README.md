@@ -98,6 +98,8 @@ Common arguments:
   for training, so the train/val/test split is roughly 60/20/20.
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
+- `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
+- `--resume`: skip a seed/fold task when its `seed*_history.csv` already has a completed `TEST` row
 
 Example training commands:
 
@@ -110,6 +112,7 @@ python -m HERA.main --model cgcnn --dataset vacancy --mode full was local hetero
 python -m HERA.main --model all --dataset all --mode all --r all
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
+python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 ```
 
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
@@ -170,6 +173,11 @@ Each run may contain:
 - per-epoch CSV logs
 - per-mode `summary.txt`
 - one run-level `summary.txt`
+
+When `--resume` is enabled, the CLI does not load or save model checkpoints.
+It only treats a seed/fold CSV as complete when it contains a valid final
+`TEST` row, reuses that test MAE in summaries, and retrains any missing or
+incomplete seed/fold from scratch.
 
 ## Batch Explanations
 
