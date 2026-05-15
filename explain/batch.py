@@ -18,10 +18,8 @@ from torch_geometric.loader import DataLoader
 
 HETERO_TASKS = {
     "megnet_hetero",
-    "megnet_local",
     "megnet_hetero_was",
     "cgcnn_hetero",
-    "cgcnn_local",
     "hetero_cgcnn_was",
 }
 
@@ -85,17 +83,17 @@ class PredictionWrapper(nn.Module):
             node_type=None,
             defect_marker=None,
     ):
-        if self.task in ("megnet_hetero", "megnet_local", "megnet_hetero_was"):
+        if self.task in ("megnet_hetero", "megnet_hetero_was"):
             x, edge_index, edge_attr, batch, bond_batch = _complete_hetero_inputs(
                 x, edge_index, edge_attr, batch, bond_batch
             )
             pred = self.model(x, edge_index, edge_attr, state, batch, bond_batch)
-        elif self.task in ("cgcnn_hetero", "cgcnn_local", "hetero_cgcnn_was"):
+        elif self.task in ("cgcnn_hetero", "hetero_cgcnn_was"):
             x, edge_index, edge_attr, batch, _ = _complete_hetero_inputs(
                 x, edge_index, edge_attr, batch, None
             )
             pred = self.model(x, edge_index, edge_attr, batch)
-        elif self.task in ("cgcnn_sparse", "cgcnn_full", "cgcnn_was"):
+        elif self.task in ("cgcnn_sparse", "cgcnn_full", "cgcnn_local", "cgcnn_was"):
             pred = self.model(x, edge_index, edge_attr, batch)
         elif self.task in CGCNN_ATTENTION_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, node_type=node_type)

@@ -212,27 +212,13 @@ class SimpleCrystalConverter:
         for idx, site in enumerate(structure):
             if idx in selected:
                 continue
+            # Union of all defect-centered radius neighborhoods.
             min_distance = min(structure.get_distance(idx, defect_idx) for defect_idx in defect_indices)
             if self.local_radius > 0 and min_distance <= self.local_radius:
                 selected.add(idx)
 
         local_structure = Structure.from_sites([structure[idx] for idx in sorted(selected)])
         return self._copy_structure_metadata(structure, local_structure)
-
-    @classmethod
-    def _ensure_local_hetero_schema(cls, data, x, edge_attr, bond_batch):
-        node_feature_dim = x.shape[1] if x.dim() > 1 else 1
-        edge_feature_dim = edge_attr.shape[1] if edge_attr.dim() > 1 else 1
-        for node_type in cls.NODE_TYPE_NAMES:
-            if node_type not in data.node_types:
-                data[node_type].x = x.new_empty((0, node_feature_dim))
-                data[node_type].num_nodes = 0
-        for edge_type in cls.EDGE_TYPE_NAMES:
-            if edge_type not in data.edge_types:
-                data[edge_type].edge_index = torch.empty((2, 0), dtype=torch.long, device=x.device)
-                data[edge_type].edge_attr = edge_attr.new_empty((0, edge_feature_dim))
-                data[edge_type].bond_batch = bond_batch.new_empty((0,))
-        return data
 
     def convert(self, d):
         if self.task == 'sparse':
@@ -241,7 +227,7 @@ class SimpleCrystalConverter:
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task in ('full', 'was'):
+        if self.task in ('full', 'was', 'local'):
             bond_index = [[], []]
             bond_attr = []
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
@@ -343,7 +329,7 @@ class SimpleCrystalConverter:
                 **self._source_metadata_kwargs(d),
             )
         else:
-            # hetero / local mode
+            # hetero mode
             bond_index = [[], []]
             bond_attr = []
             indexs = torch.LongTensor([site.properties['type'] for site in d])
@@ -401,8 +387,6 @@ class SimpleCrystalConverter:
                 node_type_names=self.NODE_TYPE_NAMES,
                 edge_type_names=self.EDGE_TYPE_NAMES,
             )
-            if self.task == 'local':
-                data = self._ensure_local_hetero_schema(data, x, edge_attr, bond_batch)
             return data
 
     def __call__(self, d):

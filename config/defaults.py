@@ -88,7 +88,7 @@ def get_configs_2dmd(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_local = _local_config(config_hetero, f'{task_prefix}_local')
+    config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')
@@ -161,7 +161,7 @@ def get_configs_default(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_local = _local_config(config_hetero, f'{task_prefix}_local')
+    config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')

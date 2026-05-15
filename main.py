@@ -26,7 +26,7 @@ Usage examples:
   # Five-fold cross validation; --seeds must contain exactly one random state
   python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
 
-  # Resume an existing run; completed seed/fold history CSVs are skipped
+  # Resume an existing run; completed mode summaries are skipped
   python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 
 Supported combinations:
@@ -38,6 +38,7 @@ Supported combinations:
 """
 
 import argparse
+import ast
 import copy
 import os
 import random
@@ -203,7 +204,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     mode_to_dataset_key = {
         'full': 0,      # dataset_full
         'hetero': 1,    # dataset_hetero
-        'local': 1,     # dataset_hetero, cropped by SimpleCrystalConverter at conversion time
+        'local': 1,     # dataset_hetero supplies defect labels; converter crops to a homogeneous local graph
         'attention': 2, # dataset_attn
         'was': 0,       # dataset_full with current+reference atom embeddings
         'hetero_was': 1, # dataset_hetero with current+reference atom embeddings
@@ -300,6 +301,60 @@ def split_run_summary(seeds, cv5):
     if cv5:
         return f'5-fold CV random_state: {seeds[0]}'
     return f'Seeds: {seeds}'
+
+
+def expected_split_logger_ids(seeds, cv5):
+    if cv5:
+        return [f'{seeds[0]}_fold{fold_idx + 1}' for fold_idx in range(5)]
+    return list(seeds)
+
+
+def completed_resume_losses(log_dir, seeds, cv5):
+    losses = []
+    for logger_id in expected_split_logger_ids(seeds, cv5):
+        loss = TrainingLogger.completed_test_mae(log_dir, logger_id)
+        if loss is None:
+            return None
+        losses.append(loss)
+    return losses
+
+
+def read_mode_summary_losses(path):
+    if not os.path.isfile(path):
+        return None
+
+    try:
+        with open(path, 'r') as f:
+            for line in f:
+                if not (line.startswith('Per-seed losses:') or line.startswith('Per-fold losses:')):
+                    continue
+                raw_losses = line.split(':', 1)[1].strip()
+                losses = ast.literal_eval(raw_losses)
+                if not isinstance(losses, (list, tuple)):
+                    return None
+                losses = [float(loss) for loss in losses]
+                if all(np.isfinite(losses)):
+                    return losses
+                return None
+    except (OSError, SyntaxError, ValueError, TypeError):
+        return None
+
+    return None
+
+
+def write_mode_summary(path, model_name, dataset_name, run_label, losses,
+                       epochs, seeds, config, radius_label=None, cv5=False):
+    split_label = 'Per-fold losses' if cv5 else 'Per-seed losses'
+    mode_summary = [
+        f'{model_name.upper()} | {dataset_name} | {run_label.upper()}',
+        f'Epochs: {epochs} | {split_run_summary(seeds, cv5)}',
+        f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
+        f'{split_label}: {losses}',
+    ]
+    if radius_label is not None:
+        mode_summary.insert(1, radius_summary(run_label.rsplit('_r', 1)[0], config))
+    with open(path, 'w') as f:
+        f.write('\n'.join(mode_summary) + '\n')
 
 
 def latest_run_dir(log_dir):
@@ -505,9 +560,6 @@ def main():
                     )
                 return dataset_cache[local_cutoff]
 
-            base_dataset = dataset_for_cutoff(None)
-            targets = base_dataset[3]
-
             results = {}
             result_labels = []
             for mode in modes:
@@ -555,23 +607,48 @@ def main():
                     run_label = run['label']
                     train_mode = run['mode']
                     config = run['config']
-                    run_dataset = (
-                        dataset_for_cutoff(run['local_cutoff'])
-                        if run['local_cutoff'] is not None
-                        else base_dataset
-                    )
                     result_labels.append(run_label)
+                    mode_parts = [dataset_dir, train_mode]
+                    if run['radius_label'] is not None:
+                        mode_parts.append(run['radius_label'])
+                    mode_dir = os.path.join(*mode_parts)
+                    os.makedirs(mode_dir, exist_ok=True)
+                    mode_summary_path = os.path.join(mode_dir, 'summary.txt')
+
+                    if args.resume:
+                        summary_losses = read_mode_summary_losses(mode_summary_path)
+                        if summary_losses is not None:
+                            print(
+                                f'\nResume: summary found for '
+                                f'{model_name.upper()} - {run_label.upper()}; '
+                                'skipping dataset load/train.'
+                            )
+                            results[run_label] = summary_losses
+                            continue
+
+                        completed_losses = completed_resume_losses(mode_dir, args.seeds, args.cv5)
+                        if completed_losses is not None:
+                            print(
+                                f'\nResume: all completed histories found for '
+                                f'{model_name.upper()} - {run_label.upper()}; '
+                                'skipping dataset load/train.'
+                            )
+                            results[run_label] = completed_losses
+                            write_mode_summary(
+                                mode_summary_path,
+                                model_name, dataset_name, run_label, completed_losses,
+                                args.epochs, args.seeds, config,
+                                radius_label=run['radius_label'], cv5=args.cv5,
+                            )
+                            continue
+
+                    run_dataset = dataset_for_cutoff(run['local_cutoff'])
 
                     print(f'\n{"=" * 60}')
                     print(f'  Training {model_name.upper()} - {run_label.upper()} mode')
                     if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
                         print(f'  {radius_summary(mode, config)}')
                     print(f'{"=" * 60}')
-                    mode_parts = [dataset_dir, train_mode]
-                    if run['radius_label'] is not None:
-                        mode_parts.append(run['radius_label'])
-                    mode_dir = os.path.join(*mode_parts)
-                    os.makedirs(mode_dir, exist_ok=True)
                     explain_options = None
                     if args.explain:
                         if args.explain_dir is not None:
@@ -591,25 +668,18 @@ def main():
                             'strict': args.explain_strict,
                         }
                     losses = train_single_mode(
-                        train_mode, config, run_dataset[:3], targets, args.seeds, args.epochs, args.device,
+                        train_mode, config, run_dataset[:3], run_dataset[3], args.seeds, args.epochs, args.device,
                         model_name=model_name, dataset_name=dataset_name,
                         log_dir=mode_dir, explain_options=explain_options,
                         run_label=run_label, cv5=args.cv5, resume=args.resume,
                     )
                     results[run_label] = losses
-
-                    split_label = 'Per-fold losses' if args.cv5 else 'Per-seed losses'
-                    mode_summary = [
-                        f'{model_name.upper()} | {dataset_name} | {run_label.upper()}',
-                        f'Epochs: {args.epochs} | {split_run_summary(args.seeds, args.cv5)}',
-                        f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
-                        f'{split_label}: {losses}',
-                    ]
-                    if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
-                        mode_summary.insert(1, radius_summary(mode, config))
-                    mode_summary_path = os.path.join(mode_dir, 'summary.txt')
-                    with open(mode_summary_path, 'w') as f:
-                        f.write('\n'.join(mode_summary) + '\n')
+                    write_mode_summary(
+                        mode_summary_path,
+                        model_name, dataset_name, run_label, losses,
+                        args.epochs, args.seeds, config,
+                        radius_label=run['radius_label'], cv5=args.cv5,
+                    )
 
             model_results[dataset_name] = results
             all_results[(model_name, dataset_name)] = results

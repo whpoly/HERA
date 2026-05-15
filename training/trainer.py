@@ -28,7 +28,6 @@ CGCNN_ATTENTION_TASKS = (
 )
 MEGNET_HETERO_TASKS = (
     'megnet_hetero',
-    'megnet_local',
     'megnet_hetero_was',
 )
 MEGNET_ATTENTION_TASKS = (
@@ -78,7 +77,7 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task in ('megnet_full', 'megnet_was'):
+        if task in ('megnet_full', 'megnet_local', 'megnet_was'):
             self.model = MEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
@@ -103,7 +102,7 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
             ).to(self.device)
-        elif task in ('cgcnn_hetero', 'cgcnn_local', 'hetero_cgcnn_was'):
+        elif task in ('cgcnn_hetero', 'hetero_cgcnn_was'):
             model = CrystalGraphConvNet(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -149,7 +148,7 @@ class MEGNetTrainer:
                 n_h=3,
             ).to(self.device)
         else:
-            # default: cgcnn_full / cgcnn_was
+            # default: homogeneous CGCNN variants
             self.model = CGCNN(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -233,12 +232,12 @@ class MEGNetTrainer:
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.state, batch.batch_dict, batch.bond_batch_dict,
             ).squeeze()
-        elif task in ('cgcnn_hetero', 'cgcnn_local', 'hetero_cgcnn_was'):
+        elif task in ('cgcnn_hetero', 'hetero_cgcnn_was'):
             return self.model(
                 batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
                 batch.batch_dict,
             ).squeeze()
-        elif task in ('cgcnn_full', 'cgcnn_was'):
+        elif task in ('cgcnn_full', 'cgcnn_local', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
         elif task in CGCNN_ATTENTION_TASKS:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()

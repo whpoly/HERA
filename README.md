@@ -75,9 +75,8 @@ Common arguments:
 - `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
 - `--r`: shared radius values for local graph cropping and hetero local/host
   cutoff sweeps; valid values are `0 3 4 5 6 7` or `all`
-- `local` uses the same heterogeneous architecture as hetero mode, but keeps only
-  the defect neighborhood within radius `r`. `r=0` is the sparse-equivalent local
-  input expanded into the local/hetero format.
+- `local` uses the homogeneous model path on the union of all defect-centered
+  neighborhoods within radius `r`. `r=0` keeps only the defect atoms.
 - `attention_local` and `attention_local_was` use the same direct local graph
   cropping as `local`.
 - `hetero` and `hetero_was` use the same `--r` values as the local/host boundary
@@ -99,7 +98,8 @@ Common arguments:
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
-- `--resume`: skip a seed/fold task when its `seed*_history.csv` already has a completed `TEST` row
+- `--resume`: skip a completed mode/radius immediately when its per-mode
+  `summary.txt` exists; otherwise skip completed seed/fold tasks inside that mode
 
 Example training commands:
 
@@ -175,9 +175,11 @@ Each run may contain:
 - one run-level `summary.txt`
 
 When `--resume` is enabled, the CLI does not load or save model checkpoints.
-It only treats a seed/fold CSV as complete when it contains a valid final
-`TEST` row, reuses that test MAE in summaries, and retrains any missing or
-incomplete seed/fold from scratch.
+It first reuses a per-mode `summary.txt` when present, which avoids loading the
+dataset for that mode/radius. If no summary exists, it treats a seed/fold CSV
+as complete only when it contains a valid final `TEST` row; partially completed
+runs load data once, reuse completed test MAEs, and retrain missing or
+incomplete seed/fold tasks from scratch.
 
 ## Batch Explanations
 

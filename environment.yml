@@ -12,11 +12,11 @@ dependencies:
   - matminer
   - ase
   - pip:
-      # CUDA/PyTorch/PyG stack for heterogeneous GNNExplainer support.
+      # CUDA/PyTorch/PyG stack for V100 (sm_70) + heterogeneous GNNExplainer support.
       - --prefer-binary
-      - --extra-index-url https://download.pytorch.org/whl/cu128
-      - --find-links https://data.pyg.org/whl/torch-2.11.0+cu128.html
-      - torch==2.11.0+cu128
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - --find-links https://data.pyg.org/whl/torch-2.11.0+cu126.html
+      - torch==2.11.0+cu126
       - torch-geometric==2.7.0
       - pyg-lib
       - torch-scatter
