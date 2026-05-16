@@ -129,10 +129,8 @@ def set_seed(seed):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 
-def with_radius(config, radius, update_graph_cutoff=False):
+def with_radius(config, radius):
     config = copy.deepcopy(config)
-    if update_graph_cutoff:
-        config['model']['cutoff'] = radius
     config['model']['local_radius'] = radius
     return config
 
@@ -140,7 +138,7 @@ def with_radius(config, radius, update_graph_cutoff=False):
 def radius_summary(mode, config):
     radius = config['model']['local_radius']
     if mode in LOCAL_GRAPH_SWEEP_MODES:
-        return f'local_radius = cutoff = {radius}'
+        return f'local_radius = {radius}, graph cutoff = {config["model"]["cutoff"]}'
     return f'local_cutoff = {radius} (local/host boundary), graph cutoff = {config["model"]["cutoff"]}'
 
 
@@ -476,8 +474,8 @@ def main():
     parser.add_argument('--resume', action='store_true',
                         help='Skip completed seed/fold tasks whose history CSV already has a TEST result')
     parser.add_argument('--r', nargs='+', default=None,
-                        help=('Shared radius values for local graph and local/host cutoff sweeps. '
-                              "Use all for 0 3 4 5 6 7"))
+                        help=('Radius values for local cropping and local/host cutoff sweeps; '
+                              'graph edge cutoff stays at the config value. Use all for 0 3 4 5 6 7'))
     parser.add_argument('--explain', action='store_true',
                         help='Run GNNExplainer after each seed prediction and save batch visualizations')
     parser.add_argument('--explain-dir', default=None,
@@ -579,7 +577,6 @@ def main():
                             'config': with_radius(
                                 get_config(model_name, dataset_name, mode),
                                 radius,
-                                update_graph_cutoff=True,
                             ),
                             'local_cutoff': None,
                             'radius_label': f'r{radius}',
@@ -595,7 +592,6 @@ def main():
                             'config': with_radius(
                                 get_config(model_name, dataset_name, mode),
                                 radius,
-                                update_graph_cutoff=False,
                             ),
                             'local_cutoff': radius,
                             'radius_label': f'r{radius}',

@@ -165,7 +165,7 @@ class SimpleCrystalConverter:
             bond_converter=None,
             add_z_bond_coord=False,
             add_eos_features=False,
-            cutoff=5.0,
+            cutoff=6.0,
             local_radius=None,
             ignore_state=False,
     ):

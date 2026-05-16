@@ -73,12 +73,13 @@ Common arguments:
   and CGCNN suites, with DeFiNet included as CGCNN modes
 - `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
-- `--r`: shared radius values for local graph cropping and hetero local/host
-  cutoff sweeps; valid values are `0 3 4 5 6 7` or `all`
+- `--r`: radius values for local graph cropping and hetero local/host cutoff
+  sweeps; valid values are `0 3 4 5 6 7` or `all`. The graph edge cutoff
+  remains the config value, currently `6`.
 - `local` uses the homogeneous model path on the union of all defect-centered
   neighborhoods within radius `r`. `r=0` keeps only the defect atoms.
 - `attention_local` and `attention_local_was` use the same direct local graph
-  cropping as `local`.
+  cropping as `local`; graph edges are still built with cutoff `6`.
 - `hetero` and `hetero_was` use the same `--r` values as the local/host boundary
   cutoff while keeping the model graph cutoff from the config.
 - CGCNN and MEGNet also support ablation modes `was` and `hetero_was`, which
@@ -166,7 +167,8 @@ logs/run_{timestamp}/{model}/{dataset}/{mode}/r{radius}/
 ```
 
 The `r{radius}` layer is used for local graph and hetero local/host cutoff
-sweeps.
+sweeps. It changes only the local radius/local-host boundary, not the graph
+edge cutoff.
 
 Each run may contain:
 
