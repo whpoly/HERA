@@ -84,8 +84,23 @@ def is_hetero_task(task):
     return (
         task.endswith('_hetero')
         or task.endswith('_hetero_was')
+        or task.endswith('_hetero_local')
+        or task.endswith('_hetero_local_was')
         or task == 'hetero_cgcnn_was'
     )
+
+
+def is_hetero_local_task(task):
+    return (
+        task.endswith('_hetero_local')
+        or task.endswith('_hetero_local_was')
+    )
+
+
+def mark_hetero_region_if_needed(structure, task, local_cutoff):
+    if is_hetero_local_task(task):
+        return structure
+    return mark_local_region(structure, local_cutoff)
 
 
 def is_attention_task(task):
@@ -243,7 +258,7 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
     add_graph_vacancies = False
     if is_hetero_task(task):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_vacancy(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -313,7 +328,7 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
     add_graph_vacancies = False
     if is_hetero_task(task):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_2dmd_high(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -437,7 +452,7 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if is_hetero_task(task):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -517,7 +532,7 @@ def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if is_hetero_task(task):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_och(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -586,7 +601,7 @@ def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
     structure = structure.copy()
     if is_hetero_task(task):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)
@@ -673,7 +688,7 @@ def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
     unit_cell = unit_cell.copy()
     if is_hetero_task(task):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
-        structure = mark_local_region(structure, local_cutoff)
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
     elif is_attention_task(task):
         structure = get_hetero_semi(structure, unit_cell, supercell_size, state)
         structure = mark_local_region(structure, local_cutoff)

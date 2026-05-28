@@ -155,7 +155,13 @@ class SimpleCrystalConverter:
         ('atom', 'ad', 'defect'),
         ('defect', 'da', 'atom'),
     ]
-    LOCAL_STRUCTURE_MODES = ('local', 'attention_local', 'attention_local_was')
+    LOCAL_STRUCTURE_MODES = (
+        'local',
+        'hetero_local',
+        'hetero_local_was',
+        'attention_local',
+        'attention_local_was',
+    )
     ATTENTION_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
 
     def __init__(
@@ -359,7 +365,6 @@ class SimpleCrystalConverter:
                 state[0].append(state[0][0])
             y = d.y if hasattr(d, "y") else 0
             weight = d.weight if hasattr(d, 'weight') else 1
-            bond_batch = MyTensor(np.zeros(edge_index.shape[1])).long()
             edge_incidies = torch.LongTensor(np.zeros(edge_index.shape[1]))
             for i in range(edge_index.shape[1]):
                 if indexs[edge_index[0][i]] == 0 and indexs[edge_index[1][i]] == 0:
@@ -375,9 +380,7 @@ class SimpleCrystalConverter:
                 x=x,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
-                state=torch.Tensor(state),
                 y=y,
-                bond_batch=bond_batch,
                 weight=weight,
                 structure=(d, indexs),
                 **self._source_metadata_kwargs(d),
@@ -387,6 +390,10 @@ class SimpleCrystalConverter:
                 node_type_names=self.NODE_TYPE_NAMES,
                 edge_type_names=self.EDGE_TYPE_NAMES,
             )
+            data.state = torch.Tensor(state)
+            for edge_type_idx, edge_type_name in enumerate(self.EDGE_TYPE_NAMES):
+                edge_count = int((edge_incidies == edge_type_idx).sum().item())
+                data[edge_type_name].bond_batch = MyTensor(np.zeros(edge_count)).long()
             return data
 
     def __call__(self, d):

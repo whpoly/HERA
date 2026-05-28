@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `all` |
-| Modes | `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
+| Modes | `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -72,18 +72,22 @@ Common arguments:
 - `--model`: `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the MEGNet
   and CGCNN suites, with DeFiNet included as CGCNN modes
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
+- `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
 - `--r`: radius values for local graph cropping and hetero local/host cutoff
   sweeps; valid values are `0 3 4 5 6 7` or `all`. The graph edge cutoff
   remains the config value, currently `6`.
 - `local` uses the homogeneous model path on the union of all defect-centered
   neighborhoods within radius `r`. `r=0` keeps only the defect atoms.
+- `hetero_local` and `hetero_local_was` use the same local graph cropping as
+  `local`, then build a heterogeneous graph where only true defect atoms are
+  `defect` nodes; nearby host atoms remain `atom` nodes.
 - `attention_local` and `attention_local_was` use the same direct local graph
   cropping as `local`; graph edges are still built with cutoff `6`.
 - `hetero` and `hetero_was` use the same `--r` values as the local/host boundary
   cutoff while keeping the model graph cutoff from the config.
-- CGCNN and MEGNet also support ablation modes `was` and `hetero_was`, which
-  concatenate current and previous/reference atom features. CGCNN uses
+- CGCNN and MEGNet also support WAS ablation modes `was`, `hetero_was`, and
+  `hetero_local_was`, which concatenate current and previous/reference atom
+  features. CGCNN uses
   `atom_init.json` embeddings; MEGNet uses direct float atomic-number pairs.
 - Attention ablations for CGCNN and MEGNet are `attention`, `attention_local`,
   `attention_was`, and `attention_local_was`. DeFiNet is run inside the CGCNN
@@ -108,8 +112,8 @@ Example training commands:
 python -m HERA.main --model megnet --dataset vacancy
 python -m HERA.main --model cgcnn --dataset 2dmd_high --mode local --r 0
 python -m HERA.main --model megnet --dataset semi --mode local hetero --r 0
-python -m HERA.main --model megnet --dataset vacancy --mode full was local hetero hetero_was attention attention_local attention_was attention_local_was --r 0 3 4 5 6 7
-python -m HERA.main --model cgcnn --dataset vacancy --mode full was local hetero hetero_was attention attention_local attention_was attention_local_was definet definet_local definet_was definet_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model megnet --dataset vacancy --mode full was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model cgcnn --dataset vacancy --mode full was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was definet definet_local definet_was definet_local_was --r 0 3 4 5 6 7
 python -m HERA.main --model all --dataset all --mode all --r all
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
@@ -166,9 +170,9 @@ logs/run_{timestamp}/{model}/{dataset}/{mode}/
 logs/run_{timestamp}/{model}/{dataset}/{mode}/r{radius}/
 ```
 
-The `r{radius}` layer is used for local graph and hetero local/host cutoff
-sweeps. It changes only the local radius/local-host boundary, not the graph
-edge cutoff.
+The `r{radius}` layer is used for local graph, hetero-local graph, and hetero
+local/host cutoff sweeps. It changes only the local radius/local-host boundary,
+not the graph edge cutoff.
 
 Each run may contain:
 

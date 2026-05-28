@@ -32,6 +32,7 @@ Usage examples:
 Supported combinations:
   Models  : megnet, cgcnn, definet, all
   Modes   : full, hetero, local, attention, was, hetero_was,
+            hetero_local, hetero_local_was,
             attention_local, attention_was, attention_local_was,
             definet, definet_local, definet_was, definet_local_was, all
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
@@ -68,6 +69,8 @@ CGCNN_DEFINET_MODES = (
 )
 LOCAL_GRAPH_SWEEP_MODES = (
     'local',
+    'hetero_local',
+    'hetero_local_was',
     'attention_local',
     'attention_local_was',
     'definet_local',
@@ -79,6 +82,7 @@ WAS_ABLATION_MODELS = ('cgcnn', 'megnet')
 WAS_ABLATION_MODES = (
     'was',
     'hetero_was',
+    'hetero_local_was',
 )
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet')
 ATTENTION_ABLATION_MODES = (
@@ -93,6 +97,8 @@ CGCNN_DEFAULT_MODES = [
     'attention',
     'was',
     'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
     'attention_local',
     'attention_was',
     'attention_local_was',
@@ -108,6 +114,8 @@ MEGNET_DEFAULT_MODES = [
     'attention',
     'was',
     'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
     'attention_local',
     'attention_was',
     'attention_local_was',
@@ -206,6 +214,8 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         'attention': 2, # dataset_attn
         'was': 0,       # dataset_full with current+reference atom embeddings
         'hetero_was': 1, # dataset_hetero with current+reference atom embeddings
+        'hetero_local': 1, # dataset_hetero cropped by SimpleCrystalConverter, preserving defect-only hetero nodes
+        'hetero_local_was': 1, # hetero_local with current+reference atom embeddings
         'attention_local': 2, # dataset_attn, cropped by SimpleCrystalConverter
         'attention_was': 2, # dataset_attn with current+reference atom embeddings
         'attention_local_was': 2, # dataset_attn with local crop and WAS features
@@ -385,7 +395,7 @@ def validate_modes_for_model(model_name, modes, parser):
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
         parser.error('The definet model only supports --mode attention attention_local attention_was attention_local_was')
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
-        parser.error('The was and hetero_was modes are only supported with --model cgcnn or --model megnet')
+        parser.error('The was, hetero_was, and hetero_local_was modes are only supported with --model cgcnn or --model megnet')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
         parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, or --model definet')
 

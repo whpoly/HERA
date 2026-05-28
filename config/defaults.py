@@ -34,6 +34,14 @@ def _hetero_was_task(task_prefix):
     return f'{task_prefix}_hetero_was'
 
 
+def _hetero_local_config(base_config, task_prefix):
+    return _local_config(base_config, f'{task_prefix}_hetero_local')
+
+
+def _hetero_local_was_config(base_config, task_prefix):
+    return _was_config(_hetero_local_config(base_config, task_prefix), f'{task_prefix}_hetero_local_was')
+
+
 def get_configs_2dmd(task_prefix):
     """Configs for vacancy and 2dmd_high datasets."""
     config_full = {
@@ -91,6 +99,8 @@ def get_configs_2dmd(task_prefix):
     config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
+    config_hetero_local = _hetero_local_config(config_hetero, task_prefix)
+    config_hetero_local_was = _hetero_local_was_config(config_hetero, task_prefix)
     config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     config_attention_local_was = _was_config(config_attention_local, f'{task_prefix}_attention_local_was')
@@ -101,6 +111,8 @@ def get_configs_2dmd(task_prefix):
         config_local,
         config_was,
         config_hetero_was,
+        config_hetero_local,
+        config_hetero_local_was,
         config_attention_local,
         config_attention_was,
         config_attention_local_was,
@@ -164,6 +176,8 @@ def get_configs_default(task_prefix):
     config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
+    config_hetero_local = _hetero_local_config(config_hetero, task_prefix)
+    config_hetero_local_was = _hetero_local_was_config(config_hetero, task_prefix)
     config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     config_attention_local_was = _was_config(config_attention_local, f'{task_prefix}_attention_local_was')
@@ -174,6 +188,8 @@ def get_configs_default(task_prefix):
         config_local,
         config_was,
         config_hetero_was,
+        config_hetero_local,
+        config_hetero_local_was,
         config_attention_local,
         config_attention_was,
         config_attention_local_was,
@@ -214,6 +230,8 @@ VALID_MODES = [
     'attention',
     'was',
     'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
     'attention_local',
     'attention_was',
     'attention_local_was',
@@ -244,9 +262,10 @@ def get_config(model: str, dataset: str, mode: str):
         model: 'megnet', 'cgcnn', or 'definet'
         dataset: one of VALID_DATASETS
         mode: one of 'full', 'hetero', 'local', 'attention', 'was',
-            'hetero_was', 'attention_local', 'attention_was',
-            'attention_local_was', 'definet', 'definet_local',
-            'definet_was', 'definet_local_was'
+            'hetero_was', 'hetero_local', 'hetero_local_was',
+            'attention_local', 'attention_was', 'attention_local_was',
+            'definet', 'definet_local', 'definet_was',
+            'definet_local_was'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -264,8 +283,9 @@ def get_config(model: str, dataset: str, mode: str):
     if model not in WAS_MODELS and mode in (
             'was',
             'hetero_was',
+            'hetero_local_was',
     ):
-        raise ValueError("The was and hetero_was modes are only supported for cgcnn and megnet")
+        raise ValueError("The was, hetero_was, and hetero_local_was modes are only supported for cgcnn and megnet")
     if model not in ATTENTION_ABLATION_MODELS and mode in (
             'attention_local',
             'attention_was',
@@ -280,6 +300,8 @@ def get_config(model: str, dataset: str, mode: str):
         config_local,
         config_was,
         config_hetero_was,
+        config_hetero_local,
+        config_hetero_local_was,
         config_attention_local,
         config_attention_was,
         config_attention_local_was,
@@ -292,6 +314,8 @@ def get_config(model: str, dataset: str, mode: str):
               'attention': config_attention,
               'was': config_was,
               'hetero_was': config_hetero_was,
+              'hetero_local': config_hetero_local,
+              'hetero_local_was': config_hetero_local_was,
               'attention_local': config_attention_local,
               'attention_was': config_attention_was,
               'attention_local_was': config_attention_local_was}[mode]

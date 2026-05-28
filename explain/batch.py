@@ -19,8 +19,24 @@ from torch_geometric.loader import DataLoader
 HETERO_TASKS = {
     "megnet_hetero",
     "megnet_hetero_was",
+    "megnet_hetero_local",
+    "megnet_hetero_local_was",
     "cgcnn_hetero",
     "hetero_cgcnn_was",
+    "cgcnn_hetero_local",
+    "cgcnn_hetero_local_was",
+}
+MEGNET_HETERO_TASKS = {
+    "megnet_hetero",
+    "megnet_hetero_was",
+    "megnet_hetero_local",
+    "megnet_hetero_local_was",
+}
+CGCNN_HETERO_TASKS = {
+    "cgcnn_hetero",
+    "hetero_cgcnn_was",
+    "cgcnn_hetero_local",
+    "cgcnn_hetero_local_was",
 }
 
 HETERO_NODE_TYPES = ("atom", "defect")
@@ -83,12 +99,12 @@ class PredictionWrapper(nn.Module):
             node_type=None,
             defect_marker=None,
     ):
-        if self.task in ("megnet_hetero", "megnet_hetero_was"):
+        if self.task in MEGNET_HETERO_TASKS:
             x, edge_index, edge_attr, batch, bond_batch = _complete_hetero_inputs(
                 x, edge_index, edge_attr, batch, bond_batch
             )
             pred = self.model(x, edge_index, edge_attr, state, batch, bond_batch)
-        elif self.task in ("cgcnn_hetero", "hetero_cgcnn_was"):
+        elif self.task in CGCNN_HETERO_TASKS:
             x, edge_index, edge_attr, batch, _ = _complete_hetero_inputs(
                 x, edge_index, edge_attr, batch, None
             )

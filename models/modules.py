@@ -145,6 +145,7 @@ class HeteroMegnetLayer(nn.Module):
                  ):
         super().__init__()
         self.edge_types = metadata[1]
+        self.embedding_size = embedding_size
         self.megnets = nn.ModuleDict()
         for etype in self.edge_types:
             self.megnets['__'.join(etype)] = MegnetModule(
@@ -164,8 +165,12 @@ class HeteroMegnetLayer(nn.Module):
         for etype in self.edge_types:
             k = '__'.join(etype)
             src, rel, dst = etype
-            if x_dict[src].size(0) == 0 or x_dict[dst].size(0) == 0:
-                edge_out_dict[etype] = edge_attr_dict[etype]
+            if (
+                    x_dict[src].size(0) == 0
+                    or x_dict[dst].size(0) == 0
+                    or edge_index_dict[etype].size(1) == 0
+            ):
+                edge_out_dict[etype] = edge_attr_dict[etype].new_empty((0, self.embedding_size))
                 continue
             x_src = torch.cat([x_dict[src], x_dict[dst]], dim=0) if src != dst else x_dict[src]
             edge_index = edge_index_dict[etype]

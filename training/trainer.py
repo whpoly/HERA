@@ -26,9 +26,17 @@ CGCNN_ATTENTION_TASKS = (
     'cgcnn_attention_was',
     'cgcnn_attention_local_was',
 )
+CGCNN_HETERO_TASKS = (
+    'cgcnn_hetero',
+    'hetero_cgcnn_was',
+    'cgcnn_hetero_local',
+    'cgcnn_hetero_local_was',
+)
 MEGNET_HETERO_TASKS = (
     'megnet_hetero',
     'megnet_hetero_was',
+    'megnet_hetero_local',
+    'megnet_hetero_local_was',
 )
 MEGNET_ATTENTION_TASKS = (
     'megnet_attention',
@@ -42,11 +50,51 @@ DEFINET_ATTENTION_TASKS = (
     'definet_attention_was',
     'definet_attention_local_was',
 )
+HETERO_NODE_TYPES = ('atom', 'defect')
+HETERO_EDGE_TYPES = (
+    ('atom', 'aa', 'atom'),
+    ('defect', 'dd', 'defect'),
+    ('atom', 'ad', 'defect'),
+    ('defect', 'da', 'atom'),
+)
 
 
 def set_attr(structure, attr, name):
     setattr(structure, name, attr)
     return structure
+
+
+def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict=None):
+    x_dict = dict(x_dict)
+    edge_index_dict = dict(edge_index_dict)
+    edge_attr_dict = dict(edge_attr_dict)
+    batch_dict = dict(batch_dict)
+    bond_batch_dict = None if bond_batch_dict is None else dict(bond_batch_dict)
+
+    ref_x = next(iter(x_dict.values()))
+    node_feature_dim = ref_x.shape[1] if ref_x.dim() > 1 else 1
+    for node_type in HETERO_NODE_TYPES:
+        if node_type not in x_dict:
+            x_dict[node_type] = ref_x.new_empty((0, node_feature_dim))
+        if node_type not in batch_dict:
+            batch_dict[node_type] = torch.empty((0,), dtype=torch.long, device=ref_x.device)
+
+    if edge_attr_dict:
+        ref_edge_attr = next(iter(edge_attr_dict.values()))
+        edge_feature_dim = ref_edge_attr.shape[1] if ref_edge_attr.dim() > 1 else 1
+    else:
+        ref_edge_attr = ref_x.new_empty((0, 1))
+        edge_feature_dim = 1
+
+    for edge_type in HETERO_EDGE_TYPES:
+        if edge_type not in edge_index_dict:
+            edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, device=ref_x.device)
+        if edge_type not in edge_attr_dict:
+            edge_attr_dict[edge_type] = ref_edge_attr.new_empty((0, edge_feature_dim))
+        if bond_batch_dict is not None and edge_type not in bond_batch_dict:
+            bond_batch_dict[edge_type] = torch.empty((0,), dtype=torch.long, device=ref_x.device)
+
+    return x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict
 
 
 class MEGNetTrainer:
@@ -102,7 +150,7 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
             ).to(self.device)
-        elif task in ('cgcnn_hetero', 'hetero_cgcnn_was'):
+        elif task in CGCNN_HETERO_TASKS:
             model = CrystalGraphConvNet(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
@@ -228,14 +276,27 @@ class MEGNetTrainer:
     def _forward(self, batch):
         task = self.config['task']
         if task in MEGNET_HETERO_TASKS:
-            return self.model(
-                batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
-                batch.state, batch.batch_dict, batch.bond_batch_dict,
-            ).squeeze()
-        elif task in ('cgcnn_hetero', 'hetero_cgcnn_was'):
-            return self.model(
-                batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict,
+            x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict = _complete_hetero_inputs(
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch.edge_attr_dict,
                 batch.batch_dict,
+                batch.bond_batch_dict,
+            )
+            return self.model(
+                x_dict, edge_index_dict, edge_attr_dict,
+                batch.state, batch_dict, bond_batch_dict,
+            ).squeeze()
+        elif task in CGCNN_HETERO_TASKS:
+            x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch.edge_attr_dict,
+                batch.batch_dict,
+            )
+            return self.model(
+                x_dict, edge_index_dict, edge_attr_dict,
+                batch_dict,
             ).squeeze()
         elif task in ('cgcnn_full', 'cgcnn_local', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
