@@ -350,25 +350,35 @@ class MEGNetTrainer:
             return cur_test_loss
         return cur_test_loss, torch.concat(results).to('cpu').data.reshape(-1, 1)
 
-    def predict_structures(self, test_X, test_y, model_state_dict, test_weights=None):
+    def predict_structures(self, test_X, test_y, model_state_dict, test_weights=None,
+                           return_predictions=False):
         print("converting data")
         test_data = [set_attr(s, y, 'y') for s, y in zip(test_X, test_y)]
         if test_weights is not None:
             test_data = [set_attr(s, w, 'weight') for s, w in zip(test_data, test_weights)]
         self.test_structures = [self.converter.convert(s) for s in tqdm(test_data)]
-        loader = DataLoader(self.test_structures, batch_size=50, shuffle=False)
+        loader = DataLoader(
+            self.test_structures,
+            batch_size=self.config["model"]["test_batch_size"],
+            shuffle=False,
+        )
         self.model.load_state_dict(model_state_dict)
         self.model.train(False)
-        total = []
+        total, results = [], []
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(self.device)
                 preds = self._forward(batch)
+                preds = self.scaler.inverse_transform(preds)
                 total.append(
-                    MAELoss(self.scaler.inverse_transform(preds), batch.y,
+                    MAELoss(preds, batch.y,
                             weights=batch.weight, reduction='sum').to('cpu').data.numpy()
                 )
-        return sum(total) / len(self.test_structures)
+                results.append(preds.detach().to('cpu').reshape(-1, 1))
+        mae = sum(total) / len(self.test_structures)
+        if not return_predictions:
+            return mae
+        return mae, torch.concat(results).numpy().reshape(-1)
 
     # -------------------------------------------------------------- #
     #  Save / load

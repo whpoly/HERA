@@ -120,6 +120,35 @@ python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --se
 python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 ```
 
+### Native OOD case studies
+
+To reproduce the GaAs-style leave-one-material-out case study on selected
+native-defect hosts, run one held-out material per command. These commands can
+be distributed across different machines because each one writes an independent
+run directory:
+
+```bash
+python -m HERA.native_ood_case_study \
+  --model cgcnn \
+  --mode full hetero \
+  --material GaN \
+  --epochs 500 \
+  --seeds 123 11 1245 34 42 80 13232 8 99 101 \
+  --device cuda:0 \
+  --log-dir HERA/logs \
+  --resume \
+  --atom-init HERA/atom_init.json
+```
+
+Change `--material GaN` to `--material AlN` or `--material SiC` on the other
+machines. With a single held-out material, the default output directories are
+`logs/native_ood_GaN/`, `logs/native_ood_AlN/`, and `logs/native_ood_SiC/`
+under the selected `--log-dir`.
+Each run treats that material as a completely unseen test host and uses the
+other native-defect structures for training/validation. The outputs include a
+Table-2-style `summary.md`, machine-readable `summary.csv`, per-seed metrics,
+and per-sample predictions.
+
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
 ## ALIGNN Reference
