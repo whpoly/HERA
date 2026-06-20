@@ -129,8 +129,8 @@ run directory:
 
 ```bash
 python -m HERA.native_ood_case_study \
-  --model cgcnn \
-  --mode full hetero \
+  --model cgcnn megnet definet \
+  --mode full hetero attention \
   --material GaN \
   --epochs 500 \
   --seeds 123 11 1245 34 42 80 13232 8 99 101 \
@@ -147,7 +147,11 @@ under the selected `--log-dir`.
 Each run treats that material as a completely unseen test host and uses the
 other native-defect structures for training/validation. The outputs include a
 Table-2-style `summary.md`, machine-readable `summary.csv`, per-seed metrics,
-and per-sample predictions.
+and per-sample predictions. When multiple models are passed, results are kept
+separate under each material's `cgcnn/`, `megnet/`, and `definet/`
+subdirectories. DefiNet is a defect-aware attention/gating baseline, so it
+runs through its attention-style mode while CGCNN and MEGNet run
+`full`, `hetero`, and `attention`.
 
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 

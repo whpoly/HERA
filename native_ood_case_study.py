@@ -25,7 +25,7 @@ from pymatgen.core import Structure
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from .config.defaults import VALID_MODES, get_config
+from .config.defaults import CGCNN_DEFINET_MODES, DEFINET_MODES, VALID_MODES, get_config
 from .data.datasets import init_elem_embedding, tag_structure_source
 from .data.structure_utils import convert_to_sparse_native
 from .main import (
@@ -189,6 +189,56 @@ def expand_mode_runs(model_name, modes, radii):
                 }
             )
     return runs
+
+
+def modes_for_model(model_name, requested_modes):
+    """Return the mode list supported by a model for the case-study command.
+
+    The case-study CLI allows commands such as
+    ``--model cgcnn megnet definet --mode full hetero attention``. DefiNet is
+    the defect-aware attention/gating baseline, so it only runs attention-style
+    modes while CGCNN/MEGNet keep the requested homogeneous, heterogeneous, and
+    attention baselines.
+    """
+    if model_name == "definet":
+        alias_to_definet_mode = {
+            "definet": "attention",
+            "definet_local": "attention_local",
+            "definet_was": "attention_was",
+            "definet_local_was": "attention_local_was",
+        }
+        modes = [
+            alias_to_definet_mode.get(mode, mode)
+            for mode in requested_modes
+            if mode in DEFINET_MODES or mode in alias_to_definet_mode
+        ]
+        modes = list(dict.fromkeys(modes))
+        skipped = [
+            mode
+            for mode in requested_modes
+            if mode not in DEFINET_MODES and mode not in alias_to_definet_mode
+        ]
+        if skipped:
+            print(
+                "Skipping unsupported DefiNet mode(s): "
+                + ", ".join(skipped)
+                + "; using attention-style DefiNet mode(s)."
+            )
+        if not modes:
+            modes = ["attention"]
+        return modes
+
+    if model_name != "cgcnn":
+        modes = [mode for mode in requested_modes if mode not in CGCNN_DEFINET_MODES]
+        skipped = [mode for mode in requested_modes if mode in CGCNN_DEFINET_MODES]
+        if skipped:
+            print(
+                f"Skipping CGCNN-only DefiNet mode(s) for {model_name}: "
+                + ", ".join(skipped)
+            )
+        return modes
+
+    return requested_modes
 
 
 def subset(values, indices):
@@ -419,19 +469,30 @@ def default_run_dir(log_dir, materials):
     return Path(log_dir) / f"native_ood_{timestamp}"
 
 
-def run_case_study(args, runs, materials, run_dir, dataset_cache):
+def run_case_study(
+    args,
+    model_name,
+    runs,
+    materials,
+    run_dir,
+    dataset_cache,
+    summary_rows=None,
+    seed_rows=None,
+):
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     write_settings(run_dir, args, materials)
 
-    summary_rows = []
-    seed_rows = []
+    if summary_rows is None:
+        summary_rows = []
+    if seed_rows is None:
+        seed_rows = []
 
     for run in runs:
-        cache_key = run["local_cutoff"]
+        cache_key = (model_name, run["local_cutoff"])
         if cache_key not in dataset_cache:
             dataset_cache[cache_key] = load_native_with_metadata(
-                args.model, args.native_csv, local_cutoff=run["local_cutoff"]
+                model_name, args.native_csv, local_cutoff=run["local_cutoff"]
             )
         datasets, targets, metadata = dataset_cache[cache_key]
         data = datasets[MODE_TO_DATASET_KEY[run["mode"]]]
@@ -440,10 +501,10 @@ def run_case_study(args, runs, materials, run_dir, dataset_cache):
             prediction_frames = []
             seed_metrics = []
             print(
-                f"\n=== {args.model} | {run['label']} | held out {material} ==="
+                f"\n=== {model_name} | {run['label']} | held out {material} ==="
             )
             for seed in args.seeds:
-                pred_path = prediction_path(run_dir, material, args.model, run["label"], seed)
+                pred_path = prediction_path(run_dir, material, model_name, run["label"], seed)
                 history_path = pred_path.with_name(f"seed_{seed}_history.csv")
                 if args.resume and pred_path.exists():
                     pred_df, metrics = load_prediction(pred_path)
@@ -469,7 +530,7 @@ def run_case_study(args, runs, materials, run_dir, dataset_cache):
                 seed_metrics.append(metrics)
                 seed_row = {
                     "material": material,
-                    "model": args.model,
+                    "model": model_name,
                     "mode": run["label"],
                     "seed": seed,
                 }
@@ -485,7 +546,7 @@ def run_case_study(args, runs, materials, run_dir, dataset_cache):
             ensemble_out = (
                 run_dir
                 / material
-                / args.model
+                / model_name
                 / run["label"]
                 / "ensemble_predictions.csv"
             )
@@ -495,7 +556,7 @@ def run_case_study(args, runs, materials, run_dir, dataset_cache):
             material_meta = metadata[metadata["material"] == material]
             summary_row = {
                 "material": material,
-                "model": args.model,
+                "model": model_name,
                 "mode": run["label"],
                 "n_samples": int(len(material_meta)),
                 "n_defect_groups": int(material_meta["defect_group"].nunique()),
@@ -520,8 +581,20 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run leave-one-material-out OOD case studies on native defects."
     )
-    parser.add_argument("--model", default="cgcnn", choices=["cgcnn", "megnet", "definet"])
-    parser.add_argument("--mode", nargs="+", default=["full", "hetero"], choices=VALID_MODES)
+    parser.add_argument(
+        "--model",
+        dest="models",
+        nargs="+",
+        default=["cgcnn"],
+        choices=["cgcnn", "megnet", "definet"],
+        help="Model architecture(s), e.g. --model cgcnn megnet.",
+    )
+    parser.add_argument(
+        "--mode",
+        nargs="+",
+        default=["full", "hetero", "attention"],
+        choices=VALID_MODES,
+    )
     parser.add_argument(
         "--materials",
         "--material",
@@ -553,13 +626,29 @@ def main():
     radii = parse_radius_values(args.r, parser)
     init_elem_embedding(args.atom_init)
 
-    runs = expand_mode_runs(args.model, args.mode, radii)
     dataset_cache = {}
 
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(
         args.log_dir, args.materials
     )
-    run_case_study(args, runs, args.materials, run_dir, dataset_cache)
+    summary_rows = []
+    seed_rows = []
+    for model_name in args.models:
+        model_modes = modes_for_model(model_name, args.mode)
+        if not model_modes:
+            print(f"Skipping {model_name}: no supported modes selected.")
+            continue
+        runs = expand_mode_runs(model_name, model_modes, radii)
+        run_case_study(
+            args,
+            model_name,
+            runs,
+            args.materials,
+            run_dir,
+            dataset_cache,
+            summary_rows=summary_rows,
+            seed_rows=seed_rows,
+        )
 
 
 if __name__ == "__main__":
