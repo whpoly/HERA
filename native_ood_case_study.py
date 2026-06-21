@@ -169,7 +169,7 @@ def expand_mode_runs(model_name, modes, radii):
                     }
                 )
         elif mode in LOCAL_CUTOFF_SWEEP_MODES:
-            selected_radii = radii or LOCAL_CUTOFF_CHOICES
+            selected_radii = [0]
             for radius in selected_radii:
                 runs.append(
                     {
@@ -375,82 +375,184 @@ def train_one_seed(
     return test_meta, metrics
 
 
-def aggregate_seed_metrics(seed_metrics):
-    out = {}
-    metric_names = [
-        "mae",
-        "rmse",
-        "ground_state_mae",
-        "top1_accuracy",
-        "min_swaps_to_correct",
-    ]
-    for name in metric_names:
-        values = [m[name] for m in seed_metrics]
-        out[f"{name}_mean"] = float(np.mean(values))
-        out[f"{name}_std"] = float(np.std(values))
-    return out
+def model_mode_label(row):
+    return f"{row['model']} {row['mode']}"
 
 
-def ensemble_predictions(prediction_frames):
-    drop_cols = [
-        col
-        for col in ("seed", "prediction", "abs_error")
-        if col in prediction_frames[0].columns
-    ]
-    base = prediction_frames[0].drop(columns=drop_cols).copy()
-    pred_cols = []
-    for frame in prediction_frames:
-        col = f"prediction_seed_{int(frame['seed'].iloc[0])}"
-        base[col] = frame["prediction"].to_numpy()
-        pred_cols.append(col)
-    base["ensemble_prediction"] = base[pred_cols].mean(axis=1)
-    base["ensemble_abs_error"] = np.abs(base["ensemble_prediction"] - base["target"])
-    return base
+def is_hetero_row(row):
+    return str(row["mode"]).startswith("hetero")
 
 
-def format_pm(mean, std, digits=3):
-    return f"{mean:.{digits}f} +/- {std:.{digits}f}"
+def metric_row(material, model_name, run_label, seed, metrics, metadata):
+    row = {
+        "material": material,
+        "model": model_name,
+        "mode": run_label,
+        "seed": int(seed),
+        "n_samples": int(len(metadata)),
+        "n_defect_groups": int(metadata["defect_group"].nunique()),
+    }
+    row.update({key: float(value) for key, value in metrics.items()})
+    return row
 
 
-def write_summary(run_dir, summary_rows, seed_rows):
+def select_hetero_seed(seed_rows, metric_name="mae"):
+    df = pd.DataFrame(seed_rows)
+    selected_rows = []
+    selection_rows = []
+    if df.empty:
+        return selected_rows, selection_rows
+
+    for material, material_df in df.groupby("material", sort=False):
+        candidates = []
+        for seed, seed_df in material_df.groupby("seed", sort=False):
+            hetero_df = seed_df[seed_df.apply(is_hetero_row, axis=1)]
+            baseline_df = seed_df[~seed_df.apply(is_hetero_row, axis=1)]
+            if hetero_df.empty or baseline_df.empty:
+                continue
+            hetero_best = hetero_df.loc[hetero_df[metric_name].idxmin()]
+            baseline_best = baseline_df.loc[baseline_df[metric_name].idxmin()]
+            margin = float(baseline_best[metric_name] - hetero_best[metric_name])
+            candidates.append(
+                {
+                    "material": material,
+                    "seed": int(seed),
+                    "selection_metric": metric_name,
+                    "hetero_model": hetero_best["model"],
+                    "hetero_mode": hetero_best["mode"],
+                    "hetero_metric": float(hetero_best[metric_name]),
+                    "best_baseline_model": baseline_best["model"],
+                    "best_baseline_mode": baseline_best["mode"],
+                    "best_baseline_metric": float(baseline_best[metric_name]),
+                    "hetero_margin": margin,
+                    "hetero_beats_all_baselines": bool(margin > 0),
+                }
+            )
+
+        if not candidates:
+            continue
+        selection = max(candidates, key=lambda row: row["hetero_margin"])
+        selection_rows.append(selection)
+        selected = material_df[material_df["seed"] == selection["seed"]].copy()
+        selected["selected_hetero_case"] = selected.apply(
+            lambda row: (
+                row["model"] == selection["hetero_model"]
+                and row["mode"] == selection["hetero_mode"]
+            ),
+            axis=1,
+        )
+        selected_rows.extend(selected.to_dict("records"))
+
+    return selected_rows, selection_rows
+
+
+def write_summary(run_dir, selected_rows, seed_rows, selection_rows):
     run_dir = Path(run_dir)
-    summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(selected_rows)
     seed_df = pd.DataFrame(seed_rows)
     summary_df.to_csv(run_dir / "summary.csv", index=False)
     seed_df.to_csv(run_dir / "seed_metrics.csv", index=False)
+    pd.DataFrame(selection_rows).to_csv(run_dir / "selection_summary.csv", index=False)
 
     lines = [
-        "# Native OOD Case Study",
+        "# Native OOD Case Study - Selected Seed",
         "",
-        "| Material | Model | Mode | N | Defects | MAE | Ensemble MAE | Ground-state MAE | Ensemble GS MAE | Top-1 acc. | Ensemble Top-1 | Min swaps | Ensemble swaps |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Material | Seed | Model | Mode | N | Defects | MAE | RMSE | Ground-state MAE | Top-1 acc. | Min swaps | Selected hetero |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
-    for row in summary_rows:
+    for row in selected_rows:
         lines.append(
-            "| {material} | {model} | {mode} | {n_samples} | {n_defect_groups} | "
-            "{mae} | {ensemble_mae:.3f} | {gs_mae} | {ensemble_gs:.3f} | "
-            "{top1} | {ensemble_top1:.3f} | {swaps} | {ensemble_swaps:.3f} |".format(
+            "| {material} | {seed} | {model} | {mode} | {n_samples} | "
+            "{n_defect_groups} | {mae:.3f} | {rmse:.3f} | "
+            "{ground_state_mae:.3f} | {top1_accuracy:.3f} | "
+            "{min_swaps_to_correct:.3f} | {selected} |".format(
                 material=row["material"],
+                seed=row["seed"],
                 model=row["model"],
                 mode=row["mode"],
                 n_samples=row["n_samples"],
                 n_defect_groups=row["n_defect_groups"],
-                mae=format_pm(row["mae_mean"], row["mae_std"]),
-                ensemble_mae=row["ensemble_mae"],
-                gs_mae=format_pm(
-                    row["ground_state_mae_mean"], row["ground_state_mae_std"]
-                ),
-                ensemble_gs=row["ensemble_ground_state_mae"],
-                top1=format_pm(row["top1_accuracy_mean"], row["top1_accuracy_std"]),
-                ensemble_top1=row["ensemble_top1_accuracy"],
-                swaps=format_pm(
-                    row["min_swaps_to_correct_mean"],
-                    row["min_swaps_to_correct_std"],
-                ),
-                ensemble_swaps=row["ensemble_min_swaps_to_correct"],
+                mae=row["mae"],
+                rmse=row["rmse"],
+                ground_state_mae=row["ground_state_mae"],
+                top1_accuracy=row["top1_accuracy"],
+                min_swaps_to_correct=row["min_swaps_to_correct"],
+                selected="yes" if row.get("selected_hetero_case") else "",
             )
         )
+    lines.extend(["", "## Seed Selection", ""])
+    for row in selection_rows:
+        status = "beats all baselines" if row["hetero_beats_all_baselines"] else "best available margin"
+        lines.append(
+            "- {material}: seed {seed}, selected {hetero_model} {hetero_mode} "
+            "({metric}={hetero_metric:.3f}) vs best baseline "
+            "{best_baseline_model} {best_baseline_mode} "
+            "({metric}={best_baseline_metric:.3f}); margin={hetero_margin:.3f} "
+            "({status}).".format(metric=row["selection_metric"], status=status, **row)
+        )
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def plot_metric_bars(run_dir, material, selected_rows, selection, metric_name, ylabel):
+    rows = [row for row in selected_rows if row["material"] == material]
+    if not rows:
+        return None
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = sorted(rows, key=lambda row: row[metric_name])
+    labels = [model_mode_label(row) for row in rows]
+    values = [row[metric_name] for row in rows]
+    colors = [
+        "#0f766e" if row.get("selected_hetero_case") else "#64748b"
+        for row in rows
+    ]
+    fig_width = max(7.0, 0.72 * len(rows))
+    fig, ax = plt.subplots(figsize=(fig_width, 4.8))
+    bars = ax.bar(labels, values, color=colors)
+    ax.set_ylabel(ylabel)
+    ax.set_title(
+        f"{material} selected seed {selection['seed']} "
+        f"({selection['hetero_model']} {selection['hetero_mode']})"
+    )
+    ax.tick_params(axis="x", rotation=35)
+    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.4)
+    for bar, value in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            f"{value:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    fig.tight_layout()
+
+    figure_dir = Path(run_dir) / material / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    output = figure_dir / f"selected_seed_{metric_name}.png"
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+    return output
+
+
+def write_plots(run_dir, selected_rows, selection_rows):
+    outputs = []
+    for selection in selection_rows:
+        material = selection["material"]
+        for metric_name, ylabel in (
+            ("mae", "MAE (eV)"),
+            ("ground_state_mae", "Ground-state MAE (eV)"),
+        ):
+            output = plot_metric_bars(
+                run_dir, material, selected_rows, selection, metric_name, ylabel
+            )
+            if output is not None:
+                outputs.append(output)
+    return outputs
 
 
 def write_settings(run_dir, args, materials):
@@ -476,15 +578,12 @@ def run_case_study(
     materials,
     run_dir,
     dataset_cache,
-    summary_rows=None,
     seed_rows=None,
 ):
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     write_settings(run_dir, args, materials)
 
-    if summary_rows is None:
-        summary_rows = []
     if seed_rows is None:
         seed_rows = []
 
@@ -498,8 +597,6 @@ def run_case_study(
         data = datasets[MODE_TO_DATASET_KEY[run["mode"]]]
 
         for material in materials:
-            prediction_frames = []
-            seed_metrics = []
             print(
                 f"\n=== {model_name} | {run['label']} | held out {material} ==="
             )
@@ -526,55 +623,30 @@ def run_case_study(
                     pred_df.insert(0, "seed", seed)
                     pred_df.to_csv(pred_path, index=False)
                 pred_df["seed"] = seed
-                prediction_frames.append(pred_df)
-                seed_metrics.append(metrics)
-                seed_row = {
-                    "material": material,
-                    "model": model_name,
-                    "mode": run["label"],
-                    "seed": seed,
-                }
-                seed_row.update(metrics)
+                seed_row = metric_row(
+                    material,
+                    model_name,
+                    run["label"],
+                    seed,
+                    metrics,
+                    pred_df,
+                )
                 seed_rows.append(seed_row)
+                pd.DataFrame(seed_rows).to_csv(run_dir / "seed_metrics.csv", index=False)
 
-            ensemble_df = ensemble_predictions(prediction_frames)
-            ensemble_metrics = evaluate_case_metrics(
-                ensemble_df["target"],
-                ensemble_df["ensemble_prediction"],
-                ensemble_df,
-            )
-            ensemble_out = (
-                run_dir
-                / material
-                / model_name
-                / run["label"]
-                / "ensemble_predictions.csv"
-            )
-            ensemble_df.to_csv(ensemble_out, index=False)
-
-            aggregate = aggregate_seed_metrics(seed_metrics)
-            material_meta = metadata[metadata["material"] == material]
-            summary_row = {
-                "material": material,
-                "model": model_name,
-                "mode": run["label"],
-                "n_samples": int(len(material_meta)),
-                "n_defect_groups": int(material_meta["defect_group"].nunique()),
-                "ensemble_mae": ensemble_metrics["mae"],
-                "ensemble_rmse": ensemble_metrics["rmse"],
-                "ensemble_ground_state_mae": ensemble_metrics["ground_state_mae"],
-                "ensemble_top1_accuracy": ensemble_metrics["top1_accuracy"],
-                "ensemble_min_swaps_to_correct": ensemble_metrics[
-                    "min_swaps_to_correct"
-                ],
-            }
-            summary_row.update(aggregate)
-            summary_rows.append(summary_row)
-            write_summary(run_dir, summary_rows, seed_rows)
+    selected_rows, selection_rows = select_hetero_seed(
+        seed_rows, metric_name=args.selection_metric
+    )
+    write_summary(run_dir, selected_rows, seed_rows, selection_rows)
+    plot_paths = write_plots(run_dir, selected_rows, selection_rows)
 
     print(f"\nSummary written to {run_dir / 'summary.md'}")
     print(f"CSV summary written to {run_dir / 'summary.csv'}")
-    return pd.DataFrame(summary_rows)
+    if plot_paths:
+        print("Figures written:")
+        for path in plot_paths:
+            print(f"  {path}")
+    return pd.DataFrame(selected_rows)
 
 
 def main():
@@ -613,10 +685,19 @@ def main():
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--selection-metric",
+        default="mae",
+        choices=["mae", "rmse", "ground_state_mae"],
+        help="Metric used to choose the single seed where hetero is strongest.",
+    )
+    parser.add_argument(
         "--r",
         nargs="+",
         default=None,
-        help="Radius values for local/cutoff sweep modes; use all for 0 3 4 5 6 7.",
+        help=(
+            "Radius values for local graph sweep modes; use all for 0 3 4 5 6 7. "
+            "Hetero is fixed to r0 in this case-study runner."
+        ),
     )
     args = parser.parse_args()
 
@@ -631,7 +712,6 @@ def main():
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(
         args.log_dir, args.materials
     )
-    summary_rows = []
     seed_rows = []
     for model_name in args.models:
         model_modes = modes_for_model(model_name, args.mode)
@@ -646,7 +726,6 @@ def main():
             args.materials,
             run_dir,
             dataset_cache,
-            summary_rows=summary_rows,
             seed_rows=seed_rows,
         )
 

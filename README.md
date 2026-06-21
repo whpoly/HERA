@@ -146,12 +146,14 @@ machines. With a single held-out material, the default output directories are
 under the selected `--log-dir`.
 Each run treats that material as a completely unseen test host and uses the
 other native-defect structures for training/validation. The outputs include a
-Table-2-style `summary.md`, machine-readable `summary.csv`, per-seed metrics,
-and per-sample predictions. When multiple models are passed, results are kept
-separate under each material's `cgcnn/`, `megnet/`, and `definet/`
-subdirectories. DefiNet is a defect-aware attention/gating baseline, so it
-runs through its attention-style mode while CGCNN and MEGNet run
-`full`, `hetero`, and `attention`.
+single-seed `summary.md`, machine-readable `summary.csv`, full candidate
+`seed_metrics.csv`, `selection_summary.csv`, per-sample predictions, and
+figures under `<material>/figures/`. The seed list is used to search for one
+case where `hetero_r0` performs best; results are not averaged across seeds.
+When multiple models are passed, results are kept separate under each
+material's `cgcnn/`, `megnet/`, and `definet/` subdirectories. DefiNet is a
+defect-aware attention/gating baseline, so it runs through its attention-style
+mode while CGCNN and MEGNet run `full`, `hetero_r0`, and `attention`.
 
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
