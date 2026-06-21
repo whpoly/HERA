@@ -157,6 +157,38 @@ mode while CGCNN and MEGNet run `full`, `hetero_r0`, and `attention`.
 
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
+### Native POSCAR0 fine-tuning
+
+To test POSCAR0-based target adaptation without a validation split, hold out
+GaN, AlN, and SiC together, train for a fixed 500 epochs on all other native
+materials, then fine-tune separately for each target material using only that
+material's POSCAR0 configurations:
+
+```bash
+python -m HERA.native_poscar0_finetune \
+  --model cgcnn megnet definet \
+  --mode full hetero attention \
+  --material GaN AlN SiC \
+  --epochs 500 \
+  --finetune-epochs 100 \
+  --finetune-lr 1e-4 \
+  --seed 42 \
+  --device cuda:0 \
+  --log-dir HERA/logs \
+  --resume \
+  --atom-init HERA/atom_init.json
+```
+
+This protocol does not use validation data or best-validation checkpoint
+selection. For each model and mode, the base checkpoint is the model after the
+last training epoch. The base model is tested zero-shot on each target material,
+then copied and fine-tuned per material from the same base checkpoint using
+that material's POSCAR0 rows only. The main comparison reports zero-shot versus
+POSCAR0 fine-tuned performance on the target material's non-POSCAR0
+configurations. Outputs include `summary.csv`, `comparison.csv`, prediction
+CSVs, per-material POSCAR0 value tables under
+`<model>/<mode>/poscar0_values/`, and figures under `figures/`.
+
 ## ALIGNN Reference
 
 For ALIGNN-related experiments, we use the official GitHub implementation of ALIGNN rather than maintaining a separate local implementation in this repository. If you need to run or reproduce ALIGNN experiments, please refer directly to the upstream project: https://github.com/usnistgov/alignn
