@@ -82,25 +82,25 @@ def get_prepared(path, prepared, is_high=False):
 
 def load_data_vacancy(task_prefix, local_cutoff=None):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
     df = pd.DataFrame(prepared)
     df.set_index(["id"], inplace=True)
     unit_cells = {
-        'MoS2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
-        'MoS2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
-        'BN_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
-        'GaSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
-        'P_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
-        'InSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
+        'MoS2': CifParser("defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2': CifParser("defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
+        'MoS2_500': CifParser("defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2_500': CifParser("defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
+        'BN_500': CifParser("defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
+        'GaSe_500': CifParser("defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
+        'P_500': CifParser("defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
+        'InSe_500': CifParser("defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
@@ -119,23 +119,23 @@ def load_data_vacancy(task_prefix, local_cutoff=None):
 
 def load_data_2dmd_high(task_prefix, local_cutoff=None):
     prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
-    get_prepared('D:/defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/MoS2_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/WSe2_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/BP_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/GaSe_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/hBN_spin_500', prepared, is_high=True)
+    get_prepared('defects/dataset/2d-materials-point-defects-all/high_density_defects/InSe_spin_500', prepared, is_high=True)
     df = pd.DataFrame(prepared)
     df.set_index(["id"], inplace=True)
     unit_cells = {
-        'MoS2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2': CifParser("D:/defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
-        'MoS2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
-        'WSe2_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
-        'BN_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
-        'GaSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
-        'P_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
-        'InSe_500': CifParser("D:/defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
+        'MoS2': CifParser("defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2': CifParser("defects/dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
+        'MoS2_500': CifParser("defects/dataset/2d-materials-point-defects-all/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2_500': CifParser("defects/dataset/2d-materials-point-defects-all/WSe2.cif").get_structures(primitive=False)[0],
+        'BN_500': CifParser("defects/dataset/2d-materials-point-defects-all/BN.cif").get_structures(primitive=False)[0],
+        'GaSe_500': CifParser("defects/dataset/2d-materials-point-defects-all/GaSe.cif").get_structures(primitive=False)[0],
+        'P_500': CifParser("defects/dataset/2d-materials-point-defects-all/P.cif").get_structures(primitive=False)[0],
+        'InSe_500': CifParser("defects/dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
@@ -151,11 +151,11 @@ def load_data_2dmd_high(task_prefix, local_cutoff=None):
 
 
 def load_data_native(task_prefix, local_cutoff=None):
-    df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
+    df_descriptors = pd.read_csv('defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
-        source_path = 'D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/' + j
+        source_path = 'defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/' + j
         struct = Structure.from_file(source_path)
         tag_structure_source(struct, source_path, j)
         defect = 'vacancy' if j.split('-')[2].split('_')[0] == 'V' else 'others'
@@ -172,12 +172,12 @@ def load_data_native(task_prefix, local_cutoff=None):
 
 
 def load_data_och(task_prefix, local_cutoff=None):
-    df_descriptors = pd.read_csv('D:/defects/dataset/rs2re_h/id_prop.csv', header=None)
+    df_descriptors = pd.read_csv('defects/dataset/rs2re_h/id_prop.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         if df_descriptors[1][i] > -1.5 and df_descriptors[1][i] < 0.5:
-            source_path = 'D:/defects/dataset/rs2re_h/' + j + '.cif'
+            source_path = 'defects/dataset/rs2re_h/' + j + '.cif'
             struct = Structure.from_file(source_path)
             tag_structure_source(struct, source_path, j)
             prep.append([struct, 'H'])
@@ -191,14 +191,14 @@ def load_data_och(task_prefix, local_cutoff=None):
 
 
 def load_data_imp2d(task_prefix, local_cutoff=None):
-    df_descriptors = pd.read_csv('D:/defects/dataset/imp2d/imp2d/id_prop.csv', header=None)
+    df_descriptors = pd.read_csv('defects/dataset/imp2d/imp2d/id_prop.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         base, impurity, _ = j.split('_')
         if impurity not in base:
             if df_descriptors[1][i] > -10 and df_descriptors[1][i] < 10:
-                source_path = 'D:/defects/dataset/imp2d/imp2d/' + j + '.cif'
+                source_path = 'defects/dataset/imp2d/imp2d/' + j + '.cif'
                 struct = Structure.from_file(source_path)
                 tag_structure_source(struct, source_path, j)
                 prep.append([struct, impurity])
@@ -212,13 +212,13 @@ def load_data_imp2d(task_prefix, local_cutoff=None):
 
 
 def load_data_semi(task_prefix, local_cutoff=None):
-    df_descriptors = pd.read_csv('D:/defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
+    df_descriptors = pd.read_csv('defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         base = j.split('-')[1]
         try:
-            source_path = 'D:/defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/' + j
+            source_path = 'defects/dataset/Dataset_1/Dataset_1/Neutral/Neutral/' + j
             struct = Structure.from_file(source_path)
             tag_structure_source(struct, source_path, j)
             base_structure = Structure.from_file('Dataset_1/host_configurations/' + base + '.vasp')

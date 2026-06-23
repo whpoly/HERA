@@ -59,7 +59,7 @@ MODE_TO_DATASET_KEY = {
 }
 
 DEFAULT_NATIVE_CSV = (
-    r"D:/defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/"
+    r"defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/"
     r"id_prop_A_rich.csv"
 )
 
