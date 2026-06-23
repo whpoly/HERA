@@ -16,6 +16,7 @@ from ..data.converters import (
 )
 from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
 from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, DefiNet
+from ..models.alignn import ALIGNN, HeteroALIGNN
 from ..utils.scaler import Scaler
 from .losses import MAELoss
 
@@ -43,6 +44,17 @@ MEGNET_ATTENTION_TASKS = (
     'megnet_attention_local',
     'megnet_attention_was',
     'megnet_attention_local_was',
+)
+ALIGNN_HOMOGENEOUS_TASKS = (
+    'alignn_full',
+    'alignn_local',
+    'alignn_was',
+)
+ALIGNN_HETERO_TASKS = (
+    'alignn_hetero',
+    'alignn_hetero_was',
+    'alignn_hetero_local',
+    'alignn_hetero_local_was',
 )
 DEFINET_ATTENTION_TASKS = (
     'definet_attention',
@@ -95,6 +107,23 @@ def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict,
             bond_batch_dict[edge_type] = torch.empty((0,), dtype=torch.long, device=ref_x.device)
 
     return x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict
+
+
+def _complete_hetero_edge_vecs(edge_vec_dict, edge_attr_dict):
+    edge_vec_dict = {} if edge_vec_dict is None else dict(edge_vec_dict)
+    for edge_type in HETERO_EDGE_TYPES:
+        if edge_type not in edge_vec_dict:
+            edge_vec_dict[edge_type] = edge_attr_dict[edge_type].new_zeros(
+                (edge_attr_dict[edge_type].size(0), 3)
+            )
+    return edge_vec_dict
+
+
+def _collect_hetero_attr(batch, attr):
+    try:
+        return batch.collect(attr)
+    except (AttributeError, KeyError):
+        return getattr(batch, f'{attr}_dict', None)
 
 
 class MEGNetTrainer:
@@ -166,6 +195,35 @@ class MEGNetTrainer:
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
                 n_h=3,
+            ).to(self.device)
+        elif task in ALIGNN_HOMOGENEOUS_TASKS:
+            self.model = ALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                vertex_aggregation=self.config["model"]["vertex_aggregation"],
+            ).to(self.device)
+        elif task in ALIGNN_HETERO_TASKS:
+            self.model = HeteroALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                metadata=(['atom', 'defect'],
+                          [('atom', 'aa', 'atom'),
+                           ('defect', 'dd', 'defect'),
+                           ('atom', 'ad', 'defect'),
+                           ('defect', 'da', 'atom')]),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                vertex_aggregation=self.config["model"]["vertex_aggregation"],
             ).to(self.device)
         elif task in MEGNET_ATTENTION_TASKS:
             self.model = AttentionMEGNet(
@@ -297,6 +355,26 @@ class MEGNetTrainer:
             return self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch_dict,
+            ).squeeze()
+        elif task in ALIGNN_HETERO_TASKS:
+            x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch.edge_attr_dict,
+                batch.batch_dict,
+            )
+            edge_vec_dict = _complete_hetero_edge_vecs(
+                _collect_hetero_attr(batch, 'edge_vec'),
+                edge_attr_dict,
+            )
+            return self.model(
+                x_dict, edge_index_dict, edge_attr_dict,
+                batch_dict, edge_vec_dict=edge_vec_dict, state=batch.state,
+            ).squeeze()
+        elif task in ALIGNN_HOMOGENEOUS_TASKS:
+            return self.model(
+                batch.x, batch.edge_index, batch.edge_attr, batch.batch,
+                edge_vec=getattr(batch, 'edge_vec', None),
             ).squeeze()
         elif task in ('cgcnn_full', 'cgcnn_local', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()

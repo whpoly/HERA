@@ -236,12 +236,15 @@ class SimpleCrystalConverter:
         if self.task in ('full', 'was', 'local'):
             bond_index = [[], []]
             bond_attr = []
+            bond_vec = []
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
             all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
             for i, nbrs in enumerate(all_nbrs):
                 bond_index[0] += [i] * len(nbrs)
                 bond_index[1].extend(list(map(lambda x: x[2], nbrs)))
                 bond_attr.extend(list(map(lambda x: x[1], nbrs)))
+                center = np.asarray(d[i].coords)
+                bond_vec.extend([np.asarray(nbr.coords) - center for nbr in nbrs])
             edge_index = torch.LongTensor(np.array(bond_index))
 
             x = torch.Tensor(self.atom_converter.convert(d))
@@ -254,6 +257,7 @@ class SimpleCrystalConverter:
                 )
 
             edge_attr = torch.Tensor(self.bond_converter.convert(distances_preprocessed))
+            edge_vec = torch.Tensor(np.asarray(bond_vec, dtype=float).reshape(-1, 3))
 
             if self.ignore_state:
                 state = [[0.0, 0.0]]
@@ -275,6 +279,7 @@ class SimpleCrystalConverter:
                 y=y,
                 bond_batch=bond_batch,
                 weight=weight,
+                edge_vec=edge_vec,
                 structure=d,
                 **self._source_metadata_kwargs(d),
             )
@@ -290,12 +295,15 @@ class SimpleCrystalConverter:
 
             bond_index = [[], []]
             bond_attr = []
+            bond_vec = []
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
             all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
             for i, nbrs in enumerate(all_nbrs):
                 bond_index[0] += [i] * len(nbrs)
                 bond_index[1].extend(list(map(lambda x: x[2], nbrs)))
                 bond_attr.extend(list(map(lambda x: x[1], nbrs)))
+                center = np.asarray(d[i].coords)
+                bond_vec.extend([np.asarray(nbr.coords) - center for nbr in nbrs])
             edge_index = torch.LongTensor(np.array(bond_index))
 
             x = torch.Tensor(self.atom_converter.convert(d))
@@ -308,6 +316,7 @@ class SimpleCrystalConverter:
                 )
 
             edge_attr = torch.Tensor(self.bond_converter.convert(distances_preprocessed))
+            edge_vec = torch.Tensor(np.asarray(bond_vec, dtype=float).reshape(-1, 3))
 
             if self.ignore_state:
                 state = [[0.0, 0.0]]
@@ -331,6 +340,7 @@ class SimpleCrystalConverter:
                 weight=weight,
                 node_type=node_type,
                 defect_marker=defect_marker,
+                edge_vec=edge_vec,
                 structure=d,
                 **self._source_metadata_kwargs(d),
             )
@@ -338,6 +348,7 @@ class SimpleCrystalConverter:
             # hetero mode
             bond_index = [[], []]
             bond_attr = []
+            bond_vec = []
             indexs = torch.LongTensor([site.properties['type'] for site in d])
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
             all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
@@ -345,15 +356,19 @@ class SimpleCrystalConverter:
                 bond_index[0] += [i]
                 bond_index[1].extend([i])
                 bond_attr.extend([0.0])
+                bond_vec.append(np.zeros(3))
+                center = np.asarray(d[i].coords)
                 for j in nbrs:
                     bond_index[0] += [i]
                     bond_index[1].extend([j[2]])
                     bond_attr.extend([j[1]])
+                    bond_vec.append(np.asarray(j.coords) - center)
 
             edge_index = torch.LongTensor(np.array(bond_index))
             x = torch.Tensor(self.atom_converter.convert(d))
             distances_preprocessed = np.array(bond_attr)
             edge_attr = torch.Tensor(self.bond_converter.convert(distances_preprocessed))
+            edge_vec = torch.Tensor(np.asarray(bond_vec, dtype=float).reshape(-1, 3))
 
             if self.ignore_state:
                 state = [[0.0, 0.0]]
@@ -380,6 +395,7 @@ class SimpleCrystalConverter:
                 x=x,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
+                edge_vec=edge_vec,
                 y=y,
                 weight=weight,
                 structure=(d, indexs),

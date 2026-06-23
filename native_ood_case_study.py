@@ -63,6 +63,41 @@ DEFAULT_NATIVE_CSV = (
     r"id_prop_A_rich.csv"
 )
 
+MODEL_DISPLAY = {
+    "cgcnn": "CGCNN",
+    "megnet": "MEGNet",
+    "definet": "DeFiNet",
+}
+
+MODE_DISPLAY = {
+    "full": "Full",
+    "hetero": "Hetero",
+    "attention": "Attention",
+    "definet": "DeFiNet",
+}
+
+MODEL_COLORS = {
+    "Full CGCNN": "#5aa0c8",
+    "Hetero CGCNN": "#e8896d",
+    "Attention CGCNN": "#72c4a8",
+    "Full MEGNet": "#c8ad5a",
+    "Hetero MEGNet": "#9b8bd6",
+    "Attention MEGNet": "#d36aa0",
+    "DeFiNet": "#157f78",
+}
+
+FALLBACK_COLORS = [
+    "#5aa0c8",
+    "#e8896d",
+    "#72c4a8",
+    "#c8ad5a",
+    "#9b8bd6",
+    "#d36aa0",
+    "#157f78",
+    "#8a6f5a",
+    "#5f7f4f",
+]
+
 
 def parse_native_filename(filename):
     parts = Path(filename).name.split("-")
@@ -249,10 +284,71 @@ def tensor_subset(values, indices):
     return torch.stack([values[int(idx)] for idx in indices])
 
 
+def mode_display_name(mode):
+    mode = str(mode)
+    if "_r" in mode:
+        base, radius = mode.rsplit("_r", 1)
+        if base == "hetero" and radius == "0":
+            return MODE_DISPLAY["hetero"]
+        return f"{MODE_DISPLAY.get(base, base.replace('_', ' ').title())} r{radius}"
+    return MODE_DISPLAY.get(mode, mode.replace("_", " ").title())
+
+
+def model_mode_display(model, mode):
+    model_name = MODEL_DISPLAY.get(str(model), str(model).upper())
+    if str(model) == "definet":
+        if str(mode) in {"attention", "definet"}:
+            return model_name
+        return f"{model_name} {mode_display_name(mode)}"
+    return f"{mode_display_name(mode)} {model_name}"
+
+
+def color_for_label(label, fallback_idx):
+    return MODEL_COLORS.get(str(label), FALLBACK_COLORS[fallback_idx % len(FALLBACK_COLORS)])
+
+
+def ground_state_set(df):
+    return (
+        df.sort_values(["defect_group", "target", "file"], ascending=[True, True, True])
+        .groupby("defect_group", sort=False, as_index=False)
+        .head(1)
+        .copy()
+    )
+
+
+def ndcg_at_k(y_true, y_pred, k):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    n = len(y_true)
+    if n <= 1:
+        return 1.0
+
+    true_order = np.argsort(y_true, kind="mergesort")
+    pred_order = np.argsort(y_pred, kind="mergesort")
+    true_ranks = np.empty(n, dtype=float)
+    true_ranks[true_order] = np.arange(1, n + 1, dtype=float)
+    gains = n - true_ranks + 1.0
+    limit = min(max(int(k), 1), n)
+    discounts = 1.0 / np.log2(np.arange(2, limit + 2, dtype=float))
+    dcg = float(np.sum(gains[pred_order[:limit]] * discounts))
+    ideal = float(np.sum(gains[true_order[:limit]] * discounts))
+    if ideal == 0.0:
+        return 0.0
+    return float(np.clip(dcg / ideal, 0.0, 1.0))
+
+
 def evaluate_case_metrics(y_true, y_pred, metadata):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     abs_err = np.abs(y_pred - y_true)
+    eval_df = metadata.copy().reset_index(drop=True)
+    eval_df["target"] = y_true
+    eval_df["prediction"] = y_pred
+    gs_df = ground_state_set(eval_df)
+    ndcg_values = {
+        f"ndcg_at_{k}": ndcg_at_k(gs_df["target"], gs_df["prediction"], k)
+        for k in range(1, 6)
+    }
 
     gs_errors = []
     top1_hits = []
@@ -275,6 +371,8 @@ def evaluate_case_metrics(y_true, y_pred, metadata):
         "ground_state_mae": float(np.mean(gs_errors)),
         "top1_accuracy": float(np.mean(top1_hits)),
         "min_swaps_to_correct": float(np.mean(swaps)),
+        "ndcg": ndcg_values["ndcg_at_5"],
+        **ndcg_values,
     }
 
 
@@ -376,7 +474,7 @@ def train_one_seed(
 
 
 def model_mode_label(row):
-    return f"{row['model']} {row['mode']}"
+    return model_mode_display(row["model"], row["mode"])
 
 
 def is_hetero_row(row):
@@ -457,14 +555,14 @@ def write_summary(run_dir, selected_rows, seed_rows, selection_rows):
     lines = [
         "# Native OOD Case Study - Selected Seed",
         "",
-        "| Material | Seed | Model | Mode | N | Defects | MAE | RMSE | Ground-state MAE | Top-1 acc. | Min swaps | Selected hetero |",
-        "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Material | Seed | Model | Mode | N | Defects | MAE | RMSE | Ground-state MAE | NDCG | Top-1 acc. | Min swaps | Selected hetero |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in selected_rows:
         lines.append(
             "| {material} | {seed} | {model} | {mode} | {n_samples} | "
             "{n_defect_groups} | {mae:.3f} | {rmse:.3f} | "
-            "{ground_state_mae:.3f} | {top1_accuracy:.3f} | "
+            "{ground_state_mae:.3f} | {ndcg:.3f} | {top1_accuracy:.3f} | "
             "{min_swaps_to_correct:.3f} | {selected} |".format(
                 material=row["material"],
                 seed=row["seed"],
@@ -475,6 +573,7 @@ def write_summary(run_dir, selected_rows, seed_rows, selection_rows):
                 mae=row["mae"],
                 rmse=row["rmse"],
                 ground_state_mae=row["ground_state_mae"],
+                ndcg=row.get("ndcg", float("nan")),
                 top1_accuracy=row["top1_accuracy"],
                 min_swaps_to_correct=row["min_swaps_to_correct"],
                 selected="yes" if row.get("selected_hetero_case") else "",
@@ -493,7 +592,7 @@ def write_summary(run_dir, selected_rows, seed_rows, selection_rows):
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def plot_metric_bars(run_dir, material, selected_rows, selection, metric_name, ylabel):
+def plot_selected_seed_performance(run_dir, material, selected_rows, selection):
     rows = [row for row in selected_rows if row["material"] == material]
     if not rows:
         return None
@@ -503,37 +602,295 @@ def plot_metric_bars(run_dir, material, selected_rows, selection, metric_name, y
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = sorted(rows, key=lambda row: row[metric_name])
     labels = [model_mode_label(row) for row in rows]
-    values = [row[metric_name] for row in rows]
-    colors = [
-        "#0f766e" if row.get("selected_hetero_case") else "#64748b"
-        for row in rows
+    metric_specs = [
+        ("mae", "MAE (eV)", True),
+        ("ground_state_mae", "Ground-State MAE (eV)", True),
+        ("ndcg", "NDCG", False),
     ]
-    fig_width = max(7.0, 0.72 * len(rows))
-    fig, ax = plt.subplots(figsize=(fig_width, 4.8))
-    bars = ax.bar(labels, values, color=colors)
-    ax.set_ylabel(ylabel)
-    ax.set_title(
-        f"{material} selected seed {selection['seed']} "
-        f"({selection['hetero_model']} {selection['hetero_mode']})"
+    metric_specs = [spec for spec in metric_specs if spec[0] in rows[0]]
+    x = np.arange(len(labels))
+    fig_width = max(8.0, 0.78 * len(labels) + 2.0)
+    fig, axes = plt.subplots(
+        len(metric_specs),
+        1,
+        figsize=(fig_width, 2.7 * len(metric_specs)),
+        sharex=True,
     )
-    ax.tick_params(axis="x", rotation=35)
-    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.4)
-    for bar, value in zip(bars, values):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height(),
-            f"{value:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-        )
+    axes = np.atleast_1d(axes)
+
+    for ax, (metric, ylabel, _) in zip(axes, metric_specs):
+        values = np.asarray([row[metric] for row in rows], dtype=float)
+        colors = [color_for_label(label, idx) for idx, label in enumerate(labels)]
+        bars = ax.bar(x, values, color=colors, edgecolor="black", linewidth=0.45)
+        ax.set_ylabel(ylabel)
+        ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+        ax.set_axisbelow(True)
+        finite_values = values[np.isfinite(values)]
+        value_max = float(np.max(finite_values)) if len(finite_values) else 1.0
+        value_min = float(np.min(finite_values)) if len(finite_values) else 0.0
+        if metric == "ndcg":
+            ax.set_ylim(0, 1.14)
+            label_offset = 0.018
+        else:
+            span = max(value_max - min(0.0, value_min), 1e-9)
+            ax.set_ylim(0, value_max + max(0.14 * span, 0.18))
+            label_offset = max(0.012 * span, 0.035)
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + label_offset,
+                f"{value:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    axes[0].set_title(f"{material}: OOD model performance (seed {selection['seed']})")
+    axes[-1].set_xticks(x)
+    axes[-1].set_xticklabels(labels, rotation=35, ha="right")
     fig.tight_layout()
 
     figure_dir = Path(run_dir) / material / "figures"
     figure_dir.mkdir(parents=True, exist_ok=True)
-    output = figure_dir / f"selected_seed_{metric_name}.png"
+    output = figure_dir / "selected_seed_performance.png"
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+    return output
+
+
+def plot_selected_seed_ground_state(run_dir, material, selected_rows, selection):
+    rows = [row for row in selected_rows if row["material"] == material]
+    if not rows:
+        return None
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plot_table = None
+    model_labels = []
+    for row in rows:
+        pred_path = prediction_path(run_dir, material, row["model"], row["mode"], row["seed"])
+        pred_df = pd.read_csv(pred_path)
+        gs_df = ground_state_set(pred_df)
+        label = model_mode_label(row)
+        model_labels.append(label)
+        model_part = gs_df[["file", "defect_group", "prediction"]].rename(
+            columns={"prediction": f"{label} prediction"}
+        )
+        if plot_table is None:
+            label_cols = [
+                col
+                for col in ["defect_label", "configuration", "source_path"]
+                if col in gs_df.columns
+            ]
+            plot_table = gs_df[["file", "defect_group", "target"] + label_cols].copy()
+            if "defect_label" in plot_table.columns:
+                plot_table["plot_label"] = plot_table["defect_label"].astype(str)
+            else:
+                plot_table["plot_label"] = plot_table["defect_group"].astype(str)
+        plot_table = plot_table.merge(model_part, on=["file", "defect_group"], how="left")
+
+    if plot_table is None or plot_table.empty:
+        return None
+
+    plot_table = plot_table.sort_values(["target", "plot_label"], ascending=[True, True]).reset_index(drop=True)
+    figure_dir = Path(run_dir) / material / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    table_path = figure_dir / "selected_seed_ground_state.csv"
+    plot_table.to_csv(table_path, index=False)
+
+    labels = plot_table["plot_label"].astype(str).tolist()
+    x = np.arange(len(labels), dtype=float)
+    series_count = 1 + len(model_labels)
+    width = min(0.16, 0.82 / max(series_count, 1))
+    offsets = (np.arange(series_count) - (series_count - 1) / 2.0) * width
+
+    fig_width = max(8.8, 0.82 * len(labels) + 0.85 * len(model_labels))
+    fig, ax = plt.subplots(figsize=(fig_width, 5.4))
+    target = plot_table["target"].to_numpy(dtype=float)
+    ax.bar(
+        x + offsets[0],
+        target,
+        width,
+        label="DFT",
+        color="#8a8a8a",
+        edgecolor="black",
+        linewidth=0.45,
+    )
+
+    for idx, model_label in enumerate(model_labels, start=1):
+        values = plot_table[f"{model_label} prediction"].to_numpy(dtype=float)
+        mae = float(np.nanmean(np.abs(values - target)))
+        ax.bar(
+            x + offsets[idx],
+            values,
+            width,
+            label=f"{model_label} (MAE: {mae:.3f})",
+            color=color_for_label(model_label, idx - 1),
+            edgecolor="black",
+            linewidth=0.45,
+        )
+
+    ax.set_ylabel("Defect Formation Energy (eV)", fontsize=12)
+    ax.set_xlabel("Defect Type", fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=True, fontsize=9, loc="best")
+    ax.set_title(f"{material}: DFT ground-state OOD comparison (seed {selection['seed']})")
+    fig.tight_layout()
+
+    output = figure_dir / "selected_seed_ground_state.png"
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+    return output
+
+
+def build_energy_order_table(plot_table):
+    rows = []
+    dft_df = plot_table[["plot_label", "file", "defect_group", "target"]].copy()
+    dft_df = dft_df.sort_values(["target", "plot_label"], ascending=[True, True]).reset_index(drop=True)
+    for order, row in enumerate(dft_df.itertuples(index=False), start=1):
+        rows.append(
+            {
+                "model": "DFT",
+                "sort_position": order,
+                "plot_label": row.plot_label,
+                "file": row.file,
+                "defect_group": row.defect_group,
+                "energy": float(row.target),
+            }
+        )
+
+    model_labels = [
+        col.removesuffix(" prediction")
+        for col in plot_table.columns
+        if col.endswith(" prediction")
+    ]
+    for model_label in model_labels:
+        pred_col = f"{model_label} prediction"
+        model_df = dft_df[["plot_label", "file", "defect_group"]].merge(
+            plot_table[["file", "defect_group", pred_col]],
+            on=["file", "defect_group"],
+            how="left",
+        )
+        for order, (_, row) in enumerate(model_df.iterrows(), start=1):
+            rows.append(
+                {
+                    "model": model_label,
+                    "sort_position": order,
+                    "plot_label": row["plot_label"],
+                    "file": row["file"],
+                    "defect_group": row["defect_group"],
+                    "energy": float(row[pred_col]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_rank_comparison_table(plot_table):
+    out = plot_table[["plot_label", "file", "defect_group", "target"]].copy()
+    out = out.sort_values(["target", "plot_label"], ascending=[True, True]).reset_index(drop=True)
+    out["dft_rank"] = np.arange(1, len(out) + 1)
+    model_labels = [
+        col.removesuffix(" prediction")
+        for col in plot_table.columns
+        if col.endswith(" prediction")
+    ]
+    for model_label in model_labels:
+        pred_col = f"{model_label} prediction"
+        ranks = plot_table[["file", "defect_group", pred_col]].copy()
+        ranks[f"{model_label} rank"] = (
+            ranks[pred_col].rank(method="first", ascending=True).astype(int)
+        )
+        out = out.merge(
+            ranks[["file", "defect_group", f"{model_label} rank"]],
+            on=["file", "defect_group"],
+            how="left",
+        )
+    return out
+
+
+def plot_selected_seed_energy_order_comparison(run_dir, material, selected_rows, selection):
+    rows = [row for row in selected_rows if row["material"] == material]
+    if not rows:
+        return None
+
+    plot_table = None
+    for row in rows:
+        pred_path = prediction_path(run_dir, material, row["model"], row["mode"], row["seed"])
+        pred_df = pd.read_csv(pred_path)
+        gs_df = ground_state_set(pred_df)
+        label = model_mode_label(row)
+        model_part = gs_df[["file", "defect_group", "prediction"]].rename(
+            columns={"prediction": f"{label} prediction"}
+        )
+        if plot_table is None:
+            label_cols = [
+                col
+                for col in ["defect_label", "configuration", "source_path"]
+                if col in gs_df.columns
+            ]
+            plot_table = gs_df[["file", "defect_group", "target"] + label_cols].copy()
+            if "defect_label" in plot_table.columns:
+                plot_table["plot_label"] = plot_table["defect_label"].astype(str)
+            else:
+                plot_table["plot_label"] = plot_table["defect_group"].astype(str)
+        plot_table = plot_table.merge(model_part, on=["file", "defect_group"], how="left")
+
+    if plot_table is None or plot_table.empty:
+        return None
+
+    order_table = build_energy_order_table(plot_table)
+    figure_dir = Path(run_dir) / material / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    table_path = figure_dir / "selected_seed_energy_order_comparison.csv"
+    order_table.to_csv(table_path, index=False)
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    models = order_table["model"].drop_duplicates().astype(str).tolist()
+    n_items = int(order_table["sort_position"].max())
+    if not models or n_items == 0:
+        return None
+    group_gap = 1.2
+    x_ticks = []
+    x_labels = []
+    fig_width = max(9.5, 0.20 * n_items * len(models) + 1.25 * len(models))
+    fig, ax = plt.subplots(figsize=(fig_width, 5.4))
+    for model_idx, model in enumerate(models):
+        model_df = order_table[order_table["model"].eq(model)].sort_values("sort_position")
+        start = model_idx * (n_items + group_gap)
+        x = start + np.arange(len(model_df), dtype=float)
+        color = "#8a8a8a" if model == "DFT" else color_for_label(model, model_idx - 1)
+        ax.bar(
+            x,
+            model_df["energy"].to_numpy(dtype=float),
+            width=0.82,
+            color=color,
+            edgecolor="black",
+            linewidth=0.35,
+        )
+        x_ticks.append(start + (len(model_df) - 1) / 2.0)
+        x_labels.append(model)
+
+    ax.set_ylabel("Defect Formation Energy (eV)", fontsize=12)
+    ax.set_xlabel("Model (bars ordered by ascending DFT energy)", fontsize=12)
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_labels, rotation=35, ha="right")
+    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+    ax.set_axisbelow(True)
+    ax.set_title(f"{material}: DFT-ordered energy comparison (seed {selection['seed']})")
+    fig.tight_layout()
+
+    output = figure_dir / "selected_seed_energy_order_comparison.png"
     fig.savefig(output, dpi=220)
     plt.close(fig)
     return output
@@ -543,13 +900,12 @@ def write_plots(run_dir, selected_rows, selection_rows):
     outputs = []
     for selection in selection_rows:
         material = selection["material"]
-        for metric_name, ylabel in (
-            ("mae", "MAE (eV)"),
-            ("ground_state_mae", "Ground-state MAE (eV)"),
+        for plotter in (
+            plot_selected_seed_performance,
+            plot_selected_seed_ground_state,
+            plot_selected_seed_energy_order_comparison,
         ):
-            output = plot_metric_bars(
-                run_dir, material, selected_rows, selection, metric_name, ylabel
-            )
+            output = plotter(run_dir, material, selected_rows, selection)
             if output is not None:
                 outputs.append(output)
     return outputs

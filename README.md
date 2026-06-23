@@ -6,7 +6,7 @@ This repository contains research code for defect-property prediction on crystal
 
 | Item | Supported Options |
 | --- | --- |
-| Models | `megnet`, `cgcnn`, `definet`, `all` |
+| Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
 | Modes | `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
@@ -69,7 +69,7 @@ python -m HERA.main --help
 
 Common arguments:
 
-- `--model`: `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the MEGNet
+- `--model`: `megnet`, `cgcnn`, `definet`, `alignn`, or `all`; `all` runs the MEGNet
   and CGCNN suites, with DeFiNet included as CGCNN modes
 - `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
@@ -189,9 +189,48 @@ configurations. Outputs include `summary.csv`, `comparison.csv`, prediction
 CSVs, per-material POSCAR0 value tables under
 `<model>/<mode>/poscar0_values/`, and figures under `figures/`.
 
-## ALIGNN Reference
+### Native initial/relaxed leave-one-out final DFE
 
-For ALIGNN-related experiments, we use the official GitHub implementation of ALIGNN rather than maintaining a separate local implementation in this repository. If you need to run or reproduce ALIGNN experiments, please refer directly to the upstream project: https://github.com/usnistgov/alignn
+To leave out every eligible native-defect material in turn, train on the other
+materials, and predict the final relaxed defect formation energy from initial
+and relaxed structures:
+
+```bash
+python -m HERA.native_initial_relaxed_leave_one_out \
+  --seed 42 \
+  --model cgcnn \
+  --mode hetero \
+  --epochs 500 \
+  --device cuda:0 \
+  --log-dir HERA/logs \
+  --resume \
+  --atom-init HERA/atom_init.json
+```
+
+By default the script discovers all materials that have both POSCAR0 initial
+structures and non-POSCAR0 relaxed structures. For each held-out material it
+runs two comparisons: train on all usable rows from the other materials and
+test the held-out POSCAR0 initial structures, or train on all usable rows from
+the other materials plus the held-out POSCAR0 initial structures and test the
+held-out relaxed structures. The target is the lowest non-POSCAR0 DFE for each
+native defect group. Outputs include `summary.csv`, `summary.md`, per-sample
+prediction CSVs, material eligibility metadata, and figures under `figures/`
+following the style of `scripts/plot_native_zero_shot_performance.py`.
+
+## ALIGNN / HeteroALIGNN
+
+This repository includes a PyTorch Geometric ALIGNN implementation with a
+HERA-compatible heterogeneous variant. Use it with:
+
+```bash
+python -m HERA.main --model alignn --dataset native --mode hetero --r 0
+```
+
+Supported ALIGNN modes are `full`, `local`, `hetero`, `was`, `hetero_was`,
+`hetero_local`, and `hetero_local_was`. HeteroALIGNN uses the same
+`atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
+HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
+from periodic edge vectors during each forward pass.
 
 ## Smoke Check
 

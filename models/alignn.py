@@ -1,0 +1,410 @@
+"""ALIGNN model variants, including a heterogeneous HERA-compatible ALIGNN."""
+
+from collections import defaultdict
+import math
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import MessagePassing
+
+from .modules import ShiftedSoftplus
+
+
+def _edge_type_key(edge_type):
+    return "__".join(edge_type)
+
+
+def _empty_index(reference):
+    return torch.empty((2, 0), dtype=torch.long, device=reference.device)
+
+
+def _normalize_aggr(aggr):
+    if aggr == "sum":
+        return "add"
+    if aggr in {"add", "mean", "max", "min"}:
+        return aggr
+    return "add"
+
+
+def _pool_mean_or_zeros(features, batch, dim_size, width, reference):
+    if features is None or batch is None or features.size(0) == 0:
+        return reference.new_zeros((dim_size, width))
+
+    out = reference.new_zeros((dim_size, features.size(-1)))
+    counts = reference.new_zeros((dim_size, 1))
+    out.index_add_(0, batch.long(), features)
+    counts.index_add_(0, batch.long(), torch.ones((features.size(0), 1), device=features.device, dtype=features.dtype))
+    return out / counts.clamp_min(1.0)
+
+
+def _graph_count(batch_dict=None, batch=None, state=None):
+    if state is not None:
+        return int(state.size(0))
+    if batch is not None and batch.numel() > 0:
+        return int(batch.max().item()) + 1
+    if batch_dict is not None:
+        counts = [int(value.max().item()) + 1 for value in batch_dict.values() if value.numel() > 0]
+        if counts:
+            return max(counts)
+    return 1
+
+
+class AngleExpansion(nn.Module):
+    """Gaussian radial basis expansion for bond angles in radians."""
+
+    def __init__(self, num_centers=40, sigma=None):
+        super().__init__()
+        centers = torch.linspace(0.0, math.pi, int(num_centers))
+        self.register_buffer("centers", centers)
+        if sigma is None:
+            sigma = math.pi / max(int(num_centers) - 1, 1)
+        self.sigma = float(sigma)
+
+    @property
+    def out_features(self):
+        return int(self.centers.numel())
+
+    def forward(self, angles):
+        return torch.exp(-((angles.view(-1, 1) - self.centers.view(1, -1)) / self.sigma) ** 2)
+
+
+def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion):
+    if len(pair_src) == 0:
+        return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
+
+    src = torch.tensor(pair_src, dtype=torch.long, device=edge_vec.device)
+    dst = torch.tensor(pair_dst, dtype=torch.long, device=edge_vec.device)
+    if edge_vec.numel() == 0:
+        return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
+
+    v_in = -edge_vec[src]
+    v_out = edge_vec[dst]
+    in_norm = v_in.norm(dim=-1)
+    out_norm = v_out.norm(dim=-1)
+    valid = (in_norm > 1e-8) & (out_norm > 1e-8)
+    if valid.sum().item() == 0:
+        return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
+
+    src = src[valid]
+    dst = dst[valid]
+    v_in = v_in[valid]
+    v_out = v_out[valid]
+    cos_angle = F.cosine_similarity(v_in, v_out, dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+    angles = torch.acos(cos_angle)
+    return torch.stack([src, dst], dim=0), angle_expansion(angles)
+
+
+def build_line_graph(edge_index, edge_vec, angle_expansion):
+    """Build directed bond-angle line graph edges for a homogeneous graph."""
+
+    if edge_index.size(1) == 0:
+        return _empty_index(edge_index), edge_index.new_empty((0, angle_expansion.out_features), dtype=torch.float)
+
+    sources = edge_index[0].detach().cpu().tolist()
+    targets = edge_index[1].detach().cpu().tolist()
+    outgoing = defaultdict(list)
+    for edge_id, src in enumerate(sources):
+        outgoing[int(src)].append(edge_id)
+
+    pair_src = []
+    pair_dst = []
+    for first_edge, shared_node in enumerate(targets):
+        for second_edge in outgoing.get(int(shared_node), []):
+            if first_edge == second_edge:
+                continue
+            pair_src.append(first_edge)
+            pair_dst.append(second_edge)
+
+    return _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion)
+
+
+def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_types, angle_expansion):
+    """Build a line graph over the concatenated heterogeneous bond nodes."""
+
+    if edge_vec_all.size(0) == 0:
+        return _empty_index(edge_vec_all), edge_vec_all.new_empty((0, angle_expansion.out_features))
+
+    outgoing = defaultdict(list)
+    edge_targets = []
+
+    for edge_type in edge_types:
+        edge_index = edge_index_dict[edge_type]
+        src_type, _, dst_type = edge_type
+        offset = edge_offsets[edge_type]
+        sources = edge_index[0].detach().cpu().tolist()
+        targets = edge_index[1].detach().cpu().tolist()
+
+        for local_edge, src in enumerate(sources):
+            outgoing[(src_type, int(src))].append(offset + local_edge)
+        for local_edge, dst in enumerate(targets):
+            edge_targets.append(((dst_type, int(dst)), offset + local_edge))
+
+    pair_src = []
+    pair_dst = []
+    for shared_node, first_edge in edge_targets:
+        for second_edge in outgoing.get(shared_node, []):
+            if first_edge == second_edge:
+                continue
+            pair_src.append(first_edge)
+            pair_dst.append(second_edge)
+
+    return _angle_features_from_pairs(pair_src, pair_dst, edge_vec_all, angle_expansion)
+
+
+class GatedGraphConv(MessagePassing):
+    """Residual gated message-passing block used for atom and line graphs."""
+
+    def __init__(self, channels, edge_dim, aggr="add"):
+        super().__init__(aggr=_normalize_aggr(aggr))
+        self.channels = channels
+        self.message_nn = nn.Sequential(
+            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.gate_nn = nn.Sequential(
+            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+            nn.Sigmoid(),
+        )
+        self.update_nn = nn.Sequential(
+            nn.Linear(2 * channels, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x, edge_index, edge_attr, size=None):
+        x_dst = x[1] if isinstance(x, tuple) else x
+        if x_dst.size(0) == 0 or edge_index.size(1) == 0:
+            return x_dst
+
+        out = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr, size=size)
+        out = self.update_nn(torch.cat([x_dst, out], dim=-1))
+        return self.norm(x_dst + out)
+
+    def message(self, x_i, x_j, edge_attr):
+        z = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        return self.gate_nn(z) * self.message_nn(z)
+
+
+class ALIGNNLayer(nn.Module):
+    """One ALIGNN block: line-graph bond update followed by atom update."""
+
+    def __init__(self, hidden_dim, angle_dim, vertex_aggregation="add"):
+        super().__init__()
+        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.atom_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+
+    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion):
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
+        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
+        x = self.atom_conv(x, edge_index, edge_attr)
+        return x, edge_attr
+
+
+class HeteroALIGNNLayer(nn.Module):
+    """Heterogeneous ALIGNN block for atom/defect node and edge types."""
+
+    def __init__(self, hidden_dim, angle_dim, metadata, vertex_aggregation="add"):
+        super().__init__()
+        self.node_types = tuple(metadata[0])
+        self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
+        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.atom_convs = nn.ModuleDict({
+            _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+            for edge_type in self.edge_types
+        })
+
+    def _update_edges(self, edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion):
+        edge_parts = []
+        edge_vec_parts = []
+        edge_offsets = {}
+        offset = 0
+
+        for edge_type in self.edge_types:
+            edge_attr = edge_attr_dict[edge_type]
+            edge_vec = edge_vec_dict.get(edge_type)
+            if edge_vec is None:
+                edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+            edge_offsets[edge_type] = offset
+            edge_parts.append(edge_attr)
+            edge_vec_parts.append(edge_vec.float())
+            offset += int(edge_attr.size(0))
+
+        if offset == 0:
+            return edge_attr_dict
+
+        edge_all = torch.cat(edge_parts, dim=0)
+        edge_vec_all = torch.cat(edge_vec_parts, dim=0)
+        line_edge_index, angle_attr = build_hetero_line_graph(
+            edge_index_dict, edge_vec_all, edge_offsets, self.edge_types, angle_expansion
+        )
+        edge_all = self.line_conv(edge_all, line_edge_index, angle_attr)
+
+        out = {}
+        for edge_type in self.edge_types:
+            start = edge_offsets[edge_type]
+            end = start + edge_attr_dict[edge_type].size(0)
+            out[edge_type] = edge_all[start:end]
+        return out
+
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion):
+        edge_attr_dict = self._update_edges(edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion)
+        node_outputs = {node_type: [] for node_type in self.node_types}
+
+        for edge_type in self.edge_types:
+            src_type, _, dst_type = edge_type
+            edge_index = edge_index_dict[edge_type]
+            if edge_index.size(1) == 0 or x_dict[src_type].size(0) == 0 or x_dict[dst_type].size(0) == 0:
+                continue
+
+            out = self.atom_convs[_edge_type_key(edge_type)](
+                (x_dict[src_type], x_dict[dst_type]),
+                edge_index,
+                edge_attr_dict[edge_type],
+                size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
+            )
+            node_outputs[dst_type].append(out)
+
+        out_dict = {}
+        for node_type in self.node_types:
+            outputs = node_outputs[node_type]
+            if not outputs:
+                out_dict[node_type] = x_dict[node_type]
+            elif len(outputs) == 1:
+                out_dict[node_type] = outputs[0]
+            else:
+                out_dict[node_type] = torch.stack(outputs, dim=0).mean(dim=0)
+        return out_dict, edge_attr_dict
+
+
+class ALIGNN(nn.Module):
+    """Homogeneous ALIGNN for full/local/WAS graph modes."""
+
+    def __init__(
+            self,
+            node_input_shape,
+            edge_input_shape,
+            hidden_dim=64,
+            n_blocks=3,
+            angle_embed_size=40,
+            vertex_aggregation="add",
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
+        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.layers = nn.ModuleList([
+            ALIGNNLayer(hidden_dim, self.angle_expansion.out_features, vertex_aggregation=vertex_aggregation)
+            for _ in range(n_blocks)
+        ])
+        self.readout = nn.Sequential(
+            nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, x, edge_index, edge_attr, batch, edge_vec=None):
+        x = self.node_embedding(x.float())
+        edge_attr = self.edge_embedding(edge_attr.float())
+        if edge_vec is None:
+            edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+        else:
+            edge_vec = edge_vec.float()
+
+        for layer in self.layers:
+            x, edge_attr = layer(x, edge_index, edge_attr, edge_vec, self.angle_expansion)
+
+        num_graphs = _graph_count(batch=batch)
+        node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
+        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
+        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
+        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+
+
+class HeteroALIGNN(nn.Module):
+    """Heterogeneous ALIGNN for HERA atom/defect graph modes."""
+
+    def __init__(
+            self,
+            node_input_shape,
+            edge_input_shape,
+            metadata,
+            hidden_dim=64,
+            n_blocks=3,
+            angle_embed_size=40,
+            vertex_aggregation="add",
+    ):
+        super().__init__()
+        self.node_types = tuple(metadata[0])
+        self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
+        self.hidden_dim = hidden_dim
+        self.node_embedding = nn.ModuleDict({
+            node_type: nn.Linear(node_input_shape, hidden_dim)
+            for node_type in self.node_types
+        })
+        self.edge_embedding = nn.ModuleDict({
+            _edge_type_key(edge_type): nn.Linear(edge_input_shape, hidden_dim)
+            for edge_type in self.edge_types
+        })
+        self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.layers = nn.ModuleList([
+            HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
+            for _ in range(n_blocks)
+        ])
+        self.readout = nn.Sequential(
+            nn.Linear(3 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def _edge_batches(self, edge_index_dict, batch_dict, reference):
+        batches = []
+        for edge_type in self.edge_types:
+            src_type, _, dst_type = edge_type
+            edge_index = edge_index_dict[edge_type]
+            if edge_index.size(1) == 0:
+                batches.append(reference.new_empty((0,), dtype=torch.long))
+            elif batch_dict[src_type].numel() > 0:
+                batches.append(batch_dict[src_type][edge_index[0]])
+            else:
+                batches.append(batch_dict[dst_type][edge_index[1]])
+        return batches
+
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict, edge_vec_dict=None, state=None):
+        edge_vec_dict = {} if edge_vec_dict is None else edge_vec_dict
+        x_dict = {
+            node_type: self.node_embedding[node_type](x_dict[node_type].float())
+            for node_type in self.node_types
+        }
+        edge_attr_dict = {
+            edge_type: self.edge_embedding[_edge_type_key(edge_type)](edge_attr_dict[edge_type].float())
+            for edge_type in self.edge_types
+        }
+
+        for layer in self.layers:
+            x_dict, edge_attr_dict = layer(
+                x_dict, edge_index_dict, edge_attr_dict, edge_vec_dict, self.angle_expansion
+            )
+
+        reference = next(value for value in x_dict.values() if value is not None)
+        num_graphs = _graph_count(batch_dict=batch_dict, state=state)
+        atom_pool = _pool_mean_or_zeros(
+            x_dict.get("atom"), batch_dict.get("atom"), num_graphs, self.hidden_dim, reference
+        )
+        defect_pool = _pool_mean_or_zeros(
+            x_dict.get("defect"), batch_dict.get("defect"), num_graphs, self.hidden_dim, reference
+        )
+
+        edge_parts = [edge_attr_dict[edge_type] for edge_type in self.edge_types]
+        edge_batch_parts = self._edge_batches(edge_index_dict, batch_dict, reference)
+        if edge_parts:
+            edge_features = torch.cat(edge_parts, dim=0)
+            edge_batch = torch.cat(edge_batch_parts, dim=0)
+        else:
+            edge_features = reference.new_empty((0, self.hidden_dim))
+            edge_batch = reference.new_empty((0,), dtype=torch.long)
+        edge_pool = _pool_mean_or_zeros(edge_features, edge_batch, num_graphs, self.hidden_dim, reference)
+
+        return self.readout(torch.cat([atom_pool, defect_pool, edge_pool], dim=-1))

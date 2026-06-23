@@ -207,8 +207,17 @@ _CONFIG_REGISTRY = {
 }
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
-VALID_MODELS = ['megnet', 'cgcnn', 'definet']
+VALID_MODELS = ['megnet', 'cgcnn', 'definet', 'alignn']
 DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
+ALIGNN_MODES = (
+    'full',
+    'hetero',
+    'local',
+    'was',
+    'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
+)
 CGCNN_DEFINET_MODES = (
     'definet',
     'definet_local',
@@ -221,7 +230,7 @@ CGCNN_DEFINET_TASKS = {
     'definet_was': 'definet_attention_was',
     'definet_local_was': 'definet_attention_local_was',
 }
-WAS_MODELS = ('cgcnn', 'megnet')
+WAS_MODELS = ('cgcnn', 'megnet', 'alignn')
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet')
 VALID_MODES = [
     'full',
@@ -280,12 +289,14 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError("The definet modes are run under --model cgcnn")
     if model == 'definet' and mode not in DEFINET_MODES:
         raise ValueError(f"The definet model only supports {DEFINET_MODES}")
+    if model == 'alignn' and mode not in ALIGNN_MODES:
+        raise ValueError(f"The alignn model only supports {ALIGNN_MODES}")
     if model not in WAS_MODELS and mode in (
             'was',
             'hetero_was',
             'hetero_local_was',
     ):
-        raise ValueError("The was, hetero_was, and hetero_local_was modes are only supported for cgcnn and megnet")
+        raise ValueError("The was, hetero_was, and hetero_local_was modes are only supported for cgcnn, megnet, and alignn")
     if model not in ATTENTION_ABLATION_MODELS and mode in (
             'attention_local',
             'attention_was',

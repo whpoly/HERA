@@ -25,6 +25,10 @@ HETERO_TASKS = {
     "hetero_cgcnn_was",
     "cgcnn_hetero_local",
     "cgcnn_hetero_local_was",
+    "alignn_hetero",
+    "alignn_hetero_was",
+    "alignn_hetero_local",
+    "alignn_hetero_local_was",
 }
 MEGNET_HETERO_TASKS = {
     "megnet_hetero",
@@ -37,6 +41,17 @@ CGCNN_HETERO_TASKS = {
     "hetero_cgcnn_was",
     "cgcnn_hetero_local",
     "cgcnn_hetero_local_was",
+}
+ALIGNN_HOMOGENEOUS_TASKS = {
+    "alignn_full",
+    "alignn_local",
+    "alignn_was",
+}
+ALIGNN_HETERO_TASKS = {
+    "alignn_hetero",
+    "alignn_hetero_was",
+    "alignn_hetero_local",
+    "alignn_hetero_local_was",
 }
 
 HETERO_NODE_TYPES = ("atom", "defect")
@@ -98,6 +113,7 @@ class PredictionWrapper(nn.Module):
             bond_batch=None,
             node_type=None,
             defect_marker=None,
+            edge_vec=None,
     ):
         if self.task in MEGNET_HETERO_TASKS:
             x, edge_index, edge_attr, batch, bond_batch = _complete_hetero_inputs(
@@ -109,8 +125,16 @@ class PredictionWrapper(nn.Module):
                 x, edge_index, edge_attr, batch, None
             )
             pred = self.model(x, edge_index, edge_attr, batch)
+        elif self.task in ALIGNN_HETERO_TASKS:
+            x, edge_index, edge_attr, batch, _ = _complete_hetero_inputs(
+                x, edge_index, edge_attr, batch, None
+            )
+            edge_vec = _complete_hetero_edge_vecs(edge_vec, edge_attr)
+            pred = self.model(x, edge_index, edge_attr, batch, edge_vec_dict=edge_vec, state=state)
         elif self.task in ("cgcnn_sparse", "cgcnn_full", "cgcnn_local", "cgcnn_was"):
             pred = self.model(x, edge_index, edge_attr, batch)
+        elif self.task in ALIGNN_HOMOGENEOUS_TASKS:
+            pred = self.model(x, edge_index, edge_attr, batch, edge_vec=edge_vec)
         elif self.task in CGCNN_ATTENTION_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, node_type=node_type)
         elif self.task in DEFINET_ATTENTION_TASKS:
@@ -274,6 +298,9 @@ def _model_args(batch, task):
         if task.startswith("megnet"):
             kwargs["state"] = batch.state
             kwargs["bond_batch"] = _select_dict_keys(batch.bond_batch_dict, edge_index_dict.keys())
+        if task.startswith("alignn"):
+            kwargs["state"] = batch.state
+            kwargs["edge_vec"] = _select_dict_keys(_collect_hetero_attr(batch, "edge_vec"), edge_index_dict.keys())
         return (batch.x_dict, edge_index_dict), kwargs
 
     kwargs = {
@@ -283,6 +310,8 @@ def _model_args(batch, task):
     if task.startswith("megnet"):
         kwargs["state"] = batch.state
         kwargs["bond_batch"] = batch.bond_batch
+    if task.startswith("alignn"):
+        kwargs["edge_vec"] = getattr(batch, "edge_vec", None)
     if (
             task.endswith("_attention")
             or task in CGCNN_ATTENTION_TASKS
@@ -314,6 +343,23 @@ def _nonempty_edge_dict(edge_index_dict):
 
 def _select_dict_keys(value_dict, keys):
     return {key: value_dict[key] for key in keys if key in value_dict}
+
+
+def _collect_hetero_attr(batch, attr):
+    try:
+        return batch.collect(attr)
+    except (AttributeError, KeyError):
+        return getattr(batch, f"{attr}_dict", {}) or {}
+
+
+def _complete_hetero_edge_vecs(edge_vec_dict, edge_attr_dict):
+    edge_vec_dict = {} if edge_vec_dict is None else dict(edge_vec_dict)
+    for edge_type in HETERO_EDGE_TYPES:
+        if edge_type not in edge_vec_dict:
+            edge_vec_dict[edge_type] = edge_attr_dict[edge_type].new_zeros(
+                (edge_attr_dict[edge_type].size(0), 3)
+            )
+    return edge_vec_dict
 
 
 def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict=None):

@@ -98,6 +98,23 @@ def set_train_loader_keep_scaler(trainer, train_data, train_targets):
     )
 
 
+def set_train_loader_fit_scaler(trainer, train_data, train_targets):
+    train_data = [set_attr(s, y, "y") for s, y in zip(train_data, train_targets)]
+    trainer.train_structures = [
+        trainer.converter.convert(s) for s in tqdm(train_data, desc="Converting base train data")
+    ]
+    trainer.scaler.fit(trainer.train_structures)
+    trainer.sampler = None
+    trainer.trainloader = DataLoader(
+        trainer.train_structures,
+        batch_size=trainer.config["model"]["train_batch_size"],
+        shuffle=True,
+        num_workers=0,
+        generator=trainer._make_generator(2),
+    )
+    trainer.target_name = "formation_energy"
+
+
 def train_fixed_epochs(trainer, epochs, history_path, phase):
     rows = []
     for epoch in range(epochs):
@@ -129,13 +146,7 @@ def train_base_model(config, data, targets, train_idx, epochs, device, seed, out
     trainer = MEGNetTrainer(config, device, seed=seed)
     train_data = subset(data, train_idx)
     train_targets = tensor_subset(targets, train_idx)
-    trainer.prepare_data(
-        train_data,
-        train_targets,
-        train_data[:1],
-        train_targets[:1],
-        "formation_energy",
-    )
+    set_train_loader_fit_scaler(trainer, train_data, train_targets)
     train_fixed_epochs(trainer, epochs, history_path, phase="base")
     save_checkpoint(checkpoint_path, trainer)
     return trainer
@@ -227,6 +238,15 @@ def run_model_mode(args, model_name, run, datasets, targets, metadata, run_dir):
 
     if len(target_eval_idx) == 0:
         raise ValueError("No non-POSCAR0 target samples found for evaluation.")
+
+    split_counts = []
+    for material in args.materials:
+        material_mask = metadata["material"].eq(material).to_numpy()
+        split_counts.append(
+            f"{material}: POSCAR0={int(np.sum(material_mask & poscar0_mask))}, "
+            f"non-POSCAR0 test={int(np.sum(material_mask & ~poscar0_mask))}"
+        )
+    print("  Target split | " + "; ".join(split_counts))
 
     base_checkpoint = out_dir / "base_checkpoint.pth"
 

@@ -30,7 +30,7 @@ Usage examples:
   python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 
 Supported combinations:
-  Models  : megnet, cgcnn, definet, all
+  Models  : megnet, cgcnn, definet, alignn, all
   Modes   : full, hetero, local, attention, was, hetero_was,
             hetero_local, hetero_local_was,
             attention_local, attention_was, attention_local_was,
@@ -78,7 +78,16 @@ LOCAL_GRAPH_SWEEP_MODES = (
 )
 LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_was')
 DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
-WAS_ABLATION_MODELS = ('cgcnn', 'megnet')
+ALIGNN_MODES = (
+    'full',
+    'hetero',
+    'local',
+    'was',
+    'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
+)
+WAS_ABLATION_MODELS = ('cgcnn', 'megnet', 'alignn')
 WAS_ABLATION_MODES = (
     'was',
     'hetero_was',
@@ -119,6 +128,15 @@ MEGNET_DEFAULT_MODES = [
     'attention_local',
     'attention_was',
     'attention_local_was',
+]
+ALIGNN_DEFAULT_MODES = [
+    'full',
+    'hetero',
+    'local',
+    'was',
+    'hetero_was',
+    'hetero_local',
+    'hetero_local_was',
 ]
 
 
@@ -382,6 +400,8 @@ def latest_run_dir(log_dir):
 def default_modes_for_model(model_name):
     if model_name == 'definet':
         return list(DEFINET_MODES)
+    if model_name == 'alignn':
+        return list(ALIGNN_DEFAULT_MODES)
     if model_name == 'cgcnn':
         return list(CGCNN_DEFAULT_MODES)
     if model_name == 'megnet':
@@ -394,8 +414,10 @@ def validate_modes_for_model(model_name, modes, parser):
         parser.error('The definet modes are run under --model cgcnn')
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
         parser.error('The definet model only supports --mode attention attention_local attention_was attention_local_was')
+    if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
+        parser.error('The alignn model supports --mode full hetero local was hetero_was hetero_local hetero_local_was')
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
-        parser.error('The was, hetero_was, and hetero_local_was modes are only supported with --model cgcnn or --model megnet')
+        parser.error('The was, hetero_was, and hetero_local_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
         parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, or --model definet')
 
@@ -456,12 +478,12 @@ def write_dataset_summary(model_name, dataset_name, modes, results, epochs, seed
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Train crystal GNN models (CGCNN / MEGNet) with different graph modes.',
+        description='Train crystal GNN models (CGCNN / MEGNet / ALIGNN) with different graph modes.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument('--model', required=True, choices=VALID_MODELS + ['all'],
-                        help='Model architecture: megnet, cgcnn, definet, or all')
+                        help='Model architecture: megnet, cgcnn, definet, alignn, or all')
     parser.add_argument('--dataset', required=True, choices=VALID_DATASETS + ['all'],
                         help='Dataset to use, or all for every dataset')
     parser.add_argument('--mode', nargs='+', default=None, choices=VALID_MODES + ['all'],
