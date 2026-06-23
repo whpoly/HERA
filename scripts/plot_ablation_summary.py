@@ -31,6 +31,7 @@ import pandas as pd
 
 MODE_DISPLAY = {
     "full": "Full",
+    "full_x": "Full + X",
     "was": "WAS",
     "hetero": "Hetero",
     "hetero_was": "Hetero + WAS",
@@ -55,13 +56,14 @@ MODEL_DISPLAY = {
 
 PAIR_ORDER = {
     "full": 0,
-    "hetero": 1,
-    "hetero_local": 2,
-    "local": 3,
-    "attention": 4,
-    "attention_local": 5,
-    "definet": 6,
-    "definet_local": 7,
+    "full_x": 1,
+    "hetero": 2,
+    "hetero_local": 3,
+    "local": 4,
+    "attention": 5,
+    "attention_local": 6,
+    "definet": 7,
+    "definet_local": 8,
 }
 
 COLORS = {

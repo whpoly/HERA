@@ -26,7 +26,14 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from .config.defaults import CGCNN_DEFINET_MODES, DEFINET_MODES, VALID_MODES, get_config
-from .data.datasets import init_elem_embedding, tag_structure_source
+from .data.datasets import (
+    DATASET_REPRESENTATIONS,
+    DEFAULT_DATASET_REPRESENTATIONS,
+    dataset_index_for_mode,
+    init_elem_embedding,
+    representation_for_mode,
+    tag_structure_source,
+)
 from .data.structure_utils import convert_to_sparse_native
 from .main import (
     DEFAULT_SEEDS,
@@ -39,27 +46,8 @@ from .main import (
 )
 from .training.trainer import MEGNetTrainer
 
-
-MODE_TO_DATASET_KEY = {
-    "full": 0,
-    "hetero": 1,
-    "local": 1,
-    "attention": 2,
-    "was": 0,
-    "hetero_was": 1,
-    "hetero_local": 1,
-    "hetero_local_was": 1,
-    "attention_local": 2,
-    "attention_was": 2,
-    "attention_local_was": 2,
-    "definet": 2,
-    "definet_local": 2,
-    "definet_was": 2,
-    "definet_local_was": 2,
-}
-
 DEFAULT_NATIVE_CSV = (
-    r"defects/dataset/Dataset_1/Dataset_1/A_rich/Neutral/"
+    r"dataset/Dataset_1/Dataset_1/A_rich/Neutral/"
     r"id_prop_A_rich.csv"
 )
 
@@ -71,6 +59,7 @@ MODEL_DISPLAY = {
 
 MODE_DISPLAY = {
     "full": "Full",
+    "full_x": "Full + X",
     "hetero": "Hetero",
     "attention": "Attention",
     "definet": "DeFiNet",
@@ -78,9 +67,11 @@ MODE_DISPLAY = {
 
 MODEL_COLORS = {
     "Full CGCNN": "#5aa0c8",
+    "Full + X CGCNN": "#4f7fb8",
     "Hetero CGCNN": "#e8896d",
     "Attention CGCNN": "#72c4a8",
     "Full MEGNet": "#c8ad5a",
+    "Full + X MEGNet": "#a89642",
     "Hetero MEGNet": "#9b8bd6",
     "Attention MEGNet": "#d36aa0",
     "DeFiNet": "#157f78",
@@ -117,9 +108,34 @@ def native_defect_marker(filename):
     return "vacancy" if defect_label.split("_")[0] == "V" else "others"
 
 
-def load_native_with_metadata(model_name, csv_path=DEFAULT_NATIVE_CSV, local_cutoff=None):
+def _normalize_representations(representations):
+    if representations is None:
+        return set(DEFAULT_DATASET_REPRESENTATIONS)
+    if isinstance(representations, str):
+        representations = [representations]
+    normalized = set(representations)
+    unknown = normalized - set(DATASET_REPRESENTATIONS)
+    if unknown:
+        raise ValueError(
+            f"Unknown representation(s) {sorted(unknown)}. "
+            f"Choose from {list(DATASET_REPRESENTATIONS)}"
+        )
+    if not normalized:
+        raise ValueError("At least one dataset representation must be requested")
+    if {'full', 'full_x'} <= normalized:
+        raise ValueError("'full' and 'full_x' must be loaded separately")
+    return normalized
+
+
+def load_native_with_metadata(
+        model_name,
+        csv_path=DEFAULT_NATIVE_CSV,
+        local_cutoff=None,
+        representations=None,
+):
     csv_path = Path(csv_path)
     data_dir = csv_path.parent
+    representations = _normalize_representations(representations)
     df = pd.read_csv(csv_path, header=None, names=["file", "target"])
 
     prep = []
@@ -136,54 +152,67 @@ def load_native_with_metadata(model_name, csv_path=DEFAULT_NATIVE_CSV, local_cut
         metadata.append(meta)
 
     skip_was = True
-    dataset_full = [
-        convert_to_sparse_native(
-            structure, defect, 1, f"{model_name}_full", None, skip_was, False
+    dataset_full = None
+    if "full" in representations or "full_x" in representations:
+        full_task = (
+            f"{model_name}_full_x"
+            if "full_x" in representations
+            else f"{model_name}_full"
         )
-        for structure, defect in tqdm(prep, desc="Converting full graphs")
-    ]
-    dataset_hetero = [
-        convert_to_sparse_native(
-            structure,
-            defect,
-            1,
-            f"{model_name}_hetero",
-            None,
-            skip_was,
-            False,
-            local_cutoff=local_cutoff,
-        )
-        for structure, defect in tqdm(prep, desc="Converting hetero graphs")
-    ]
-    dataset_attn = [
-        convert_to_sparse_native(
-            structure,
-            defect,
-            1,
-            f"{model_name}_attention",
-            None,
-            skip_was,
-            False,
-            local_cutoff=local_cutoff,
-        )
-        for structure, defect in tqdm(prep, desc="Converting attention graphs")
-    ]
+        dataset_full = [
+            convert_to_sparse_native(
+                structure, defect, 1, full_task, None, skip_was, False
+            )
+            for structure, defect in tqdm(prep, desc="Converting full graphs")
+        ]
+    dataset_hetero = None
+    if "hetero" in representations:
+        dataset_hetero = [
+            convert_to_sparse_native(
+                structure,
+                defect,
+                1,
+                f"{model_name}_hetero",
+                None,
+                skip_was,
+                False,
+                local_cutoff=local_cutoff,
+            )
+            for structure, defect in tqdm(prep, desc="Converting hetero graphs")
+        ]
+    dataset_attn = None
+    if "attention" in representations:
+        dataset_attn = [
+            convert_to_sparse_native(
+                structure,
+                defect,
+                1,
+                f"{model_name}_attention",
+                None,
+                skip_was,
+                False,
+                local_cutoff=local_cutoff,
+            )
+            for structure, defect in tqdm(prep, desc="Converting attention graphs")
+        ]
 
-    rows = [
-        (full, hetero, attn, target, meta)
-        for full, hetero, attn, target, meta in zip(
-            dataset_full, dataset_hetero, dataset_attn, targets, metadata
-        )
-        if hetero is not None
+    datasets = [dataset_full, dataset_hetero, dataset_attn]
+    available = [dataset for dataset in datasets if dataset is not None]
+    valid_indices = [
+        idx
+        for idx in range(len(targets))
+        if all(dataset[idx] is not None for dataset in available)
     ]
-    if not rows:
+    if not valid_indices:
         raise ValueError("No valid native structures were loaded.")
 
-    dataset_full, dataset_hetero, dataset_attn, targets, metadata = zip(*rows)
     return (
-        [list(dataset_full), list(dataset_hetero), list(dataset_attn)],
-        torch.tensor(targets).float(),
-        pd.DataFrame(metadata),
+        [
+            None if dataset is None else [dataset[idx] for idx in valid_indices]
+            for dataset in datasets
+        ],
+        torch.tensor([targets[idx] for idx in valid_indices]).float(),
+        pd.DataFrame([metadata[idx] for idx in valid_indices]),
     )
 
 
@@ -944,13 +973,17 @@ def run_case_study(
         seed_rows = []
 
     for run in runs:
-        cache_key = (model_name, run["local_cutoff"])
+        representation = representation_for_mode(run["mode"])
+        cache_key = (model_name, run["local_cutoff"], representation)
         if cache_key not in dataset_cache:
             dataset_cache[cache_key] = load_native_with_metadata(
-                model_name, args.native_csv, local_cutoff=run["local_cutoff"]
+                model_name,
+                args.native_csv,
+                local_cutoff=run["local_cutoff"],
+                representations=[representation],
             )
         datasets, targets, metadata = dataset_cache[cache_key]
-        data = datasets[MODE_TO_DATASET_KEY[run["mode"]]]
+        data = datasets[dataset_index_for_mode(run["mode"])]
 
         for material in materials:
             print(
@@ -1020,7 +1053,7 @@ def main():
     parser.add_argument(
         "--mode",
         nargs="+",
-        default=["full", "hetero", "attention"],
+        default=["full", "full_x", "hetero", "attention"],
         choices=VALID_MODES,
     )
     parser.add_argument(

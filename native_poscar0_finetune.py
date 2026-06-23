@@ -26,10 +26,10 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from .config.defaults import VALID_MODES
+from .data.datasets import dataset_index_for_mode, representation_for_mode
 from .main import parse_radius_values, set_seed
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
-    MODE_TO_DATASET_KEY,
     evaluate_case_metrics,
     expand_mode_runs,
     load_native_with_metadata,
@@ -227,7 +227,7 @@ def save_poscar0_values(path, material, zero_df, finetuned_df):
 
 def run_model_mode(args, model_name, run, datasets, targets, metadata, run_dir):
     mode_label = run["label"]
-    data = datasets[MODE_TO_DATASET_KEY[run["mode"]]]
+    data = datasets[dataset_index_for_mode(run["mode"])]
     out_dir = run_dir / model_name / mode_label
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -500,7 +500,7 @@ def main():
     parser.add_argument(
         "--mode",
         nargs="+",
-        default=["full", "hetero", "attention"],
+        default=["full", "full_x", "hetero", "attention"],
         choices=VALID_MODES,
     )
     parser.add_argument(
@@ -553,12 +553,14 @@ def main():
         model_modes = modes_for_model(model_name, args.mode)
         runs = expand_mode_runs(model_name, model_modes, radii)
         for run in runs:
-            cache_key = (model_name, run["local_cutoff"])
+            representation = representation_for_mode(run["mode"])
+            cache_key = (model_name, run["local_cutoff"], representation)
             if cache_key not in dataset_cache:
                 dataset_cache[cache_key] = load_native_with_metadata(
                     model_name,
                     args.native_csv,
                     local_cutoff=run["local_cutoff"],
+                    representations=[representation],
                 )
             datasets, targets, metadata = dataset_cache[cache_key]
 

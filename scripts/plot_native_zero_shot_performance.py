@@ -35,6 +35,7 @@ MODEL_DISPLAY = {
 
 MODE_DISPLAY = {
     "full": "Full",
+    "full_x": "Full + X",
     "hetero": "Hetero",
     "attention": "Attention",
     "definet": "DeFiNet",
@@ -42,9 +43,11 @@ MODE_DISPLAY = {
 
 MODEL_COLORS = {
     "Full CGCNN": "#5aa0c8",
+    "Full + X CGCNN": "#4f7fb8",
     "Hetero CGCNN": "#e8896d",
     "Attention CGCNN": "#72c4a8",
     "Full MEGNet": "#c8ad5a",
+    "Full + X MEGNet": "#a89642",
     "Hetero MEGNet": "#9b8bd6",
     "Attention MEGNet": "#d36aa0",
     "DeFiNet": "#157f78",

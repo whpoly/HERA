@@ -31,7 +31,7 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, hetero, local, attention, was, hetero_was,
+  Modes   : full, full_x, hetero, local, attention, was, hetero_was,
             hetero_local, hetero_local_was,
             attention_local, attention_was, attention_local_was,
             definet, definet_local, definet_was, definet_local_was, all
@@ -53,7 +53,12 @@ import torch
 from sklearn.model_selection import KFold, train_test_split
 
 from .config.defaults import get_config, VALID_DATASETS, VALID_MODELS, VALID_MODES
-from .data.datasets import load_dataset, init_elem_embedding
+from .data.datasets import (
+    dataset_index_for_mode,
+    load_dataset,
+    init_elem_embedding,
+    representation_for_mode,
+)
 from .training.trainer import MEGNetTrainer
 from .training.history import TrainingLogger
 
@@ -80,6 +85,7 @@ LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_was')
 DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
 ALIGNN_MODES = (
     'full',
+    'full_x',
     'hetero',
     'local',
     'was',
@@ -101,6 +107,7 @@ ATTENTION_ABLATION_MODES = (
 )
 CGCNN_DEFAULT_MODES = [
     'full',
+    'full_x',
     'hetero',
     'local',
     'attention',
@@ -118,6 +125,7 @@ CGCNN_DEFAULT_MODES = [
 ]
 MEGNET_DEFAULT_MODES = [
     'full',
+    'full_x',
     'hetero',
     'local',
     'attention',
@@ -131,6 +139,7 @@ MEGNET_DEFAULT_MODES = [
 ]
 ALIGNN_DEFAULT_MODES = [
     'full',
+    'full_x',
     'hetero',
     'local',
     'was',
@@ -225,25 +234,11 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                       model_name, dataset_name, log_dir='logs', explain_options=None,
                       run_label=None, cv5=False, resume=False):
     """Train a single mode and return per-split test losses."""
-    mode_to_dataset_key = {
-        'full': 0,      # dataset_full
-        'hetero': 1,    # dataset_hetero
-        'local': 1,     # dataset_hetero supplies defect labels; converter crops to a homogeneous local graph
-        'attention': 2, # dataset_attn
-        'was': 0,       # dataset_full with current+reference atom embeddings
-        'hetero_was': 1, # dataset_hetero with current+reference atom embeddings
-        'hetero_local': 1, # dataset_hetero cropped by SimpleCrystalConverter, preserving defect-only hetero nodes
-        'hetero_local_was': 1, # hetero_local with current+reference atom embeddings
-        'attention_local': 2, # dataset_attn, cropped by SimpleCrystalConverter
-        'attention_was': 2, # dataset_attn with current+reference atom embeddings
-        'attention_local_was': 2, # dataset_attn with local crop and WAS features
-        'definet': 2,
-        'definet_local': 2,
-        'definet_was': 2,
-        'definet_local_was': 2,
-    }
     log_mode = run_label or mode
-    data = dataset[mode_to_dataset_key[mode]]
+    data = dataset[dataset_index_for_mode(mode)]
+    if data is None:
+        representation = representation_for_mode(mode)
+        raise ValueError(f'Dataset representation {representation!r} was not loaded for mode {mode}')
     data_targets = [(s, y) for s, y in zip(data, targets) if s is not None]
     if not data_targets:
         raise ValueError(f'No valid structures found for mode {mode}')
@@ -406,7 +401,7 @@ def default_modes_for_model(model_name):
         return list(CGCNN_DEFAULT_MODES)
     if model_name == 'megnet':
         return list(MEGNET_DEFAULT_MODES)
-    return ['full', 'hetero', 'local', 'attention']
+    return ['full', 'full_x', 'hetero', 'local', 'attention']
 
 
 def validate_modes_for_model(model_name, modes, parser):
@@ -415,7 +410,7 @@ def validate_modes_for_model(model_name, modes, parser):
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
         parser.error('The definet model only supports --mode attention attention_local attention_was attention_local_was')
     if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
-        parser.error('The alignn model supports --mode full hetero local was hetero_was hetero_local hetero_local_was')
+        parser.error('The alignn model supports --mode full full_x hetero local was hetero_was hetero_local hetero_local_was')
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
         parser.error('The was, hetero_was, and hetero_local_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
@@ -583,12 +578,17 @@ def main():
 
             dataset_cache = {}
 
-            def dataset_for_cutoff(local_cutoff=None):
-                if local_cutoff not in dataset_cache:
-                    dataset_cache[local_cutoff] = load_dataset(
-                        dataset_name, model_name, local_cutoff=local_cutoff
+            def dataset_for_run(local_cutoff, mode):
+                representation = representation_for_mode(mode)
+                cache_key = (local_cutoff, representation)
+                if cache_key not in dataset_cache:
+                    dataset_cache[cache_key] = load_dataset(
+                        dataset_name,
+                        model_name,
+                        local_cutoff=local_cutoff,
+                        representations=[representation],
                     )
-                return dataset_cache[local_cutoff]
+                return dataset_cache[cache_key]
 
             results = {}
             result_labels = []
@@ -670,7 +670,7 @@ def main():
                             )
                             continue
 
-                    run_dataset = dataset_for_cutoff(run['local_cutoff'])
+                    run_dataset = dataset_for_run(run['local_cutoff'], train_mode)
 
                     print(f'\n{"=" * 60}')
                     print(f'  Training {model_name.upper()} - {run_label.upper()} mode')

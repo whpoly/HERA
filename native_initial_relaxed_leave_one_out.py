@@ -30,11 +30,10 @@ import torch
 from sklearn.model_selection import train_test_split
 
 from .config.defaults import VALID_MODES
-from .data.datasets import init_elem_embedding
+from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
 from .main import parse_radius_values, set_seed
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
-    MODE_TO_DATASET_KEY,
     evaluate_case_metrics,
     expand_mode_runs,
     load_native_with_metadata,
@@ -943,12 +942,14 @@ def main():
         model_modes = modes_for_model(model_name, args.mode)
         runs = expand_mode_runs(model_name, model_modes, radii)
         for run in runs:
-            cache_key = (model_name, run["local_cutoff"])
+            representation = representation_for_mode(run["mode"])
+            cache_key = (model_name, run["local_cutoff"], representation)
             if cache_key not in dataset_cache:
                 datasets, raw_targets, raw_metadata = load_native_with_metadata(
                     model_name,
                     args.native_csv,
                     local_cutoff=run["local_cutoff"],
+                    representations=[representation],
                 )
                 metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
                 final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
@@ -963,7 +964,7 @@ def main():
             if not materials:
                 raise ValueError("No eligible materials found.")
 
-            data = datasets[MODE_TO_DATASET_KEY[run["mode"]]]
+            data = datasets[dataset_index_for_mode(run["mode"])]
 
             for material in materials:
                 print(f"\n=== {model_name} | {run['label']} | held out {material} ===")

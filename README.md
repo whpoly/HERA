@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
+| Modes | `full`, `full_x`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -72,12 +72,15 @@ Common arguments:
 - `--model`: `megnet`, `cgcnn`, `definet`, `alignn`, or `all`; `all` runs the MEGNet
   and CGCNN suites, with DeFiNet included as CGCNN modes
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `full`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
+- `--mode`: one or more of `full`, `full_x`, `hetero`, `local`, `attention`, `was`, `hetero_was`, `hetero_local`, `hetero_local_was`, `attention_local`, `attention_was`, `attention_local_was`, `definet`, `definet_local`, `definet_was`, `definet_local_was`, or `all`
 - `--r`: radius values for local graph cropping and hetero local/host cutoff
   sweeps; valid values are `0 3 4 5 6 7` or `all`. The graph edge cutoff
   remains the config value, currently `6`.
 - `local` uses the homogeneous model path on the union of all defect-centered
   neighborhoods within radius `r`. `r=0` keeps only the defect atoms.
+- `full_x` is the old full-graph-with-X comparison: vacancy-style datasets
+  such as `vacancy` and `2dmd_high` add DummySpecies/X vacancy sites to the
+  full graph; datasets without an X site use the same graph as `full`.
 - `hetero_local` and `hetero_local_was` use the same local graph cropping as
   `local`, then build a heterogeneous graph where only true defect atoms are
   `defect` nodes; nearby host atoms remain `atom` nodes.
@@ -112,8 +115,8 @@ Example training commands:
 python -m HERA.main --model megnet --dataset vacancy
 python -m HERA.main --model cgcnn --dataset 2dmd_high --mode local --r 0
 python -m HERA.main --model megnet --dataset semi --mode local hetero --r 0
-python -m HERA.main --model megnet --dataset vacancy --mode full was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was --r 0 3 4 5 6 7
-python -m HERA.main --model cgcnn --dataset vacancy --mode full was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was definet definet_local definet_was definet_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model megnet --dataset vacancy --mode full full_x was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was --r 0 3 4 5 6 7
+python -m HERA.main --model cgcnn --dataset vacancy --mode full full_x was local hetero hetero_was hetero_local hetero_local_was attention attention_local attention_was attention_local_was definet definet_local definet_was definet_local_was --r 0 3 4 5 6 7
 python -m HERA.main --model all --dataset all --mode all --r all
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
@@ -130,7 +133,7 @@ run directory:
 ```bash
 python -m HERA.native_ood_case_study \
   --model cgcnn megnet definet \
-  --mode full hetero attention \
+  --mode full full_x hetero attention \
   --material GaN \
   --epochs 500 \
   --seeds 123 11 1245 34 42 80 13232 8 99 101 \
@@ -153,7 +156,7 @@ case where `hetero_r0` performs best; results are not averaged across seeds.
 When multiple models are passed, results are kept separate under each
 material's `cgcnn/`, `megnet/`, and `definet/` subdirectories. DefiNet is a
 defect-aware attention/gating baseline, so it runs through its attention-style
-mode while CGCNN and MEGNet run `full`, `hetero_r0`, and `attention`.
+mode while CGCNN and MEGNet run `full`, `full_x`, `hetero_r0`, and `attention`.
 
 The DeFiNet-style defect-aware attention/gating experiment uses the same scalar-property training pipeline as the rest of this repository, not the full coordinate-relaxation target from the paper.
 
@@ -167,7 +170,7 @@ material's POSCAR0 configurations:
 ```bash
 python -m HERA.native_poscar0_finetune \
   --model cgcnn megnet definet \
-  --mode full hetero attention \
+  --mode full full_x hetero attention \
   --material GaN AlN SiC \
   --epochs 500 \
   --finetune-epochs 100 \
@@ -226,7 +229,7 @@ HERA-compatible heterogeneous variant. Use it with:
 python -m HERA.main --model alignn --dataset native --mode hetero --r 0
 ```
 
-Supported ALIGNN modes are `full`, `local`, `hetero`, `was`, `hetero_was`,
+Supported ALIGNN modes are `full`, `full_x`, `local`, `hetero`, `was`, `hetero_was`,
 `hetero_local`, and `hetero_local_was`. HeteroALIGNN uses the same
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph

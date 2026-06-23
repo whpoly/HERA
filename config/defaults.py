@@ -211,6 +211,7 @@ VALID_MODELS = ['megnet', 'cgcnn', 'definet', 'alignn']
 DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
 ALIGNN_MODES = (
     'full',
+    'full_x',
     'hetero',
     'local',
     'was',
@@ -234,6 +235,7 @@ WAS_MODELS = ('cgcnn', 'megnet', 'alignn')
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet')
 VALID_MODES = [
     'full',
+    'full_x',
     'hetero',
     'local',
     'attention',
@@ -270,7 +272,7 @@ def get_config(model: str, dataset: str, mode: str):
     Args:
         model: 'megnet', 'cgcnn', or 'definet'
         dataset: one of VALID_DATASETS
-        mode: one of 'full', 'hetero', 'local', 'attention', 'was',
+        mode: one of 'full', 'full_x', 'hetero', 'local', 'attention', 'was',
             'hetero_was', 'hetero_local', 'hetero_local_was',
             'attention_local', 'attention_was', 'attention_local_was',
             'definet', 'definet_local', 'definet_was',
@@ -319,6 +321,10 @@ def get_config(model: str, dataset: str, mode: str):
     ) = _CONFIG_REGISTRY[dataset](model)
     if mode in CGCNN_DEFINET_MODES:
         return _definet_attention_config(config_attention, mode)
+    if mode == 'full_x':
+        config = copy.deepcopy(config_full)
+        config['task'] = f'{model}_full_x'
+        return config
 
     config = {'full': config_full,
               'hetero': config_hetero, 'local': config_local,

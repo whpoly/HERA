@@ -120,6 +120,10 @@ def is_local_task(task):
     return task.endswith('_local')
 
 
+def is_full_x_task(task):
+    return task.endswith('_full_x') or task == 'full_x'
+
+
 def add_was(structure, unit_cell, supercell_size):
     structure = structure.copy()
     reference_supercell = unit_cell.copy()
@@ -266,7 +270,7 @@ def convert_to_sparse_vacancy(structure, unit_cell, supercell_size, task, state,
         structure = get_sparse_vacancy(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
-        add_graph_vacancies = True
+        add_graph_vacancies = is_full_x_task(task)
     if structure is None:
         return None
     if not skip_was:
@@ -336,7 +340,7 @@ def convert_to_sparse_2dmd_high(structure, unit_cell, supercell_size, task, stat
         structure = get_sparse_2dmd_high(structure, unit_cell, supercell_size)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
-        add_graph_vacancies = True
+        add_graph_vacancies = is_full_x_task(task)
     if not skip_was:
         structure = add_was(structure, unit_cell, supercell_size)
     if add_graph_vacancies:
@@ -463,7 +467,8 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
         structure = get_local_native(structure, unit_cell, supercell_size, state, cutoff)
     else:
         structure = get_full(structure, unit_cell, supercell_size, state)
-        structure = add_native_vacancy_dummy_site(structure, unit_cell)
+        if is_full_x_task(task):
+            structure = add_native_vacancy_dummy_site(structure, unit_cell)
     if not skip_was:
         structure = add_was(structure, unit_cell, supercell_size)
     if copy_unit_cell_properties:

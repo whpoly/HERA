@@ -233,7 +233,7 @@ class SimpleCrystalConverter:
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task in ('full', 'was', 'local'):
+        if self.task in ('full', 'full_x', 'was', 'local'):
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []

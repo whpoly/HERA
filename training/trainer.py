@@ -47,6 +47,7 @@ MEGNET_ATTENTION_TASKS = (
 )
 ALIGNN_HOMOGENEOUS_TASKS = (
     'alignn_full',
+    'alignn_full_x',
     'alignn_local',
     'alignn_was',
 )
@@ -154,7 +155,7 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task in ('megnet_full', 'megnet_local', 'megnet_was'):
+        if task in ('megnet_full', 'megnet_full_x', 'megnet_local', 'megnet_was'):
             self.model = MEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
@@ -376,7 +377,7 @@ class MEGNetTrainer:
                 batch.x, batch.edge_index, batch.edge_attr, batch.batch,
                 edge_vec=getattr(batch, 'edge_vec', None),
             ).squeeze()
-        elif task in ('cgcnn_full', 'cgcnn_local', 'cgcnn_was'):
+        elif task in ('cgcnn_full', 'cgcnn_full_x', 'cgcnn_local', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
         elif task in CGCNN_ATTENTION_TASKS:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()
