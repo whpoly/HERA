@@ -34,6 +34,7 @@ from .data.datasets import dataset_index_for_mode, init_elem_embedding, represen
 from .main import parse_radius_values, set_seed
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
+    color_for_label,
     evaluate_case_metrics,
     expand_mode_runs,
     load_native_with_metadata,
@@ -296,7 +297,7 @@ def run_training_group(
     checkpoint_path = group_dir / f"{train_kind}_checkpoint.pth"
     history_path = group_dir / f"{train_kind}_history.csv"
 
-    if args.resume and checkpoint_path.exists():
+    if checkpoint_path.exists():
         print(f"  Resume {train_kind} checkpoint: {checkpoint_path}")
         trainer, state = load_checkpoint(checkpoint_path, run["config"], args.device, args.seed)
         best_val = float("nan")
@@ -348,7 +349,8 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
 
     protocol = "other_train__initial_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    if args.resume and pred_path.exists():
+    if pred_path.exists():
+        print(f"  Resume prediction: {pred_path}")
         pred_df = pd.read_csv(pred_path)
         metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
     else:
@@ -395,7 +397,8 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
 
     protocol = "other_plus_initial_train__relaxed_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    if args.resume and pred_path.exists():
+    if pred_path.exists():
+        print(f"  Resume prediction: {pred_path}")
         pred_df = pd.read_csv(pred_path)
         metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
     else:
@@ -436,7 +439,21 @@ def write_settings(run_dir, args, materials):
     (run_dir / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
-def plot_protocol_mae(summary_df, run_dir):
+def filter_frame(df, material=None, model=None, mode=None):
+    if df.empty:
+        return df
+    out = df
+    if material is not None and "material" in out.columns:
+        out = out[out["material"].astype(str).eq(str(material))]
+    if model is not None and "model" in out.columns:
+        out = out[out["model"].astype(str).eq(str(model))]
+    if mode is not None and "mode" in out.columns:
+        out = out[out["mode"].astype(str).eq(str(mode))]
+    return out.copy()
+
+
+def plot_protocol_mae(summary_df, run_dir, material=None, model=None, mode=None):
+    summary_df = filter_frame(summary_df, material=material, model=model, mode=mode)
     if summary_df.empty:
         return []
 
@@ -484,7 +501,10 @@ def plot_protocol_mae(summary_df, run_dir):
         ax.set_axisbelow(True)
         ax.legend(frameon=False, fontsize=8)
         fig.tight_layout()
-        output = figure_dir / f"{model}_{mode}_protocol_mae.png"
+        if material is not None:
+            output = figure_dir / f"{material}_{model}_{mode}_protocol_mae.png"
+        else:
+            output = figure_dir / f"{model}_{mode}_protocol_mae.png"
         fig.savefig(output, dpi=220)
         plt.close(fig)
         outputs.append(output)
@@ -492,7 +512,85 @@ def plot_protocol_mae(summary_df, run_dir):
     return outputs
 
 
-def load_prediction_outputs(run_dir):
+def plot_material_model_performance(summary_df, run_dir, material=None):
+    summary_df = filter_frame(summary_df, material=material)
+    if summary_df.empty:
+        return []
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_dir = Path(run_dir) / "figures"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    metric_specs = [
+        ("mae", "MAE (eV)"),
+        ("ground_state_mae", "Ground-State MAE (eV)"),
+        ("ndcg", "NDCG"),
+    ]
+    metric_specs = [spec for spec in metric_specs if spec[0] in summary_df.columns]
+
+    for (material_name, protocol), group in summary_df.groupby(["material", "protocol"], sort=False):
+        group = group.copy()
+        labels = group["model_mode"].astype(str).tolist()
+        x = np.arange(len(labels), dtype=float)
+        fig_width = max(8.0, 0.82 * len(labels) + 2.2)
+        fig, axes = plt.subplots(
+            len(metric_specs),
+            1,
+            figsize=(fig_width, 2.7 * len(metric_specs)),
+            sharex=True,
+        )
+        axes = np.atleast_1d(axes)
+        colors = [color_for_label(label, idx) for idx, label in enumerate(labels)]
+
+        for ax, (metric, ylabel) in zip(axes, metric_specs):
+            values = group[metric].to_numpy(dtype=float)
+            bars = ax.bar(x, values, color=colors, edgecolor="black", linewidth=0.45)
+            ax.set_ylabel(ylabel)
+            ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+            ax.set_axisbelow(True)
+            finite_values = values[np.isfinite(values)]
+            value_max = float(np.max(finite_values)) if len(finite_values) else 1.0
+            value_min = float(np.min(finite_values)) if len(finite_values) else 0.0
+            if metric == "ndcg":
+                ax.set_ylim(0, 1.14)
+                label_offset = 0.018
+            else:
+                span = max(value_max - min(0.0, value_min), 1e-9)
+                ax.set_ylim(0, value_max + max(0.14 * span, 0.18))
+                label_offset = max(0.012 * span, 0.035)
+            for bar, value in zip(bars, values):
+                if not np.isfinite(value):
+                    continue
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + label_offset,
+                    f"{value:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+        axes[0].set_title(f"{material_name}: model performance ({protocol_label(protocol)})")
+        axes[-1].set_xticks(x)
+        axes[-1].set_xticklabels(labels, rotation=35, ha="right")
+        fig.tight_layout()
+
+        output = output_dir / f"{material_name}_{protocol_slug(protocol)}_model_performance.png"
+        fig.savefig(output, dpi=220)
+        plt.close(fig)
+        outputs.append(output)
+
+        table_path = output_dir / f"{material_name}_{protocol_slug(protocol)}_model_performance.csv"
+        group.to_csv(table_path, index=False)
+
+    return outputs
+
+
+def load_prediction_outputs(run_dir, material=None, model=None, mode=None):
     run_dir = Path(run_dir)
     prediction_paths = sorted(run_dir.glob("*/*/*/predictions/*/*.csv"))
     if not prediction_paths:
@@ -522,11 +620,11 @@ def load_prediction_outputs(run_dir):
         lambda row: model_mode_display(row["model"], row["mode"]),
         axis=1,
     )
-    return pred_df
+    return filter_frame(pred_df, material=material, model=model, mode=mode)
 
 
-def plot_prediction_scatter(run_dir):
-    pred_df = load_prediction_outputs(run_dir)
+def plot_prediction_scatter(run_dir, material=None, model=None, mode=None):
+    pred_df = load_prediction_outputs(run_dir, material=material, model=model, mode=mode)
     if pred_df.empty:
         return []
 
@@ -539,7 +637,7 @@ def plot_prediction_scatter(run_dir):
     figure_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
 
-    for (model, mode), group in pred_df.groupby(["model", "mode"], sort=False):
+    for (model, mode, material), group in pred_df.groupby(["model", "mode", "material"], sort=False):
         fig, ax = plt.subplots(figsize=(6.2, 5.6))
         for protocol in PROTOCOL_ORDER:
             p_df = group[group["protocol"].eq(protocol)]
@@ -562,13 +660,13 @@ def plot_prediction_scatter(run_dir):
             ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], color="#111827", linewidth=1)
             ax.set_xlim(lo - pad, hi + pad)
             ax.set_ylim(lo - pad, hi + pad)
-        ax.set_title(f"{model_mode_display(model, mode)}: predicted vs final DFE")
+        ax.set_title(f"{material}: predicted vs final DFE ({model_mode_display(model, mode)})")
         ax.set_xlabel("DFT final relaxed DFE (eV)")
         ax.set_ylabel("Predicted DFE (eV)")
         ax.grid(linestyle="--", linewidth=0.6, alpha=0.35)
         ax.legend(frameon=False, fontsize=8)
         fig.tight_layout()
-        output = figure_dir / f"{model}_{mode}_predicted_vs_final_dfe.png"
+        output = figure_dir / f"{material}_{model}_{mode}_predicted_vs_final_dfe.png"
         fig.savefig(output, dpi=220)
         plt.close(fig)
         outputs.append(output)
@@ -613,6 +711,10 @@ def select_final_state_rows(pred_df, material):
 
 def protocol_label(protocol):
     return PROTOCOLS.get(str(protocol), {}).get("display", str(protocol))
+
+
+def protocol_slug(protocol):
+    return str(protocol).replace("__", "_").replace(" ", "_").replace(":", "").lower()
 
 
 def build_final_state_table(pred_df, material):
@@ -822,8 +924,8 @@ def plot_energy_order_comparison(order_table, material, model, mode, output_dir)
     return output
 
 
-def plot_final_state_comparisons(run_dir):
-    pred_df = load_prediction_outputs(run_dir)
+def plot_final_state_comparisons(run_dir, material=None, model=None, mode=None):
+    pred_df = load_prediction_outputs(run_dir, material=material, model=model, mode=mode)
     if pred_df.empty:
         return []
 
@@ -844,6 +946,174 @@ def plot_final_state_comparisons(run_dir):
     return outputs
 
 
+def build_model_protocol_table(pred_df, material, protocol):
+    material_df = pred_df[
+        pred_df["material"].astype(str).eq(str(material))
+        & pred_df["protocol"].astype(str).eq(str(protocol))
+    ].copy()
+    if material_df.empty:
+        raise ValueError(f"No prediction rows found for {material} / {protocol_label(protocol)}.")
+
+    selected = select_final_state_rows(material_df, material)
+    rows = material_df[material_df["defect_group"].isin(selected["defect_group"])].copy()
+    if rows.empty:
+        raise ValueError(f"No selected prediction rows remain for {material} / {protocol_label(protocol)}.")
+
+    stats = (
+        rows.groupby(["defect_group", "model_mode"], sort=False)["prediction"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+    )
+    stats["std"] = stats["std"].fillna(0.0)
+
+    keep_cols = [
+        col
+        for col in [
+            "plot_label",
+            "defect_group",
+            "target",
+            "final_file",
+            "final_configuration",
+        ]
+        if col in selected.columns
+    ]
+    plot_table = selected[keep_cols].copy()
+    for label in stats["model_mode"].drop_duplicates():
+        label_stats = stats[stats["model_mode"].eq(label)][
+            ["defect_group", "mean", "std", "count"]
+        ]
+        plot_table = plot_table.merge(label_stats, on=["defect_group"], how="left")
+        plot_table = plot_table.rename(
+            columns={
+                "mean": f"{label} prediction",
+                "std": f"{label} std",
+                "count": f"{label} n",
+            }
+        )
+    return plot_table
+
+
+def build_model_energy_order_table(plot_table):
+    rows = []
+    dft_df = plot_table[["plot_label", "defect_group", "target"]].copy()
+    if "final_file" in plot_table.columns:
+        dft_df["file"] = plot_table["final_file"]
+    else:
+        dft_df["file"] = plot_table["defect_group"]
+    dft_df = dft_df.sort_values(["target", "plot_label"], ascending=[True, True]).reset_index(drop=True)
+    for order, row in enumerate(dft_df.itertuples(index=False), start=1):
+        rows.append(
+            {
+                "model": "DFT",
+                "sort_position": order,
+                "plot_label": row.plot_label,
+                "file": row.file,
+                "defect_group": row.defect_group,
+                "energy": float(row.target),
+            }
+        )
+
+    model_labels = [
+        col.removesuffix(" prediction")
+        for col in plot_table.columns
+        if col.endswith(" prediction")
+    ]
+    for label in model_labels:
+        pred_col = f"{label} prediction"
+        model_df = dft_df[["plot_label", "file", "defect_group"]].merge(
+            plot_table[["defect_group", pred_col]],
+            on=["defect_group"],
+            how="left",
+        )
+        for order, (_, row) in enumerate(model_df.iterrows(), start=1):
+            rows.append(
+                {
+                    "model": label,
+                    "sort_position": order,
+                    "plot_label": row["plot_label"],
+                    "file": row["file"],
+                    "defect_group": row["defect_group"],
+                    "energy": float(row[pred_col]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def plot_model_energy_order_comparison(order_table, material, protocol, output_dir):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    models = order_table["model"].drop_duplicates().astype(str).tolist()
+    n_items = int(order_table["sort_position"].max())
+    if not models or n_items == 0:
+        return None
+
+    group_gap = 1.2
+    x_ticks = []
+    x_labels = []
+    fig_width = max(9.5, 0.20 * n_items * len(models) + 1.25 * len(models))
+    fig, ax = plt.subplots(figsize=(fig_width, 5.4))
+
+    for model_idx, label in enumerate(models):
+        model_df = order_table[order_table["model"].eq(label)].sort_values("sort_position")
+        start = model_idx * (n_items + group_gap)
+        x = start + np.arange(len(model_df), dtype=float)
+        color = "#8a8a8a" if label == "DFT" else color_for_label(label, model_idx - 1)
+        ax.bar(
+            x,
+            model_df["energy"].to_numpy(dtype=float),
+            width=0.82,
+            color=color,
+            edgecolor="black",
+            linewidth=0.35,
+        )
+        x_ticks.append(start + (len(model_df) - 1) / 2.0)
+        x_labels.append(label)
+
+    ax.set_ylabel("Defect Formation Energy (eV)", fontsize=12)
+    ax.set_xlabel("Model (bars ordered by ascending DFT energy)", fontsize=12)
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_labels, rotation=35, ha="right")
+    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+    ax.set_axisbelow(True)
+    ax.set_title(f"{material}: DFT-ordered energy comparison ({protocol_label(protocol)})")
+    fig.tight_layout()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"{material}_{protocol_slug(protocol)}_model_energy_order_comparison.png"
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+    return output
+
+
+def plot_material_model_energy_order_comparisons(run_dir, material=None):
+    pred_df = load_prediction_outputs(run_dir, material=material)
+    if pred_df.empty:
+        return []
+
+    output_dir = Path(run_dir) / "figures"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for material_name in sorted(pred_df["material"].astype(str).unique()):
+        material_df = pred_df[pred_df["material"].astype(str).eq(material_name)]
+        for protocol in PROTOCOL_ORDER:
+            protocol_df = material_df[material_df["protocol"].eq(protocol)]
+            if protocol_df.empty:
+                continue
+            plot_table = build_model_protocol_table(protocol_df, material_name, protocol)
+            table_path = output_dir / f"{material_name}_{protocol_slug(protocol)}_model_energy_order_comparison.csv"
+            plot_table.to_csv(table_path, index=False)
+            order_table = build_model_energy_order_table(plot_table)
+            order_path = output_dir / f"{material_name}_{protocol_slug(protocol)}_model_energy_order_table.csv"
+            order_table.to_csv(order_path, index=False)
+            output = plot_model_energy_order_comparison(order_table, material_name, protocol, output_dir)
+            if output is not None:
+                outputs.append(output)
+    return outputs
+
+
 def write_summary_markdown(summary_df, skipped_df, run_dir):
     lines = [
         "# Native Initial/Relaxed Leave-One-Out",
@@ -851,21 +1121,24 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
         "| Material | Model | Mode | Protocol | N test | MAE | RMSE | GS MAE | Top-1 |",
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for row in summary_df.sort_values(["material", "model", "mode", "protocol"]).itertuples():
-        lines.append(
-            "| {material} | {model} | {mode} | {protocol} | {n_test} | "
-            "{mae:.3f} | {rmse:.3f} | {gs:.3f} | {top1:.3f} |".format(
-                material=row.material,
-                model=row.model,
-                mode=mode_display_name(row.mode),
-                protocol=row.protocol_display,
-                n_test=row.n_test,
-                mae=row.mae,
-                rmse=row.rmse,
-                gs=row.ground_state_mae,
-                top1=row.top1_accuracy,
+    if not summary_df.empty:
+        for row in summary_df.sort_values(["material", "model", "mode", "protocol"]).itertuples():
+            lines.append(
+                "| {material} | {model} | {mode} | {protocol} | {n_test} | "
+                "{mae:.3f} | {rmse:.3f} | {gs:.3f} | {top1:.3f} |".format(
+                    material=row.material,
+                    model=row.model,
+                    mode=mode_display_name(row.mode),
+                    protocol=row.protocol_display,
+                    n_test=row.n_test,
+                    mae=row.mae,
+                    rmse=row.rmse,
+                    gs=row.ground_state_mae,
+                    top1=row.top1_accuracy,
+                )
             )
-        )
+    else:
+        lines.append("|  |  |  |  | 0 |  |  |  |  |")
 
     if not skipped_df.empty:
         lines.extend(["", "## Skipped Materials", ""])
@@ -873,6 +1146,24 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
             lines.append(f"- {row.material}: {row.reason}")
 
     (Path(run_dir) / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_progress_outputs(run_dir, summary_rows, skipped_rows):
+    summary_df = pd.DataFrame(summary_rows)
+    skipped_df = pd.DataFrame(skipped_rows)
+    summary_df.to_csv(Path(run_dir) / "summary.csv", index=False)
+    if not skipped_df.empty:
+        skipped_df.to_csv(Path(run_dir) / "skipped_materials.csv", index=False)
+    write_summary_markdown(summary_df, skipped_df, run_dir)
+    return summary_df, skipped_df
+
+
+def write_material_outputs(run_dir, summary_rows, skipped_rows, material):
+    summary_df, _ = write_progress_outputs(run_dir, summary_rows, skipped_rows)
+    plot_paths = []
+    plot_paths.extend(plot_material_model_performance(summary_df, run_dir, material=material))
+    plot_paths.extend(plot_material_model_energy_order_comparisons(run_dir, material=material))
+    return plot_paths
 
 
 def main():
@@ -890,7 +1181,14 @@ def main():
     parser.add_argument("--native-csv", default=DEFAULT_NATIVE_CSV)
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument("--run-dir", default=None)
-    parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Compatibility flag. Existing checkpoints and prediction CSVs are "
+            "always reused when --run-dir points to a previous run."
+        ),
+    )
     parser.add_argument(
         "--model",
         dest="models",
@@ -936,80 +1234,90 @@ def main():
     dataset_cache = {}
     summary_rows = []
     skipped_rows = []
-    material_table_written = False
-
+    run_specs = []
     for model_name in args.models:
         model_modes = modes_for_model(model_name, args.mode)
         runs = expand_mode_runs(model_name, model_modes, radii)
         for run in runs:
+            run_specs.append((model_name, run))
+
+    if not run_specs:
+        raise ValueError("No model/mode combinations selected.")
+
+    def load_dataset_for_run(model_name, run):
+        representation = representation_for_mode(run["mode"])
+        cache_key = (model_name, run["local_cutoff"], representation)
+        if cache_key not in dataset_cache:
+            datasets, raw_targets, raw_metadata = load_native_with_metadata(
+                model_name,
+                args.native_csv,
+                local_cutoff=run["local_cutoff"],
+                representations=[representation],
+            )
+            metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
+            final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
+            dataset_cache[cache_key] = (datasets, final_targets, metadata)
+        return dataset_cache[cache_key]
+
+    first_model, first_run = run_specs[0]
+    _, _, first_metadata = load_dataset_for_run(first_model, first_run)
+    all_materials, material_table = eligible_materials(first_metadata)
+    material_table.to_csv(run_dir / "material_eligibility.csv", index=False)
+    materials = args.materials or all_materials
+    if not materials:
+        raise ValueError("No eligible materials found.")
+
+    for material in materials:
+        print(f"\n######## Held-out material: {material} ########")
+        material_started_rows = len(summary_rows)
+        for model_name, run in run_specs:
             representation = representation_for_mode(run["mode"])
-            cache_key = (model_name, run["local_cutoff"], representation)
-            if cache_key not in dataset_cache:
-                datasets, raw_targets, raw_metadata = load_native_with_metadata(
-                    model_name,
-                    args.native_csv,
-                    local_cutoff=run["local_cutoff"],
-                    representations=[representation],
-                )
-                metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
-                final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
-                dataset_cache[cache_key] = (datasets, final_targets, metadata)
-            datasets, targets, metadata = dataset_cache[cache_key]
-
-            all_materials, material_table = eligible_materials(metadata)
-            if not material_table_written:
-                material_table.to_csv(run_dir / "material_eligibility.csv", index=False)
-                material_table_written = True
-            materials = args.materials or all_materials
-            if not materials:
-                raise ValueError("No eligible materials found.")
-
+            datasets, targets, metadata = load_dataset_for_run(model_name, run)
             data = datasets[dataset_index_for_mode(run["mode"])]
 
-            for material in materials:
-                print(f"\n=== {model_name} | {run['label']} | held out {material} ===")
-                out_dir = run_dir / model_name / run["label"] / str(material)
-                rows, skipped = run_material(
-                    args,
-                    model_name,
-                    run,
-                    data,
-                    targets,
-                    metadata,
-                    material,
-                    out_dir,
+            print(f"\n=== {model_name} | {run['label']} | held out {material} ===")
+            out_dir = run_dir / model_name / run["label"] / str(material)
+            rows, skipped = run_material(
+                args,
+                model_name,
+                run,
+                data,
+                targets,
+                metadata,
+                material,
+                out_dir,
+            )
+            if skipped is not None:
+                print(f"  Skip {material}: {skipped['reason']}")
+                skipped_rows.append(
+                    {
+                        "model": model_name,
+                        "mode": run["label"],
+                        **skipped,
+                    }
                 )
-                if skipped is not None:
-                    print(f"  Skip {material}: {skipped['reason']}")
-                    skipped_rows.append(
-                        {
-                            "model": model_name,
-                            "mode": run["label"],
-                            **skipped,
-                        }
-                    )
-                summary_rows.extend(rows)
-                pd.DataFrame(summary_rows).to_csv(run_dir / "summary.csv", index=False)
-                if skipped_rows:
-                    pd.DataFrame(skipped_rows).to_csv(run_dir / "skipped_materials.csv", index=False)
+            summary_rows.extend(rows)
+            write_progress_outputs(run_dir, summary_rows, skipped_rows)
+
+        if len(summary_rows) > material_started_rows:
+            plot_paths = write_material_outputs(run_dir, summary_rows, skipped_rows, material)
+            if plot_paths:
+                print(f"\nUpdated {material} figures:")
+                for path in plot_paths:
+                    print(f"  {path}")
 
     summary_df = pd.DataFrame(summary_rows)
     skipped_df = pd.DataFrame(skipped_rows)
     summary_df.to_csv(run_dir / "summary.csv", index=False)
     if not skipped_df.empty:
         skipped_df.to_csv(run_dir / "skipped_materials.csv", index=False)
-    write_settings(run_dir, args, sorted(set(summary_df["material"])) if not summary_df.empty else [])
+    completed_materials = sorted(set(summary_df["material"])) if "material" in summary_df else []
+    write_settings(run_dir, args, completed_materials)
     write_summary_markdown(summary_df, skipped_df, run_dir)
-    plot_paths = plot_protocol_mae(summary_df, run_dir)
-    plot_paths.extend(plot_prediction_scatter(run_dir))
-    plot_paths.extend(plot_final_state_comparisons(run_dir))
 
     print(f"\nSummary written to {run_dir / 'summary.csv'}")
     print(f"Markdown summary written to {run_dir / 'summary.md'}")
-    if plot_paths:
-        print("Figures written:")
-        for path in plot_paths:
-            print(f"  {path}")
+    print(f"Figures are updated after each completed material under {run_dir / 'figures'}")
 
 
 if __name__ == "__main__":

@@ -199,15 +199,7 @@ materials, and predict the final relaxed defect formation energy from initial
 and relaxed structures:
 
 ```bash
-python -m HERA.native_initial_relaxed_leave_one_out \
-  --seed 42 \
-  --model cgcnn \
-  --mode hetero \
-  --epochs 500 \
-  --device cuda:0 \
-  --log-dir HERA/logs \
-  --resume \
-  --atom-init HERA/atom_init.json
+python -m HERA.native_initial_relaxed_leave_one_out --seed 42 --model cgcnn megnet definet --mode full hetero attention --epochs 500 --device cuda:0 --run-dir HERA/logs/native_initial_relaxed_seed42 --atom-init HERA/atom_init.json
 ```
 
 By default the script discovers all materials that have both POSCAR0 initial
@@ -218,7 +210,12 @@ the other materials plus the held-out POSCAR0 initial structures and test the
 held-out relaxed structures. The target is the lowest non-POSCAR0 DFE for each
 native defect group. Outputs include `summary.csv`, `summary.md`, per-sample
 prediction CSVs, material eligibility metadata, and figures under `figures/`
-following the style of `scripts/plot_native_zero_shot_performance.py`.
+following the style of `scripts/plot_native_zero_shot_performance.py`. The
+outer loop is material-first: after one held-out material finishes across all
+selected models/modes, the script writes that material's model-performance
+figure and DFT-ordered energy-comparison figure. When a fixed `--run-dir` is
+reused, existing checkpoints and prediction CSVs are loaded automatically, so
+`--resume` is no longer required.
 
 ## ALIGNN / HeteroALIGNN
 
