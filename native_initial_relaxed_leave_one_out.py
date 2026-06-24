@@ -333,27 +333,30 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
 
-    other_trainer, other_state, other_best_val, other_train_idx, other_val_idx = (
-        run_training_group(
-            args,
-            run,
-            data,
-            targets,
-            metadata,
-            material,
-            "other_train",
-            idx["train_other"],
-            out_dir,
-        )
-    )
-
     protocol = "other_train__initial_test"
     pred_path = prediction_path(out_dir, protocol, material)
     if pred_path.exists():
         print(f"  Resume prediction: {pred_path}")
         pred_df = pd.read_csv(pred_path)
         metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+        other_train_idx, other_val_idx = split_train_val(
+            idx["train_other"], args.val_fraction, args.seed
+        )
+        other_best_val = float("nan")
     else:
+        other_trainer, other_state, other_best_val, other_train_idx, other_val_idx = (
+            run_training_group(
+                args,
+                run,
+                data,
+                targets,
+                metadata,
+                material,
+                "other_train",
+                idx["train_other"],
+                out_dir,
+            )
+        )
         pred_df, metrics = predict_dataframe(
             other_trainer,
             data,
@@ -381,27 +384,30 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
         )
     )
 
-    augmented_trainer, augmented_state, augmented_best_val, augmented_train_idx, augmented_val_idx = (
-        run_training_group(
-            args,
-            run,
-            data,
-            targets,
-            metadata,
-            material,
-            "other_plus_initial_train",
-            idx["train_other_plus_initial"],
-            out_dir,
-        )
-    )
-
     protocol = "other_plus_initial_train__relaxed_test"
     pred_path = prediction_path(out_dir, protocol, material)
     if pred_path.exists():
         print(f"  Resume prediction: {pred_path}")
         pred_df = pd.read_csv(pred_path)
         metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+        augmented_train_idx, augmented_val_idx = split_train_val(
+            idx["train_other_plus_initial"], args.val_fraction, args.seed
+        )
+        augmented_best_val = float("nan")
     else:
+        augmented_trainer, augmented_state, augmented_best_val, augmented_train_idx, augmented_val_idx = (
+            run_training_group(
+                args,
+                run,
+                data,
+                targets,
+                metadata,
+                material,
+                "other_plus_initial_train",
+                idx["train_other_plus_initial"],
+                out_dir,
+            )
+        )
         pred_df, metrics = predict_dataframe(
             augmented_trainer,
             data,
@@ -439,6 +445,13 @@ def write_settings(run_dir, args, materials):
     (run_dir / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
+def material_figure_dir(run_dir, material=None):
+    run_dir = Path(run_dir)
+    if material is None:
+        return run_dir / "figures"
+    return run_dir / str(material) / "figures"
+
+
 def filter_frame(df, material=None, model=None, mode=None):
     if df.empty:
         return df
@@ -462,7 +475,7 @@ def plot_protocol_mae(summary_df, run_dir, material=None, model=None, mode=None)
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    figure_dir = Path(run_dir) / "figures"
+    figure_dir = material_figure_dir(run_dir, material)
     figure_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
 
@@ -522,8 +535,6 @@ def plot_material_model_performance(summary_df, run_dir, material=None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    output_dir = Path(run_dir) / "figures"
-    output_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
     metric_specs = [
         ("mae", "MAE (eV)"),
@@ -533,6 +544,8 @@ def plot_material_model_performance(summary_df, run_dir, material=None):
     metric_specs = [spec for spec in metric_specs if spec[0] in summary_df.columns]
 
     for (material_name, protocol), group in summary_df.groupby(["material", "protocol"], sort=False):
+        output_dir = material_figure_dir(run_dir, material_name)
+        output_dir.mkdir(parents=True, exist_ok=True)
         group = group.copy()
         labels = group["model_mode"].astype(str).tolist()
         x = np.arange(len(labels), dtype=float)
@@ -605,9 +618,9 @@ def load_prediction_outputs(run_dir, material=None, model=None, mode=None):
         if len(parts) < 6:
             continue
         df = df.copy()
-        df["model"] = parts[0]
-        df["mode"] = parts[1]
-        df["material"] = parts[2]
+        df["material"] = parts[0]
+        df["model"] = parts[1]
+        df["mode"] = parts[2]
         rows.append(df)
     if not rows:
         return pd.DataFrame()
@@ -633,11 +646,11 @@ def plot_prediction_scatter(run_dir, material=None, model=None, mode=None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    figure_dir = run_dir / "figures"
-    figure_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
 
     for (model, mode, material), group in pred_df.groupby(["model", "mode", "material"], sort=False):
+        figure_dir = material_figure_dir(run_dir, material)
+        figure_dir.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(6.2, 5.6))
         for protocol in PROTOCOL_ORDER:
             p_df = group[group["protocol"].eq(protocol)]
@@ -929,12 +942,12 @@ def plot_final_state_comparisons(run_dir, material=None, model=None, mode=None):
     if pred_df.empty:
         return []
 
-    output_dir = Path(run_dir) / "figures"
     outputs = []
     for (model, mode, material), group in pred_df.groupby(["model", "mode", "material"], sort=False):
+        output_dir = material_figure_dir(run_dir, material)
+        output_dir.mkdir(parents=True, exist_ok=True)
         plot_table = build_final_state_table(group, material)
         table_path = output_dir / f"{material}_{model}_{mode}_final_state.csv"
-        output_dir.mkdir(parents=True, exist_ok=True)
         plot_table.to_csv(table_path, index=False)
         outputs.append(plot_final_state(plot_table, material, model, mode, output_dir))
 
@@ -1093,10 +1106,10 @@ def plot_material_model_energy_order_comparisons(run_dir, material=None):
     if pred_df.empty:
         return []
 
-    output_dir = Path(run_dir) / "figures"
-    output_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
     for material_name in sorted(pred_df["material"].astype(str).unique()):
+        output_dir = material_figure_dir(run_dir, material_name)
+        output_dir.mkdir(parents=True, exist_ok=True)
         material_df = pred_df[pred_df["material"].astype(str).eq(material_name)]
         for protocol in PROTOCOL_ORDER:
             protocol_df = material_df[material_df["protocol"].eq(protocol)]
@@ -1276,7 +1289,7 @@ def main():
             data = datasets[dataset_index_for_mode(run["mode"])]
 
             print(f"\n=== {model_name} | {run['label']} | held out {material} ===")
-            out_dir = run_dir / model_name / run["label"] / str(material)
+            out_dir = run_dir / str(material) / model_name / run["label"]
             rows, skipped = run_material(
                 args,
                 model_name,
@@ -1317,7 +1330,7 @@ def main():
 
     print(f"\nSummary written to {run_dir / 'summary.csv'}")
     print(f"Markdown summary written to {run_dir / 'summary.md'}")
-    print(f"Figures are updated after each completed material under {run_dir / 'figures'}")
+    print(f"Figures are updated after each completed material under <run-dir>/<material>/figures")
 
 
 if __name__ == "__main__":
