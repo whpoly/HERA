@@ -94,16 +94,11 @@ class AtomFeaturesExtractor:
         from ..data.datasets import elem_embedding
 
         if self.atom_features == "Z":
-            if self.task == 'megnet':
-                return np.array(
-                    [0 if isinstance(i, DummySpecies) else i.Z for i in structure.species]
-                ).reshape(-1, 1)
-            else:
-                return np.array([
-                    [0] * 92 if isinstance(i.specie, DummySpecies)
-                    else elem_embedding[i.specie.Z]
-                    for i in structure.sites
-                ])
+            return np.array([
+                [0] * 92 if isinstance(i.specie, DummySpecies)
+                else elem_embedding[i.specie.Z]
+                for i in structure.sites
+            ])
         elif self.atom_features == 'werespecies':
             return np.array([
                 [
@@ -116,28 +111,20 @@ class AtomFeaturesExtractor:
             for site in structure.sites:
                 current_z = self._current_z(site)
                 previous_z = site.properties.get('was', current_z)
-                if self.task == 'megnet':
-                    features.append([float(current_z), float(previous_z)])
-                else:
-                    features.append(
-                        self._embedding_from_z(current_z, elem_embedding)
-                        + self._embedding_from_z(previous_z, elem_embedding)
-                    )
+                features.append(
+                    self._embedding_from_z(current_z, elem_embedding)
+                    + self._embedding_from_z(previous_z, elem_embedding)
+                )
             return np.array(features)
         else:
             raise NotImplementedError
 
     def get_shape(self):
         if self.atom_features == "Z":
-            if self.task == 'megnet':
-                return None
-            else:
-                return 92
+            return 92
         elif self.atom_features == 'werespecies':
             return 2
         elif self.atom_features == 'was_species':
-            if self.task == 'megnet':
-                return 2
             return 184
         else:
             return None

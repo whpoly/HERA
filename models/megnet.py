@@ -32,7 +32,7 @@ class MEGNet(nn.Module):
         self.embedded = node_input_shape is None
         if self.embedded:
             node_input_shape = node_embedding_size
-        self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
+            self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
         self.m1 = MegnetModule(
             edge_input_shape, node_input_shape, state_input_shape,
             inner_skip=True, embed_size=embedding_size,
@@ -177,7 +177,7 @@ class AttentionMEGNet(nn.Module):
         self.embedded = node_input_shape is None
         if self.embedded:
             node_input_shape = node_embedding_size
-        self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
+            self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
         self.n_heads = n_heads
 
         self.m1 = AtomTypeAttentionMegnetModule(

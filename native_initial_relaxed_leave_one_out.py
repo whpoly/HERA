@@ -93,6 +93,7 @@ def add_final_relaxed_targets(metadata, targets):
     out["final_target"] = np.nan
     out["final_file"] = None
     out["final_configuration"] = None
+    out["is_final_relaxed"] = False
 
     for defect_group, group in out.groupby("defect_group", sort=False):
         relaxed = group[group["is_relaxed"]].copy()
@@ -105,6 +106,7 @@ def add_final_relaxed_targets(metadata, targets):
         out.loc[idx, "final_target"] = float(final_row["raw_target"])
         out.loc[idx, "final_file"] = final_row["file"]
         out.loc[idx, "final_configuration"] = final_row["configuration"]
+        out.loc[final_row.name, "is_final_relaxed"] = True
 
     return out
 
@@ -113,7 +115,7 @@ def eligible_materials(metadata):
     rows = []
     valid = metadata["has_relaxed_final"].to_numpy()
     initial = metadata["is_initial"].to_numpy()
-    relaxed = metadata["is_relaxed"].to_numpy()
+    relaxed = metadata["is_final_relaxed"].to_numpy()
     for material, group in metadata.groupby("material", sort=True):
         idx = group.index.to_numpy()
         n_initial = int(np.sum(valid[idx] & initial[idx]))
@@ -267,19 +269,37 @@ def masks_for_material(metadata, material):
     valid = metadata["has_relaxed_final"].to_numpy()
     material_mask = metadata["material"].astype(str).eq(str(material)).to_numpy()
     initial = metadata["is_initial"].to_numpy()
-    relaxed = metadata["is_relaxed"].to_numpy()
+    final_relaxed = metadata["is_final_relaxed"].to_numpy()
     other = ~material_mask
 
     return {
         "train_other": np.where(other & valid)[0],
         "train_other_plus_initial": np.where((other & valid) | (material_mask & valid & initial))[0],
         "test_initial": np.where(material_mask & valid & initial)[0],
-        "test_relaxed": np.where(material_mask & valid & relaxed)[0],
+        "test_relaxed": np.where(material_mask & valid & final_relaxed)[0],
     }
 
 
 def prediction_path(out_dir, protocol, material):
     return out_dir / "predictions" / protocol / f"{material}.csv"
+
+
+def load_compatible_prediction(path, expected_indices):
+    if not path.exists():
+        return None, None
+    pred_df = pd.read_csv(path)
+    expected_n = len(expected_indices)
+    if len(pred_df) != expected_n:
+        print(
+            f"  Existing prediction has {len(pred_df)} rows, expected {expected_n}; recomputing: {path}"
+        )
+        return None, None
+    if "target" not in pred_df.columns or "prediction" not in pred_df.columns:
+        print(f"  Existing prediction is missing required columns; recomputing: {path}")
+        return None, None
+    print(f"  Resume prediction: {path}")
+    metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+    return pred_df, metrics
 
 
 def run_training_group(
@@ -335,10 +355,8 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
 
     protocol = "other_train__initial_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    if pred_path.exists():
-        print(f"  Resume prediction: {pred_path}")
-        pred_df = pd.read_csv(pred_path)
-        metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+    pred_df, metrics = load_compatible_prediction(pred_path, idx["test_initial"])
+    if pred_df is not None:
         other_train_idx, other_val_idx = split_train_val(
             idx["train_other"], args.val_fraction, args.seed
         )
@@ -386,10 +404,8 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
 
     protocol = "other_plus_initial_train__relaxed_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    if pred_path.exists():
-        print(f"  Resume prediction: {pred_path}")
-        pred_df = pd.read_csv(pred_path)
-        metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+    pred_df, metrics = load_compatible_prediction(pred_path, idx["test_relaxed"])
+    if pred_df is not None:
         augmented_train_idx, augmented_val_idx = split_train_val(
             idx["train_other_plus_initial"], args.val_fraction, args.seed
         )

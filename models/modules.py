@@ -172,15 +172,26 @@ class HeteroMegnetLayer(nn.Module):
             ):
                 edge_out_dict[etype] = edge_attr_dict[etype].new_empty((0, self.embedding_size))
                 continue
-            x_src = torch.cat([x_dict[src], x_dict[dst]], dim=0) if src != dst else x_dict[src]
-            edge_index = edge_index_dict[etype]
+            if src != dst:
+                src_count = x_dict[src].size(0)
+                dst_count = x_dict[dst].size(0)
+                x_input = torch.cat([x_dict[src], x_dict[dst]], dim=0)
+                batch = torch.cat([batch_dict[src], batch_dict[dst]], dim=0)
+                edge_index = edge_index_dict[etype].clone()
+                edge_index[1] = edge_index[1] + src_count
+                dst_slice = slice(src_count, src_count + dst_count)
+            else:
+                x_input = x_dict[src]
+                batch = batch_dict[src]
+                edge_index = edge_index_dict[etype]
+                dst_slice = slice(None)
+
             edge_attr = edge_attr_dict[etype]
-            batch = torch.cat([batch_dict[src], batch_dict[dst]], dim=0) if src != dst else batch_dict[src]
             bond_batch = bond_batch_dict[etype]
-            x_dst, edge_attr_out, state_out = self.megnets[k](
-                x_src, edge_index, edge_attr, state, batch, bond_batch
+            x_out, edge_attr_out, state_out = self.megnets[k](
+                x_input, edge_index, edge_attr, state, batch, bond_batch
             )
-            x_dst = x_dst[batch_dict[dst], :]
+            x_dst = x_out[dst_slice, :]
             out_dict[dst].append(x_dst)
             edge_out_dict[etype] = edge_attr_out
             state_outs.append(state_out)

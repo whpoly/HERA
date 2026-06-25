@@ -207,8 +207,9 @@ structures and non-POSCAR0 relaxed structures. For each held-out material it
 runs two comparisons: train on all usable rows from the other materials and
 test the held-out POSCAR0 initial structures, or train on all usable rows from
 the other materials plus the held-out POSCAR0 initial structures and test the
-held-out relaxed structures. The target is the lowest non-POSCAR0 DFE for each
-native defect group. Outputs include `summary.csv`, `summary.md`, per-sample
+held-out lowest-energy relaxed structure for each native defect group. The
+target is the lowest non-POSCAR0 DFE for each native defect group. Outputs
+include `summary.csv`, `summary.md`, per-sample
 prediction CSVs, material eligibility metadata, and figures following the
 style of `scripts/plot_native_zero_shot_performance.py`. The outer loop is
 material-first: after one held-out material finishes across all selected
