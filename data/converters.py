@@ -166,6 +166,7 @@ class SimpleCrystalConverter:
         self.local_radius = cutoff if local_radius is None else local_radius
         self.atom_converter = atom_converter if atom_converter else DummyConverter()
         self.bond_converter = bond_converter if bond_converter else DummyConverter()
+        self.model_family = getattr(self.atom_converter, 'task', None)
         self.add_z_bond_coord = add_z_bond_coord
         self.add_eos_features = add_eos_features
         self.ignore_state = ignore_state
@@ -175,6 +176,12 @@ class SimpleCrystalConverter:
     def _graph_mode(task):
         if task == 'hetero_cgcnn_was':
             return 'hetero_was'
+        alignn_definet_modes = {
+            'alignn_definet': 'attention',
+            'alignn_definet_was': 'attention_was',
+        }
+        if task in alignn_definet_modes:
+            return alignn_definet_modes[task]
         parts = task.split('_', 1)
         return parts[1] if len(parts) > 1 else task
 
@@ -339,11 +346,13 @@ class SimpleCrystalConverter:
             indexs = torch.LongTensor([site.properties['type'] for site in d])
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
             all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+            add_synthetic_self_loops = self.model_family != 'megnet'
             for i, nbrs in enumerate(all_nbrs):
-                bond_index[0] += [i]
-                bond_index[1].extend([i])
-                bond_attr.extend([0.0])
-                bond_vec.append(np.zeros(3))
+                if add_synthetic_self_loops:
+                    bond_index[0] += [i]
+                    bond_index[1].extend([i])
+                    bond_attr.extend([0.0])
+                    bond_vec.append(np.zeros(3))
                 center = np.asarray(d[i].coords)
                 for j in nbrs:
                     bond_index[0] += [i]

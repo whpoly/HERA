@@ -14,6 +14,20 @@ from torch_geometric.nn import (
 ATOMIC_NUMBERS = 95
 
 
+def _global_pool_with_dim_size(pooling, features, batch, dim_size):
+    try:
+        return pooling(features, batch, size=dim_size)
+    except TypeError:
+        pooled = pooling(features, batch)
+        if pooled.size(0) == dim_size:
+            return pooled
+        out = features.new_zeros((dim_size, pooled.size(1)))
+        rows = min(dim_size, pooled.size(0))
+        if rows > 0:
+            out[:rows] = pooled[:rows]
+        return out
+
+
 class ShiftedSoftplus(nn.Module):
     def __init__(self):
         super().__init__()
@@ -112,8 +126,9 @@ class MegnetModule(MessagePassing):
             edge_index=edge_index, x=x, edge_attr=edge_attr,
             state=state, batch=batch
         )
-        u_v = self.global_aggregation(x, batch)
-        u_e = self.global_aggregation(edge_attr, bond_batch, batch.max().item() + 1)
+        num_graphs = state.size(0)
+        u_v = _global_pool_with_dim_size(self.global_aggregation, x, batch, num_graphs)
+        u_e = _global_pool_with_dim_size(self.global_aggregation, edge_attr, bond_batch, num_graphs)
         state = self.phi_u(torch.cat((u_e, u_v, state), 1))
         return x + x_skip, edge_attr + edge_attr_skip, state + state_skip
 
@@ -144,6 +159,7 @@ class HeteroMegnetLayer(nn.Module):
                  inner_skip=False,
                  ):
         super().__init__()
+        self.node_types = metadata[0]
         self.edge_types = metadata[1]
         self.embedding_size = embedding_size
         self.megnets = nn.ModuleDict()
@@ -157,10 +173,26 @@ class HeteroMegnetLayer(nn.Module):
                 global_aggregation=global_aggregation,
                 inner_skip=inner_skip,
             )
+        self.node_fallbacks = nn.ModuleDict({
+            ntype: self._make_fallback(node_input_shape, embedding_size)
+            for ntype in self.node_types
+        })
+        self.state_fallback = self._make_fallback(state_input_shape, embedding_size)
+
+    @staticmethod
+    def _make_fallback(input_shape, embedding_size):
+        if input_shape == embedding_size:
+            return nn.Identity()
+        return nn.Sequential(
+            nn.Linear(input_shape, 2 * embedding_size), ShiftedSoftplus(),
+            nn.Linear(2 * embedding_size, embedding_size), ShiftedSoftplus(),
+        )
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, state, batch_dict, bond_batch_dict):
         out_dict = {ntype: [] for ntype in x_dict}
-        state_outs = []
+        state_sum = None
+        state_count = state.new_zeros((state.size(0), 1))
+        fallback_state = self.state_fallback(state)
         edge_out_dict = {}
         for etype in self.edge_types:
             k = '__'.join(etype)
@@ -194,23 +226,33 @@ class HeteroMegnetLayer(nn.Module):
             x_dst = x_out[dst_slice, :]
             out_dict[dst].append(x_dst)
             edge_out_dict[etype] = edge_attr_out
-            state_outs.append(state_out)
+            if state_sum is None:
+                state_sum = state_out.new_zeros(state_out.shape)
+            present_graphs = bond_batch.unique()
+            present_graphs = present_graphs[
+                (present_graphs >= 0) & (present_graphs < state.size(0))
+            ]
+            if present_graphs.numel() > 0:
+                state_sum[present_graphs] += state_out[present_graphs]
+                state_count[present_graphs] += 1
 
         agg_dict = {}
         for ntype, outs in out_dict.items():
             if len(outs) == 0:
-                agg_dict[ntype] = x_dict[ntype]
+                agg_dict[ntype] = self.node_fallbacks[ntype](x_dict[ntype])
             elif len(outs) == 1:
                 agg_dict[ntype] = outs[0]
             else:
                 agg_dict[ntype] = torch.stack(outs, dim=0).mean(dim=0)
 
-        if len(state_outs) == 1:
-            state_new = state_outs[0]
-        elif len(state_outs) == 0:
-            state_new = state
+        if state_sum is None or torch.count_nonzero(state_count) == 0:
+            state_new = fallback_state
         else:
-            state_new = torch.stack(state_outs, dim=0).mean(dim=0)
+            state_new = torch.where(
+                state_count > 0,
+                state_sum / state_count.clamp_min(1),
+                fallback_state,
+            )
         return agg_dict, edge_out_dict, state_new
 
 
@@ -328,8 +370,9 @@ class AtomTypeAttentionMegnetModule(MessagePassing):
             edge_index=edge_index, x=x, edge_attr=edge_attr,
             state=state, batch=batch
         )
-        u_v = self.global_aggregation(x, batch)
-        u_e = self.global_aggregation(edge_attr, bond_batch, batch.max().item() + 1)
+        num_graphs = state.size(0)
+        u_v = _global_pool_with_dim_size(self.global_aggregation, x, batch, num_graphs)
+        u_e = _global_pool_with_dim_size(self.global_aggregation, edge_attr, bond_batch, num_graphs)
         state = self.phi_u(torch.cat((u_e, u_v, state), 1))
         return x + x_skip, edge_attr + edge_attr_skip, state + state_skip
 

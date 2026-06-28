@@ -8,33 +8,19 @@ Usage examples:
   # Train MEGNet on vacancy dataset with the default modes
   python -m HERA.main --model megnet --dataset vacancy
 
-  # Train CGCNN on 2dmd_high with only the local r=0 defect-only input
-  python -m HERA.main --model cgcnn --dataset 2dmd_high --mode local --r 0
-
-  # Train MEGNet on semi dataset with local r=0 + hetero modes
-  python -m HERA.main --model megnet --dataset semi --mode local hetero --r 0
-
-  # Run local radius/cutoff ablation; r=0 is sparse-equivalent local input
-  python -m HERA.main --model cgcnn --dataset vacancy --mode local --r 0 3 4 5 6 7
-
-  # Run every configured dataset/mode/radius for MEGNet and CGCNN
+  # Run every configured dataset/mode/radius for MEGNet, CGCNN, and ALIGNN
   python -m HERA.main --model all --dataset all --mode all --r all
 
   # Custom device, epochs, and random seeds
   python -m HERA.main --model cgcnn --dataset native --device cuda:1 --epochs 300 --seeds 42 123
 
-  # Five-fold cross validation; --seeds must contain exactly one random state
-  python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --cv5 --seeds 42
-
   # Resume an existing run; completed mode summaries are skipped
-  python -m HERA.main --model cgcnn --dataset native --mode local --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
+  python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, full_x, hetero, local, attention, was, hetero_was,
-            hetero_local, hetero_local_was,
-            attention_local, attention_was, attention_local_was,
-            definet, definet_local, definet_was, definet_local_was, all
+  Modes   : full, full_x, hetero, attention, was, hetero_was,
+            attention_was, definet, definet_was, all
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
 """
 
@@ -65,87 +51,65 @@ from .training.history import TrainingLogger
 
 LOCAL_CUTOFF_CHOICES = [0, 3, 4, 5, 6, 7]
 DEFAULT_SEEDS = [123, 11, 1245, 34, 42, 80, 13232, 8, 99, 101]
-ALL_MODEL_SUITES = ('megnet', 'cgcnn')
+ALL_MODEL_SUITES = ('cgcnn', 'megnet', 'alignn')
+DEFINET_HOST_MODELS = ('cgcnn', 'alignn')
 CGCNN_DEFINET_MODES = (
     'definet',
-    'definet_local',
     'definet_was',
-    'definet_local_was',
 )
-LOCAL_GRAPH_SWEEP_MODES = (
-    'local',
-    'hetero_local',
-    'hetero_local_was',
-    'attention_local',
-    'attention_local_was',
-    'definet_local',
-    'definet_local_was',
-)
+LOCAL_GRAPH_SWEEP_MODES = ()
 LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_was')
-DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
+DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
-    'local',
+    'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
+    'attention_was',
+    'definet',
+    'definet_was',
 )
 WAS_ABLATION_MODELS = ('cgcnn', 'megnet', 'alignn')
 WAS_ABLATION_MODES = (
     'was',
     'hetero_was',
-    'hetero_local_was',
 )
-ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet')
+ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 ATTENTION_ABLATION_MODES = (
-    'attention_local',
     'attention_was',
-    'attention_local_was',
 )
 CGCNN_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
-    'local',
     'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
-    'attention_local',
     'attention_was',
-    'attention_local_was',
     'definet',
-    'definet_local',
     'definet_was',
-    'definet_local_was',
 ]
 MEGNET_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
-    'local',
     'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
-    'attention_local',
     'attention_was',
-    'attention_local_was',
 ]
 ALIGNN_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
-    'local',
+    'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
+    'attention_was',
+    'definet',
+    'definet_was',
 ]
 
 
@@ -401,20 +365,23 @@ def default_modes_for_model(model_name):
         return list(CGCNN_DEFAULT_MODES)
     if model_name == 'megnet':
         return list(MEGNET_DEFAULT_MODES)
-    return ['full', 'full_x', 'hetero', 'local', 'attention']
+    return ['full', 'full_x', 'hetero', 'attention']
 
 
 def validate_modes_for_model(model_name, modes, parser):
-    if model_name != 'cgcnn' and any(mode in CGCNN_DEFINET_MODES for mode in modes):
-        parser.error('The definet modes are run under --model cgcnn')
+    if model_name not in DEFINET_HOST_MODELS and any(mode in CGCNN_DEFINET_MODES for mode in modes):
+        parser.error('The definet modes are run under --model cgcnn or --model alignn')
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
-        parser.error('The definet model only supports --mode attention attention_local attention_was attention_local_was')
+        parser.error('The definet model only supports --mode attention attention_was')
     if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
-        parser.error('The alignn model supports --mode full full_x hetero local was hetero_was hetero_local hetero_local_was')
+        parser.error(
+            'The alignn model supports --mode full full_x hetero attention '
+            'was hetero_was attention_was definet definet_was'
+        )
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
-        parser.error('The was, hetero_was, and hetero_local_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
+        parser.error('The was and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
-        parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, or --model definet')
+        parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, --model definet, or --model alignn')
 
 
 def resolve_modes(requested_modes, model_name, parser):
@@ -501,7 +468,7 @@ def main():
     parser.add_argument('--resume', action='store_true',
                         help='Skip completed seed/fold tasks whose history CSV already has a TEST result')
     parser.add_argument('--r', nargs='+', default=None,
-                        help=('Radius values for local cropping and local/host cutoff sweeps; '
+                        help=('Radius values for hetero local/host cutoff sweeps; '
                               'graph edge cutoff stays at the config value. Use all for 0 3 4 5 6 7'))
     parser.add_argument('--explain', action='store_true',
                         help='Run GNNExplainer after each seed prediction and save batch visualizations')

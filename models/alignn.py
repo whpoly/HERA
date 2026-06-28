@@ -8,7 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
 
-from .modules import ShiftedSoftplus
+from .modules import (
+    AtomTypeGlobalAttentionReadout,
+    DefectAwareGateConv,
+    ShiftedSoftplus,
+)
 
 
 def _edge_type_key(edge_type):
@@ -187,6 +191,73 @@ class GatedGraphConv(MessagePassing):
         return self.gate_nn(z) * self.message_nn(z)
 
 
+class AtomTypeAttentionGatedGraphConv(MessagePassing):
+    """Gated atom update with neighbor attention conditioned on atom type."""
+
+    def __init__(self, channels, edge_dim, n_heads=4, aggr="add"):
+        super().__init__(aggr=_normalize_aggr(aggr))
+        self.channels = channels
+        self.n_heads = n_heads
+        self.message_nn = nn.Sequential(
+            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.gate_nn = nn.Sequential(
+            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+            nn.Sigmoid(),
+        )
+        self.attn_nn = nn.Sequential(
+            nn.Linear(4 * channels + edge_dim, 2 * n_heads), ShiftedSoftplus(),
+            nn.Linear(2 * n_heads, n_heads),
+        )
+        self.update_nn = nn.Sequential(
+            nn.Linear(2 * channels, channels), ShiftedSoftplus(),
+            nn.Linear(channels, channels),
+        )
+        self.type_emb = nn.Embedding(2, channels)
+        self.norm = nn.LayerNorm(channels)
+        self._edge_index = None
+        self._type_emb = None
+        self._attention_weights = None
+
+    def forward(self, x, edge_index, edge_attr, node_type=None, size=None):
+        x_dst = x[1] if isinstance(x, tuple) else x
+        if x_dst.size(0) == 0 or edge_index.size(1) == 0:
+            return x_dst
+
+        self._edge_index = edge_index
+        if node_type is None:
+            self._type_emb = None
+        else:
+            self._type_emb = self.type_emb(
+                node_type.to(device=x_dst.device, dtype=torch.long).view(-1).clamp(0, 1)
+            )
+        out = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr, size=size)
+        out = self.update_nn(torch.cat([x_dst, out], dim=-1))
+        return self.norm(x_dst + out)
+
+    def message(self, x_i, x_j, edge_attr, index, ptr, size_i):
+        from torch_geometric.utils import softmax as pyg_softmax
+
+        z = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        msg = self.gate_nn(z) * self.message_nn(z)
+        if self._type_emb is None:
+            zeros = torch.zeros(z.size(0), 2 * self.channels, device=z.device, dtype=z.dtype)
+            attn_input = torch.cat([z, zeros], dim=-1)
+        else:
+            edge_index = self._edge_index
+            type_src = self._type_emb[edge_index[0]]
+            type_dst = self._type_emb[edge_index[1]]
+            attn_input = torch.cat([z, type_src, type_dst], dim=-1)
+        alpha = pyg_softmax(self.attn_nn(attn_input), index, ptr, size_i)
+        self._attention_weights = alpha.detach()
+        return alpha.mean(dim=-1, keepdim=True) * msg
+
+    def get_attention_weights(self):
+        return self._attention_weights, self._edge_index
+
+
 class ALIGNNLayer(nn.Module):
     """One ALIGNN block: line-graph bond update followed by atom update."""
 
@@ -200,6 +271,49 @@ class ALIGNNLayer(nn.Module):
         edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
         x = self.atom_conv(x, edge_index, edge_attr)
         return x, edge_attr
+
+
+class AttentionALIGNNLayer(nn.Module):
+    """ALIGNN block with atom-type-aware attention on the atom graph."""
+
+    def __init__(self, hidden_dim, angle_dim, n_heads=4, vertex_aggregation="add"):
+        super().__init__()
+        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.atom_conv = AtomTypeAttentionGatedGraphConv(
+            hidden_dim, hidden_dim, n_heads=n_heads, aggr=vertex_aggregation
+        )
+
+    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion, node_type=None):
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
+        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
+        x = self.atom_conv(x, edge_index, edge_attr, node_type=node_type)
+        return x, edge_attr
+
+    def get_attention_weights(self):
+        return self.atom_conv.get_attention_weights()
+
+
+class DefiNetALIGNNLayer(nn.Module):
+    """ALIGNN angle update followed by DeFiNet-style defect-aware atom update."""
+
+    def __init__(self, hidden_dim, angle_dim, n_marker_types=2, vertex_aggregation="add"):
+        super().__init__()
+        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.atom_conv = DefectAwareGateConv(
+            channels=hidden_dim,
+            dim=hidden_dim,
+            n_marker_types=n_marker_types,
+            batch_norm=True,
+        )
+
+    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion, defect_marker=None):
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
+        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
+        x = self.atom_conv(x, edge_index, edge_attr, defect_marker=defect_marker)
+        return x, edge_attr
+
+    def get_attention_weights(self):
+        return self.atom_conv.get_attention_weights()
 
 
 class HeteroALIGNNLayer(nn.Module):
@@ -321,6 +435,161 @@ class ALIGNN(nn.Module):
         edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
         edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
         return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+
+
+class AttentionALIGNN(nn.Module):
+    """Homogeneous ALIGNN with atom-type-aware local and global attention."""
+
+    def __init__(
+            self,
+            node_input_shape,
+            edge_input_shape,
+            hidden_dim=64,
+            n_blocks=3,
+            angle_embed_size=40,
+            n_heads=4,
+            vertex_aggregation="add",
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
+        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.layers = nn.ModuleList([
+            AttentionALIGNNLayer(
+                hidden_dim,
+                self.angle_expansion.out_features,
+                n_heads=n_heads,
+                vertex_aggregation=vertex_aggregation,
+            )
+            for _ in range(n_blocks)
+        ])
+        self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
+        self.readout = nn.Sequential(
+            nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, x, edge_index, edge_attr, batch, edge_vec=None, node_type=None):
+        x = self.node_embedding(x.float())
+        edge_attr = self.edge_embedding(edge_attr.float())
+        if edge_vec is None:
+            edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+        else:
+            edge_vec = edge_vec.float()
+        if node_type is None:
+            node_type = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        else:
+            node_type = node_type.to(device=x.device, dtype=torch.long).view(-1)
+
+        for layer in self.layers:
+            x, edge_attr = layer(
+                x, edge_index, edge_attr, edge_vec, self.angle_expansion, node_type=node_type
+            )
+
+        num_graphs = _graph_count(batch=batch)
+        node_pool = self.node_readout(x, batch, node_type=node_type)
+        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
+        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
+        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+
+    def get_all_attention_weights(self):
+        results = []
+        for i, layer in enumerate(self.layers):
+            attn, edge_index = layer.get_attention_weights()
+            if attn is not None:
+                results.append((f'layer_{i}', attn, edge_index))
+        attn = self.node_readout.get_attention_weights()
+        if attn is not None:
+            results.append(('global_readout', attn, None))
+        return results
+
+
+class DefiNetALIGNN(nn.Module):
+    """Scalar-property ALIGNN adapter with DeFiNet-style defect-aware gates."""
+
+    def __init__(
+            self,
+            node_input_shape,
+            edge_input_shape,
+            hidden_dim=64,
+            n_blocks=4,
+            angle_embed_size=40,
+            n_marker_types=2,
+            vertex_aggregation="add",
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
+        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
+        self.global_distribute = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            for _ in range(n_blocks)
+        ])
+        self.layers = nn.ModuleList([
+            DefiNetALIGNNLayer(
+                hidden_dim,
+                self.angle_expansion.out_features,
+                n_marker_types=n_marker_types,
+                vertex_aggregation=vertex_aggregation,
+            )
+            for _ in range(n_blocks)
+        ])
+        self.global_aggregate = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            for _ in range(n_blocks)
+        ])
+        self.readout = nn.Sequential(
+            nn.Linear(3 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, x, edge_index, edge_attr, batch, edge_vec=None, defect_marker=None):
+        x = self.node_embedding(x.float())
+        edge_attr = self.edge_embedding(edge_attr.float())
+        if edge_vec is None:
+            edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+        else:
+            edge_vec = edge_vec.float()
+        if defect_marker is None:
+            defect_marker = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        else:
+            defect_marker = defect_marker.to(device=x.device, dtype=torch.long).view(-1)
+
+        num_graphs = _graph_count(batch=batch)
+        global_fea = self.global_seed.expand(num_graphs, -1)
+        for distribute, layer, aggregate in zip(
+                self.global_distribute, self.layers, self.global_aggregate):
+            x = x + distribute(torch.cat([x, global_fea[batch]], dim=-1))
+            x, edge_attr = layer(
+                x, edge_index, edge_attr, edge_vec, self.angle_expansion,
+                defect_marker=defect_marker,
+            )
+            pooled = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
+            global_fea = global_fea + aggregate(torch.cat([pooled, global_fea], dim=-1))
+
+        node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
+        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
+        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
+        return self.readout(torch.cat([node_pool, global_fea, edge_pool], dim=-1))
+
+    def get_all_attention_weights(self):
+        results = []
+        for i, layer in enumerate(self.layers):
+            attn, edge_index = layer.get_attention_weights()
+            if attn is not None:
+                results.append((f'layer_{i}', attn, edge_index))
+        return results
 
 
 class HeteroALIGNN(nn.Module):

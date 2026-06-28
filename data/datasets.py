@@ -39,18 +39,11 @@ MODE_REPRESENTATION = {
     'full_x': 'full_x',
     'was': 'full',
     'hetero': 'hetero',
-    'local': 'hetero',
     'hetero_was': 'hetero',
-    'hetero_local': 'hetero',
-    'hetero_local_was': 'hetero',
     'attention': 'attention',
-    'attention_local': 'attention',
     'attention_was': 'attention',
-    'attention_local_was': 'attention',
     'definet': 'attention',
-    'definet_local': 'attention',
     'definet_was': 'attention',
-    'definet_local_was': 'attention',
 }
 
 
@@ -191,7 +184,7 @@ def load_data_vacancy(task_prefix, local_cutoff=None, representations=None):
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
-    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet')
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
 
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:
@@ -233,7 +226,7 @@ def load_data_2dmd_high(task_prefix, local_cutoff=None, representations=None):
     }
     prep = df.values.tolist()
     prep = [[p[0], p[1], eval(p[2])] for p in prep]
-    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet')
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
 
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:

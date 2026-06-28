@@ -21,25 +21,10 @@ def _was_config(base_config, task):
     return config
 
 
-def _local_config(base_config, task):
-    config = copy.deepcopy(base_config)
-    config['task'] = task
-    config['model']['local_radius'] = config['model']['cutoff']
-    return config
-
-
 def _hetero_was_task(task_prefix):
     if task_prefix == 'cgcnn':
         return 'hetero_cgcnn_was'
     return f'{task_prefix}_hetero_was'
-
-
-def _hetero_local_config(base_config, task_prefix):
-    return _local_config(base_config, f'{task_prefix}_hetero_local')
-
-
-def _hetero_local_was_config(base_config, task_prefix):
-    return _was_config(_hetero_local_config(base_config, task_prefix), f'{task_prefix}_hetero_local_was')
 
 
 def get_configs_2dmd(task_prefix):
@@ -96,26 +81,16 @@ def get_configs_2dmd(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
-    config_hetero_local = _hetero_local_config(config_hetero, task_prefix)
-    config_hetero_local_was = _hetero_local_was_config(config_hetero, task_prefix)
-    config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
-    config_attention_local_was = _was_config(config_attention_local, f'{task_prefix}_attention_local_was')
     return (
         config_full,
         config_hetero,
         config_attention,
-        config_local,
         config_was,
         config_hetero_was,
-        config_hetero_local,
-        config_hetero_local_was,
-        config_attention_local,
         config_attention_was,
-        config_attention_local_was,
     )
 
 
@@ -173,26 +148,16 @@ def get_configs_default(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_local = _local_config(config_full, f'{task_prefix}_local')
     config_was = _was_config(config_full, f'{task_prefix}_was')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
-    config_hetero_local = _hetero_local_config(config_hetero, task_prefix)
-    config_hetero_local_was = _hetero_local_was_config(config_hetero, task_prefix)
-    config_attention_local = _local_config(config_attention, f'{task_prefix}_attention_local')
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
-    config_attention_local_was = _was_config(config_attention_local, f'{task_prefix}_attention_local_was')
     return (
         config_full,
         config_hetero,
         config_attention,
-        config_local,
         config_was,
         config_hetero_was,
-        config_hetero_local,
-        config_hetero_local_was,
-        config_attention_local,
         config_attention_was,
-        config_attention_local_was,
     )
 
 
@@ -208,57 +173,52 @@ _CONFIG_REGISTRY = {
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['megnet', 'cgcnn', 'definet', 'alignn']
-DEFINET_MODES = ('attention', 'attention_local', 'attention_was', 'attention_local_was')
+DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
-    'local',
+    'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
+    'attention_was',
+    'definet',
+    'definet_was',
 )
 CGCNN_DEFINET_MODES = (
     'definet',
-    'definet_local',
     'definet_was',
-    'definet_local_was',
 )
 CGCNN_DEFINET_TASKS = {
     'definet': 'definet_attention',
-    'definet_local': 'definet_attention_local',
     'definet_was': 'definet_attention_was',
-    'definet_local_was': 'definet_attention_local_was',
+}
+ALIGNN_DEFINET_TASKS = {
+    'definet': 'alignn_definet',
+    'definet_was': 'alignn_definet_was',
 }
 WAS_MODELS = ('cgcnn', 'megnet', 'alignn')
-ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet')
+ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 VALID_MODES = [
     'full',
     'full_x',
     'hetero',
-    'local',
     'attention',
     'was',
     'hetero_was',
-    'hetero_local',
-    'hetero_local_was',
-    'attention_local',
     'attention_was',
-    'attention_local_was',
     'definet',
-    'definet_local',
     'definet_was',
-    'definet_local_was',
 ]
 
 
-def _definet_attention_config(base_config, mode):
+def _definet_attention_config(base_config, mode, model='cgcnn'):
     config = copy.deepcopy(base_config)
-    config['task'] = CGCNN_DEFINET_TASKS[mode]
-    if mode in ('definet_local', 'definet_local_was'):
-        config['model']['local_radius'] = config['model']['cutoff']
-    if mode in ('definet_was', 'definet_local_was'):
+    if model == 'alignn':
+        config['task'] = ALIGNN_DEFINET_TASKS[mode]
+    else:
+        config['task'] = CGCNN_DEFINET_TASKS[mode]
+    if mode == 'definet_was':
         config['model']['atom_features'] = 'was_species'
     config['model']['nblocks'] = 4
     config['model']['n_marker_types'] = 2
@@ -270,13 +230,10 @@ def get_config(model: str, dataset: str, mode: str):
     """Get the config dict for a specific model/dataset/mode combination.
 
     Args:
-        model: 'megnet', 'cgcnn', or 'definet'
+        model: 'megnet', 'cgcnn', 'definet', or 'alignn'
         dataset: one of VALID_DATASETS
-        mode: one of 'full', 'full_x', 'hetero', 'local', 'attention', 'was',
-            'hetero_was', 'hetero_local', 'hetero_local_was',
-            'attention_local', 'attention_was', 'attention_local_was',
-            'definet', 'definet_local', 'definet_was',
-            'definet_local_was'
+        mode: one of 'full', 'full_x', 'hetero', 'attention', 'was',
+            'hetero_was', 'attention_was', 'definet', 'definet_was'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -287,8 +244,8 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"Unknown model '{model}'. Choose from {VALID_MODELS}")
     if mode not in VALID_MODES:
         raise ValueError(f"Unknown mode '{mode}'. Choose from {VALID_MODES}")
-    if mode in CGCNN_DEFINET_MODES and model != 'cgcnn':
-        raise ValueError("The definet modes are run under --model cgcnn")
+    if mode in CGCNN_DEFINET_MODES and model not in ('cgcnn', 'alignn'):
+        raise ValueError("The definet modes are run under --model cgcnn or --model alignn")
     if model == 'definet' and mode not in DEFINET_MODES:
         raise ValueError(f"The definet model only supports {DEFINET_MODES}")
     if model == 'alignn' and mode not in ALIGNN_MODES:
@@ -296,46 +253,35 @@ def get_config(model: str, dataset: str, mode: str):
     if model not in WAS_MODELS and mode in (
             'was',
             'hetero_was',
-            'hetero_local_was',
     ):
-        raise ValueError("The was, hetero_was, and hetero_local_was modes are only supported for cgcnn, megnet, and alignn")
+        raise ValueError("The was and hetero_was modes are only supported for cgcnn, megnet, and alignn")
     if model not in ATTENTION_ABLATION_MODELS and mode in (
-            'attention_local',
             'attention_was',
-            'attention_local_was',
     ):
-        raise ValueError("The attention ablation modes are only supported for cgcnn, megnet, and definet")
+        raise ValueError("The attention ablation modes are only supported for cgcnn, megnet, definet, and alignn")
 
     (
         config_full,
         config_hetero,
         config_attention,
-        config_local,
         config_was,
         config_hetero_was,
-        config_hetero_local,
-        config_hetero_local_was,
-        config_attention_local,
         config_attention_was,
-        config_attention_local_was,
     ) = _CONFIG_REGISTRY[dataset](model)
     if mode in CGCNN_DEFINET_MODES:
-        return _definet_attention_config(config_attention, mode)
+        return _definet_attention_config(config_attention, mode, model)
     if mode == 'full_x':
         config = copy.deepcopy(config_full)
         config['task'] = f'{model}_full_x'
         return config
 
     config = {'full': config_full,
-              'hetero': config_hetero, 'local': config_local,
+              'hetero': config_hetero,
               'attention': config_attention,
               'was': config_was,
               'hetero_was': config_hetero_was,
-              'hetero_local': config_hetero_local,
-              'hetero_local_was': config_hetero_local_was,
-              'attention_local': config_attention_local,
               'attention_was': config_attention_was,
-              'attention_local_was': config_attention_local_was}[mode]
+              }[mode]
     if model == 'definet':
         config['model']['nblocks'] = 4
         config['model']['n_marker_types'] = 2

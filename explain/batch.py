@@ -44,6 +44,7 @@ CGCNN_HETERO_TASKS = {
 }
 ALIGNN_HOMOGENEOUS_TASKS = {
     "alignn_full",
+    "alignn_full_x",
     "alignn_local",
     "alignn_was",
 }
@@ -52,6 +53,18 @@ ALIGNN_HETERO_TASKS = {
     "alignn_hetero_was",
     "alignn_hetero_local",
     "alignn_hetero_local_was",
+}
+ALIGNN_ATTENTION_TASKS = {
+    "alignn_attention",
+    "alignn_attention_local",
+    "alignn_attention_was",
+    "alignn_attention_local_was",
+}
+ALIGNN_DEFINET_TASKS = {
+    "alignn_definet",
+    "alignn_definet_local",
+    "alignn_definet_was",
+    "alignn_definet_local_was",
 }
 
 HETERO_NODE_TYPES = ("atom", "defect")
@@ -135,6 +148,15 @@ class PredictionWrapper(nn.Module):
             pred = self.model(x, edge_index, edge_attr, batch)
         elif self.task in ALIGNN_HOMOGENEOUS_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, edge_vec=edge_vec)
+        elif self.task in ALIGNN_ATTENTION_TASKS:
+            pred = self.model(
+                x, edge_index, edge_attr, batch, edge_vec=edge_vec, node_type=node_type
+            )
+        elif self.task in ALIGNN_DEFINET_TASKS:
+            marker = defect_marker if defect_marker is not None else node_type
+            pred = self.model(
+                x, edge_index, edge_attr, batch, edge_vec=edge_vec, defect_marker=marker
+            )
         elif self.task in CGCNN_ATTENTION_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, node_type=node_type)
         elif self.task in DEFINET_ATTENTION_TASKS:
@@ -317,6 +339,8 @@ def _model_args(batch, task):
             or task in CGCNN_ATTENTION_TASKS
             or task in MEGNET_ATTENTION_TASKS
             or task in DEFINET_ATTENTION_TASKS
+            or task in ALIGNN_ATTENTION_TASKS
+            or task in ALIGNN_DEFINET_TASKS
     ):
         kwargs["node_type"] = getattr(batch, "node_type", None)
         kwargs["defect_marker"] = getattr(batch, "defect_marker", None)

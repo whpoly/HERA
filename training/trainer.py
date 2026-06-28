@@ -16,7 +16,7 @@ from ..data.converters import (
 )
 from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
 from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, DefiNet
-from ..models.alignn import ALIGNN, HeteroALIGNN
+from ..models.alignn import ALIGNN, HeteroALIGNN, AttentionALIGNN, DefiNetALIGNN
 from ..utils.scaler import Scaler
 from .losses import MAELoss
 
@@ -56,6 +56,18 @@ ALIGNN_HETERO_TASKS = (
     'alignn_hetero_was',
     'alignn_hetero_local',
     'alignn_hetero_local_was',
+)
+ALIGNN_ATTENTION_TASKS = (
+    'alignn_attention',
+    'alignn_attention_local',
+    'alignn_attention_was',
+    'alignn_attention_local_was',
+)
+ALIGNN_DEFINET_TASKS = (
+    'alignn_definet',
+    'alignn_definet_local',
+    'alignn_definet_was',
+    'alignn_definet_local_was',
 )
 DEFINET_ATTENTION_TASKS = (
     'definet_attention',
@@ -226,6 +238,32 @@ class MEGNetTrainer:
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
             ).to(self.device)
+        elif task in ALIGNN_ATTENTION_TASKS:
+            self.model = AttentionALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                n_heads=self.config['model'].get('n_heads', 4),
+                vertex_aggregation=self.config["model"]["vertex_aggregation"],
+            ).to(self.device)
+        elif task in ALIGNN_DEFINET_TASKS:
+            self.model = DefiNetALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                n_marker_types=self.config['model'].get('n_marker_types', 2),
+                vertex_aggregation=self.config["model"]["vertex_aggregation"],
+            ).to(self.device)
         elif task in MEGNET_ATTENTION_TASKS:
             self.model = AttentionMEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
@@ -376,6 +414,19 @@ class MEGNetTrainer:
             return self.model(
                 batch.x, batch.edge_index, batch.edge_attr, batch.batch,
                 edge_vec=getattr(batch, 'edge_vec', None),
+            ).squeeze()
+        elif task in ALIGNN_ATTENTION_TASKS:
+            return self.model(
+                batch.x, batch.edge_index, batch.edge_attr, batch.batch,
+                edge_vec=getattr(batch, 'edge_vec', None),
+                node_type=batch.node_type,
+            ).squeeze()
+        elif task in ALIGNN_DEFINET_TASKS:
+            marker = getattr(batch, 'defect_marker', getattr(batch, 'node_type', None))
+            return self.model(
+                batch.x, batch.edge_index, batch.edge_attr, batch.batch,
+                edge_vec=getattr(batch, 'edge_vec', None),
+                defect_marker=marker,
             ).squeeze()
         elif task in ('cgcnn_full', 'cgcnn_full_x', 'cgcnn_local', 'cgcnn_was'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
