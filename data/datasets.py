@@ -37,8 +37,9 @@ REPRESENTATION_INDEX = {
 MODE_REPRESENTATION = {
     'full': 'full',
     'full_x': 'full_x',
-    'was': 'full',
+    'was_x': 'full_x',
     'hetero': 'hetero',
+    'hetero_fixed_pool': 'hetero',
     'hetero_was': 'hetero',
     'attention': 'attention',
     'attention_was': 'attention',

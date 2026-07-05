@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `full`, `full_x`, `hetero`, `attention`, `was`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
+| Modes | `full`, `full_x`, `hetero`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -72,7 +72,7 @@ Common arguments:
 - `--model`: `megnet`, `cgcnn`, `definet`, `alignn`, or `all`; `all` runs the MEGNet,
   CGCNN, and ALIGNN suites, with DeFiNet-style modes included for CGCNN and ALIGNN
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was`,
+- `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
@@ -80,9 +80,11 @@ Common arguments:
 - `full_x` is the old full-graph-with-X comparison: vacancy-style datasets
   such as `vacancy` and `2dmd_high` add DummySpecies/X vacancy sites to the
   full graph; datasets without an X site use the same graph as `full`.
+- `was_x` applies WAS atom features to the `full_x` representation. The old
+  full-graph-only `was` mode is no longer exposed.
 - `hetero` and `hetero_was` use the `--r` values as the local/host boundary
   cutoff while keeping the full model graph and config graph cutoff.
-- CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was` and `hetero_was`,
+- CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was_x` and `hetero_was`,
   which concatenate current and previous/reference atom features.
 - Attention ablations are `attention` and `attention_was`. DeFiNet-style modes
   are `definet` and `definet_was` for CGCNN and ALIGNN.
@@ -217,7 +219,7 @@ HERA-compatible heterogeneous variant. Use it with:
 python -m HERA.main --model alignn --dataset native --mode hetero --r 0
 ```
 
-Supported ALIGNN modes are `full`, `full_x`, `hetero`, `attention`, `was`,
+Supported ALIGNN modes are `full`, `full_x`, `hetero`, `attention`, `was_x`,
 `hetero_was`, `attention_was`, `definet`, and `definet_was`. HeteroALIGNN uses the same
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
@@ -273,15 +275,20 @@ only the local-host node-type boundary, not the graph edge cutoff or graph size.
 Each run may contain:
 
 - per-epoch CSV logs
+- per-split best-validation checkpoints named `seed{seed}_best_checkpoint.pth`
+  or `seed{random_state}_fold{fold}_best_checkpoint.pth`
 - per-mode `summary.txt`
 - one run-level `summary.txt`
 
-When `--resume` is enabled, the CLI does not load or save model checkpoints.
-It first reuses a per-mode `summary.txt` when present, which avoids loading the
-dataset for that mode/radius. If no summary exists, it treats a seed/fold CSV
-as complete only when it contains a valid final `TEST` row; partially completed
-runs load data once, reuse completed test MAEs, and retrain missing or
-incomplete seed/fold tasks from scratch.
+Each checkpoint stores `model`, `scaler`, `config`, dataset/mode labels, test
+MAE, best validation MAE, and train/validation/test source metadata so the
+trainer can be reconstructed later for explanations.
+
+When `--resume` is enabled, the CLI first reuses a per-mode `summary.txt` when
+present, which avoids loading the dataset for that mode/radius. If no summary
+exists, it treats a seed/fold CSV as complete only when it contains a valid
+final `TEST` row; completed splits are skipped as-is, while missing or
+incomplete seed/fold tasks are retrained and write fresh checkpoints.
 
 ## Batch Explanations
 

@@ -32,6 +32,7 @@ import pandas as pd
 MODE_DISPLAY = {
     "full": "Full",
     "full_x": "Full + X",
+    "was_x": "Full + X + WAS",
     "was": "WAS",
     "hetero": "Hetero",
     "hetero_was": "Hetero + WAS",
@@ -111,8 +112,10 @@ def normalize_mode(mode_label: str) -> tuple[str, str, bool, int | None]:
         radius = int(radius_match.group(1))
         normalized = normalized[: radius_match.start()]
 
-    uses_was = normalized == "was" or normalized.endswith("_was")
-    if normalized == "was":
+    uses_was = normalized in {"was", "was_x"} or normalized.endswith("_was")
+    if normalized == "was_x":
+        pair_base = "full_x"
+    elif normalized == "was":
         pair_base = "full"
     elif normalized.endswith("_was"):
         pair_base = normalized.removesuffix("_was")

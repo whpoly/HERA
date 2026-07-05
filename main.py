@@ -19,8 +19,8 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, full_x, hetero, attention, was, hetero_was,
-            attention_was, definet, definet_was, all
+  Modes   : full, full_x, hetero, hetero_fixed_pool, attention,
+            was_x, hetero_was, attention_was, definet, definet_was, all
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
 """
 
@@ -58,14 +58,16 @@ CGCNN_DEFINET_MODES = (
     'definet_was',
 )
 LOCAL_GRAPH_SWEEP_MODES = ()
-LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_was')
+LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_fixed_pool', 'hetero_was')
+FIXED_POOL_MODES = ('hetero_fixed_pool',)
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
     'definet',
@@ -73,7 +75,7 @@ ALIGNN_MODES = (
 )
 WAS_ABLATION_MODELS = ('cgcnn', 'megnet', 'alignn')
 WAS_ABLATION_MODES = (
-    'was',
+    'was_x',
     'hetero_was',
 )
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
@@ -84,8 +86,9 @@ CGCNN_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
     'definet',
@@ -95,8 +98,9 @@ MEGNET_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
 ]
@@ -104,8 +108,9 @@ ALIGNN_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
     'definet',
@@ -249,6 +254,22 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
 
         loss_test = trainer.predict_structures(split['test_X'], split['test_y'], model_best)
         logger.log_test_result(loss_test)
+        checkpoint_path = split_checkpoint_path(log_dir, split['logger_id'])
+        save_best_checkpoint(
+            checkpoint_path,
+            trainer,
+            model_best,
+            config,
+            split,
+            model_name,
+            dataset_name,
+            mode,
+            log_mode,
+            min_loss,
+            loss_test,
+            epochs,
+        )
+        print(f'  [{split["display"]}] Best checkpoint saved: {checkpoint_path}')
         print(f'  [{split["display"]}] Test MAE: {loss_test:.4f}')
         trained += 1
 
@@ -280,6 +301,55 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         print(f'  Resume: skipped {skipped}/{total} completed split(s) for {log_mode}')
 
     return losses
+
+
+def _checkpoint_safe_id(value):
+    return str(value).replace(os.sep, '_').replace('/', '_').replace('\\', '_')
+
+
+def split_checkpoint_path(log_dir, logger_id):
+    return os.path.join(log_dir, f'seed{_checkpoint_safe_id(logger_id)}_best_checkpoint.pth')
+
+
+def _structure_source_metadata(structures):
+    return [
+        {
+            'source_id': getattr(structure, 'source_id', ''),
+            'source_name': getattr(structure, 'source_name', ''),
+            'source_path': getattr(structure, 'source_path', ''),
+        }
+        for structure in structures
+    ]
+
+
+def save_best_checkpoint(path, trainer, model_state_dict, config, split,
+                         model_name, dataset_name, mode, run_label,
+                         best_val_mae, test_mae, epochs):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    torch.save(
+        {
+            'model': model_state_dict,
+            'scaler': trainer.scaler.state_dict(),
+            'config': copy.deepcopy(config),
+            'model_name': model_name,
+            'dataset_name': dataset_name,
+            'mode': mode,
+            'run_label': run_label,
+            'task': config.get('task'),
+            'best_val_mae': float(best_val_mae),
+            'test_mae': float(test_mae),
+            'epochs': int(epochs),
+            'split': {
+                'display': split['display'],
+                'logger_id': split['logger_id'],
+                'seed': int(split['seed']),
+                'train_sources': _structure_source_metadata(split['train_X']),
+                'val_sources': _structure_source_metadata(split['val_X']),
+                'test_sources': _structure_source_metadata(split['test_X']),
+            },
+        },
+        path,
+    )
 
 
 def split_run_summary(seeds, cv5):
@@ -375,11 +445,12 @@ def validate_modes_for_model(model_name, modes, parser):
         parser.error('The definet model only supports --mode attention attention_was')
     if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
         parser.error(
-            'The alignn model supports --mode full full_x hetero attention '
-            'was hetero_was attention_was definet definet_was'
+            'The alignn model supports --mode full full_x hetero '
+            'hetero_fixed_pool attention was_x hetero_was attention_was '
+            'definet definet_was'
         )
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
-        parser.error('The was and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
+        parser.error('The was_x and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
         parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, --model definet, or --model alignn')
 
@@ -584,6 +655,13 @@ def main():
                     ]
                 elif mode in LOCAL_CUTOFF_SWEEP_MODES:
                     radii = args.r if args.r is not None else LOCAL_CUTOFF_CHOICES
+                    if mode in FIXED_POOL_MODES:
+                        radii = [radius for radius in radii if radius != 0]
+                        if not radii:
+                            print(
+                                f'\nSkipping {model_name.upper()} - {mode.upper()}: '
+                                'r=0 is identical to hetero_r0 for fixed pooling.'
+                            )
                     mode_runs = [
                         {
                             'label': f'{mode}_r{radius}',

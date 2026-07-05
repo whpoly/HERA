@@ -81,14 +81,14 @@ def get_configs_2dmd(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_was = _was_config(config_full, f'{task_prefix}_was')
+    config_was_x = _was_config(config_full, f'{task_prefix}_was_x')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     return (
         config_full,
         config_hetero,
         config_attention,
-        config_was,
+        config_was_x,
         config_hetero_was,
         config_attention_was,
     )
@@ -148,14 +148,14 @@ def get_configs_default(task_prefix):
         },
         'optim': _base_optim(),
     }
-    config_was = _was_config(config_full, f'{task_prefix}_was')
+    config_was_x = _was_config(config_full, f'{task_prefix}_was_x')
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     return (
         config_full,
         config_hetero,
         config_attention,
-        config_was,
+        config_was_x,
         config_hetero_was,
         config_attention_was,
     )
@@ -178,12 +178,16 @@ ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
     'definet',
     'definet_was',
+)
+FIXED_POOL_MODES = (
+    'hetero_fixed_pool',
 )
 CGCNN_DEFINET_MODES = (
     'definet',
@@ -203,8 +207,9 @@ VALID_MODES = [
     'full',
     'full_x',
     'hetero',
+    'hetero_fixed_pool',
     'attention',
-    'was',
+    'was_x',
     'hetero_was',
     'attention_was',
     'definet',
@@ -232,8 +237,9 @@ def get_config(model: str, dataset: str, mode: str):
     Args:
         model: 'megnet', 'cgcnn', 'definet', or 'alignn'
         dataset: one of VALID_DATASETS
-        mode: one of 'full', 'full_x', 'hetero', 'attention', 'was',
-            'hetero_was', 'attention_was', 'definet', 'definet_was'
+        mode: one of 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
+            'attention', 'was_x', 'hetero_was', 'attention_was',
+            'definet', 'definet_was'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -250,11 +256,13 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"The definet model only supports {DEFINET_MODES}")
     if model == 'alignn' and mode not in ALIGNN_MODES:
         raise ValueError(f"The alignn model only supports {ALIGNN_MODES}")
+    if mode in FIXED_POOL_MODES and model not in ('cgcnn', 'megnet', 'alignn'):
+        raise ValueError("The hetero_fixed_pool mode is only supported for cgcnn, megnet, and alignn")
     if model not in WAS_MODELS and mode in (
-            'was',
+            'was_x',
             'hetero_was',
     ):
-        raise ValueError("The was and hetero_was modes are only supported for cgcnn, megnet, and alignn")
+        raise ValueError("The was_x and hetero_was modes are only supported for cgcnn, megnet, and alignn")
     if model not in ATTENTION_ABLATION_MODELS and mode in (
             'attention_was',
     ):
@@ -264,7 +272,7 @@ def get_config(model: str, dataset: str, mode: str):
         config_full,
         config_hetero,
         config_attention,
-        config_was,
+        config_was_x,
         config_hetero_was,
         config_attention_was,
     ) = _CONFIG_REGISTRY[dataset](model)
@@ -274,11 +282,20 @@ def get_config(model: str, dataset: str, mode: str):
         config = copy.deepcopy(config_full)
         config['task'] = f'{model}_full_x'
         return config
+    if mode == 'hetero_fixed_pool':
+        config = copy.deepcopy(config_hetero)
+        config['task'] = f'{model}_hetero_fixed_pool'
+        config['model']['fixed_pooling'] = True
+        return config
+    if mode == 'was_x':
+        config = copy.deepcopy(config_was_x)
+        config['task'] = f'{model}_was_x'
+        return config
 
     config = {'full': config_full,
               'hetero': config_hetero,
               'attention': config_attention,
-              'was': config_was,
+              'was_x': config_was_x,
               'hetero_was': config_hetero_was,
               'attention_was': config_attention_was,
               }[mode]

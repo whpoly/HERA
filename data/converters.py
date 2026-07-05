@@ -227,7 +227,7 @@ class SimpleCrystalConverter:
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task in ('full', 'full_x', 'was', 'local'):
+        if self.task in ('full', 'full_x', 'was_x', 'local'):
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []
@@ -344,6 +344,10 @@ class SimpleCrystalConverter:
             bond_attr = []
             bond_vec = []
             indexs = torch.LongTensor([site.properties['type'] for site in d])
+            pool_types = torch.LongTensor([
+                int(site.properties.get('pool_type', site.properties['type']))
+                for site in d
+            ])
             all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
             all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
             add_synthetic_self_loops = self.model_family != 'megnet'
@@ -394,6 +398,7 @@ class SimpleCrystalConverter:
                 edge_vec=edge_vec,
                 y=y,
                 weight=weight,
+                pool_type=pool_types,
                 structure=(d, indexs),
                 **self._source_metadata_kwargs(d),
             ).to_heterogeneous(

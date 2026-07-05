@@ -29,12 +29,14 @@ CGCNN_ATTENTION_TASKS = (
 )
 CGCNN_HETERO_TASKS = (
     'cgcnn_hetero',
+    'cgcnn_hetero_fixed_pool',
     'hetero_cgcnn_was',
     'cgcnn_hetero_local',
     'cgcnn_hetero_local_was',
 )
 MEGNET_HETERO_TASKS = (
     'megnet_hetero',
+    'megnet_hetero_fixed_pool',
     'megnet_hetero_was',
     'megnet_hetero_local',
     'megnet_hetero_local_was',
@@ -49,10 +51,11 @@ ALIGNN_HOMOGENEOUS_TASKS = (
     'alignn_full',
     'alignn_full_x',
     'alignn_local',
-    'alignn_was',
+    'alignn_was_x',
 )
 ALIGNN_HETERO_TASKS = (
     'alignn_hetero',
+    'alignn_hetero_fixed_pool',
     'alignn_hetero_was',
     'alignn_hetero_local',
     'alignn_hetero_local_was',
@@ -167,7 +170,7 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task in ('megnet_full', 'megnet_full_x', 'megnet_local', 'megnet_was'):
+        if task in ('megnet_full', 'megnet_full_x', 'megnet_local', 'megnet_was_x'):
             self.model = MEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
@@ -191,6 +194,7 @@ class MEGNetTrainer:
                 state_input_shape=self.config["model"]["state_input_shape"],
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 global_aggregation=self.config["model"]["global_aggregation"],
+                fixed_pooling=self.config["model"].get("fixed_pooling", False),
             ).to(self.device)
         elif task in CGCNN_HETERO_TASKS:
             model = CrystalGraphConvNet(
@@ -208,6 +212,7 @@ class MEGNetTrainer:
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
                 n_h=3,
+                fixed_pooling=self.config["model"].get("fixed_pooling", False),
             ).to(self.device)
         elif task in ALIGNN_HOMOGENEOUS_TASKS:
             self.model = ALIGNN(
@@ -237,6 +242,7 @@ class MEGNetTrainer:
                     self.config['model']['edge_embed_size'],
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
+                fixed_pooling=self.config["model"].get("fixed_pooling", False),
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(
@@ -383,6 +389,7 @@ class MEGNetTrainer:
             return self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch.state, batch_dict, bond_batch_dict,
+                pool_type=_collect_hetero_attr(batch, 'pool_type'),
             ).squeeze()
         elif task in CGCNN_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
@@ -394,6 +401,7 @@ class MEGNetTrainer:
             return self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch_dict,
+                pool_type=_collect_hetero_attr(batch, 'pool_type'),
             ).squeeze()
         elif task in ALIGNN_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
@@ -408,7 +416,10 @@ class MEGNetTrainer:
             )
             return self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
-                batch_dict, edge_vec_dict=edge_vec_dict, state=batch.state,
+                batch_dict,
+                edge_vec_dict=edge_vec_dict,
+                state=batch.state,
+                pool_type=_collect_hetero_attr(batch, 'pool_type'),
             ).squeeze()
         elif task in ALIGNN_HOMOGENEOUS_TASKS:
             return self.model(
@@ -428,7 +439,7 @@ class MEGNetTrainer:
                 edge_vec=getattr(batch, 'edge_vec', None),
                 defect_marker=marker,
             ).squeeze()
-        elif task in ('cgcnn_full', 'cgcnn_full_x', 'cgcnn_local', 'cgcnn_was'):
+        elif task in ('cgcnn_full', 'cgcnn_full_x', 'cgcnn_local', 'cgcnn_was_x'):
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
         elif task in CGCNN_ATTENTION_TASKS:
             return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()

@@ -46,7 +46,7 @@ ALIGNN_HOMOGENEOUS_TASKS = {
     "alignn_full",
     "alignn_full_x",
     "alignn_local",
-    "alignn_was",
+    "alignn_was_x",
 }
 ALIGNN_HETERO_TASKS = {
     "alignn_hetero",
@@ -144,7 +144,10 @@ class PredictionWrapper(nn.Module):
             )
             edge_vec = _complete_hetero_edge_vecs(edge_vec, edge_attr)
             pred = self.model(x, edge_index, edge_attr, batch, edge_vec_dict=edge_vec, state=state)
-        elif self.task in ("cgcnn_sparse", "cgcnn_full", "cgcnn_local", "cgcnn_was"):
+        elif self.task in (
+                "cgcnn_sparse", "cgcnn_full", "cgcnn_full_x",
+                "cgcnn_local", "cgcnn_was_x",
+        ):
             pred = self.model(x, edge_index, edge_attr, batch)
         elif self.task in ALIGNN_HOMOGENEOUS_TASKS:
             pred = self.model(x, edge_index, edge_attr, batch, edge_vec=edge_vec)

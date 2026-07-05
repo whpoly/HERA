@@ -87,11 +87,13 @@ class HeteroMEGNet(nn.Module):
                  n_blocks=3,
                  vertex_aggregation="mean",
                  global_aggregation="mean",
+                 fixed_pooling=False,
                  ):
         super().__init__()
         self.node_type = metadata[0]
         self.edge_type = metadata[1]
         self.embedding_size = embedding_size
+        self.fixed_pooling = fixed_pooling
         self.embedded = node_input_shape is None
         if self.embedded:
             node_input_shape = node_embedding_size
@@ -135,7 +137,48 @@ class HeteroMEGNet(nn.Module):
             padded[:pooled.size(0)] = pooled[:dim_size]
             return padded
 
-    def forward(self, x, edge_index, edge_attr, state, batch, bond_batch):
+    @staticmethod
+    def _pool_type_for_node_store(pool_type, node_type, x, batch):
+        if pool_type is not None:
+            return pool_type.to(device=x.device, dtype=torch.long).view(-1)
+        default_value = 1 if node_type == 'defect' else 0
+        return torch.full(
+            (x.size(0),),
+            default_value,
+            dtype=torch.long,
+            device=x.device,
+        )
+
+    def _pool_fixed_type(self, pooling, x_dict, batch_dict, pool_type_dict,
+                         target_type, num_graphs, reference):
+        features = []
+        batches = []
+        pool_type_dict = {} if pool_type_dict is None else pool_type_dict
+        for node_type, x in x_dict.items():
+            if x is None or x.size(0) == 0:
+                continue
+            batch = batch_dict.get(node_type)
+            if batch is None or batch.numel() == 0:
+                continue
+            pool_type = self._pool_type_for_node_store(
+                pool_type_dict.get(node_type), node_type, x, batch
+            )
+            mask = pool_type.eq(target_type)
+            if torch.count_nonzero(mask) == 0:
+                continue
+            features.append(x[mask])
+            batches.append(batch[mask])
+        if not features:
+            return self._set2set_or_zeros(pooling, None, None, num_graphs, reference)
+        return self._set2set_or_zeros(
+            pooling,
+            torch.cat(features, dim=0),
+            torch.cat(batches, dim=0),
+            num_graphs,
+            reference,
+        )
+
+    def forward(self, x, edge_index, edge_attr, state, batch, bond_batch, pool_type=None):
         if self.embedded:
             x = {k: self.emb(v.long()).squeeze() for k, v in x.items()}
         else:
@@ -146,8 +189,12 @@ class HeteroMEGNet(nn.Module):
             x, edge_attr, state = block(x, edge_index, edge_attr, state, batch, bond_batch)
 
         num_graphs = state.size(0)
-        x_defect = self._set2set_or_zeros(self.sv_2, x.get('defect'), batch.get('defect'), num_graphs, state)
-        x_atom = self._set2set_or_zeros(self.sv, x.get('atom'), batch.get('atom'), num_graphs, state)
+        if self.fixed_pooling:
+            x_atom = self._pool_fixed_type(self.sv, x, batch, pool_type, 0, num_graphs, state)
+            x_defect = self._pool_fixed_type(self.sv_2, x, batch, pool_type, 1, num_graphs, state)
+        else:
+            x_defect = self._set2set_or_zeros(self.sv_2, x.get('defect'), batch.get('defect'), num_graphs, state)
+            x_atom = self._set2set_or_zeros(self.sv, x.get('atom'), batch.get('atom'), num_graphs, state)
 
         edge_attr = torch.cat([edge_attr[self.edge_type[i]] for i in range(len(self.edge_type))], dim=0)
         bond_batch = torch.cat([bond_batch[self.edge_type[i]] for i in range(len(self.edge_type))], dim=0)

@@ -84,6 +84,7 @@ def is_hetero_task(task):
     return (
         task.endswith('_hetero')
         or task.endswith('_hetero_was')
+        or task.endswith('_hetero_fixed_pool')
         or task.endswith('_hetero_local')
         or task.endswith('_hetero_local_was')
         or task == 'hetero_cgcnn_was'
@@ -97,7 +98,15 @@ def is_hetero_local_task(task):
     )
 
 
+def preserve_pool_type(structure):
+    structure = structure.copy()
+    for site in structure:
+        site.properties['pool_type'] = int(site_type_flag(site))
+    return structure
+
+
 def mark_hetero_region_if_needed(structure, task, local_cutoff):
+    structure = preserve_pool_type(structure)
     if is_hetero_local_task(task):
         return structure
     return mark_local_region(structure, local_cutoff)
@@ -121,7 +130,7 @@ def is_local_task(task):
 
 
 def is_full_x_task(task):
-    return task.endswith('_full_x') or task == 'full_x'
+    return task.endswith('_full_x') or task.endswith('_was_x') or task == 'full_x' or task == 'was_x'
 
 
 def add_was(structure, unit_cell, supercell_size):

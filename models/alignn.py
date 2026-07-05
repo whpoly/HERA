@@ -604,11 +604,13 @@ class HeteroALIGNN(nn.Module):
             n_blocks=3,
             angle_embed_size=40,
             vertex_aggregation="add",
+            fixed_pooling=False,
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.hidden_dim = hidden_dim
+        self.fixed_pooling = fixed_pooling
         self.node_embedding = nn.ModuleDict({
             node_type: nn.Linear(node_input_shape, hidden_dim)
             for node_type in self.node_types
@@ -641,7 +643,43 @@ class HeteroALIGNN(nn.Module):
                 batches.append(batch_dict[dst_type][edge_index[1]])
         return batches
 
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict, edge_vec_dict=None, state=None):
+    @staticmethod
+    def _pool_type_for_node_store(pool_type, node_type, x):
+        if pool_type is not None:
+            return pool_type.to(device=x.device, dtype=torch.long).view(-1)
+        default_value = 1 if node_type == "defect" else 0
+        return torch.full((x.size(0),), default_value, dtype=torch.long, device=x.device)
+
+    def _pool_fixed_type(self, x_dict, batch_dict, pool_type_dict, target_type, num_graphs, reference):
+        features = []
+        batches = []
+        pool_type_dict = {} if pool_type_dict is None else pool_type_dict
+        for node_type, x in x_dict.items():
+            if x is None or x.size(0) == 0:
+                continue
+            batch = batch_dict.get(node_type)
+            if batch is None or batch.numel() == 0:
+                continue
+            pool_type = self._pool_type_for_node_store(
+                pool_type_dict.get(node_type), node_type, x
+            )
+            mask = pool_type.eq(target_type)
+            if torch.count_nonzero(mask) == 0:
+                continue
+            features.append(x[mask])
+            batches.append(batch[mask])
+        if not features:
+            return _pool_mean_or_zeros(None, None, num_graphs, self.hidden_dim, reference)
+        return _pool_mean_or_zeros(
+            torch.cat(features, dim=0),
+            torch.cat(batches, dim=0),
+            num_graphs,
+            self.hidden_dim,
+            reference,
+        )
+
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict,
+                edge_vec_dict=None, state=None, pool_type=None):
         edge_vec_dict = {} if edge_vec_dict is None else edge_vec_dict
         x_dict = {
             node_type: self.node_embedding[node_type](x_dict[node_type].float())
@@ -659,12 +697,16 @@ class HeteroALIGNN(nn.Module):
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)
-        atom_pool = _pool_mean_or_zeros(
-            x_dict.get("atom"), batch_dict.get("atom"), num_graphs, self.hidden_dim, reference
-        )
-        defect_pool = _pool_mean_or_zeros(
-            x_dict.get("defect"), batch_dict.get("defect"), num_graphs, self.hidden_dim, reference
-        )
+        if self.fixed_pooling:
+            atom_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 0, num_graphs, reference)
+            defect_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 1, num_graphs, reference)
+        else:
+            atom_pool = _pool_mean_or_zeros(
+                x_dict.get("atom"), batch_dict.get("atom"), num_graphs, self.hidden_dim, reference
+            )
+            defect_pool = _pool_mean_or_zeros(
+                x_dict.get("defect"), batch_dict.get("defect"), num_graphs, self.hidden_dim, reference
+            )
 
         edge_parts = [edge_attr_dict[edge_type] for edge_type in self.edge_types]
         edge_batch_parts = self._edge_batches(edge_index_dict, batch_dict, reference)

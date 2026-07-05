@@ -84,11 +84,12 @@ class Heterocgcnn(nn.Module):
 
     def __init__(self, base_model, orig_atom_fea_len, nbr_fea_len,
                  atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-                 classification=False):
+                 classification=False, fixed_pooling=False):
         super().__init__()
         self.classification = classification
         self.base_model = base_model
         self.atom_fea_len = atom_fea_len
+        self.fixed_pooling = fixed_pooling
         self.conv_to_fc = nn.Linear(2 * atom_fea_len, h_fea_len)
         self.pooling = MeanAggregation()
 
@@ -115,14 +116,60 @@ class Heterocgcnn(nn.Module):
             padded[:pooled.size(0)] = pooled[:dim_size]
             return padded
 
-    def forward(self, x, edge_index, edge_attr, batch):
+    @staticmethod
+    def _num_graphs(batch):
+        counts = [int(value.max().item()) + 1 for value in batch.values() if value.numel() > 0]
+        return max(counts) if counts else 1
+
+    @staticmethod
+    def _pool_type_for_node_store(pool_type, node_type, x):
+        if pool_type is not None:
+            return pool_type.to(device=x.device, dtype=torch.long).view(-1)
+        default_value = 1 if node_type == 'defect' else 0
+        return torch.full((x.size(0),), default_value, dtype=torch.long, device=x.device)
+
+    def _pool_fixed_type(self, atom_fea, batch, pool_type, target_type, num_graphs, reference):
+        features = []
+        batches = []
+        pool_type = {} if pool_type is None else pool_type
+        for node_type, features_by_type in atom_fea.items():
+            if features_by_type is None or features_by_type.size(0) == 0:
+                continue
+            batch_by_type = batch.get(node_type)
+            if batch_by_type is None or batch_by_type.numel() == 0:
+                continue
+            node_pool_type = self._pool_type_for_node_store(
+                pool_type.get(node_type), node_type, features_by_type
+            )
+            mask = node_pool_type.eq(target_type)
+            if torch.count_nonzero(mask) == 0:
+                continue
+            features.append(features_by_type[mask])
+            batches.append(batch_by_type[mask])
+        if not features:
+            return self._pool_node_type(None, None, num_graphs, reference)
+        return self._pool_node_type(
+            torch.cat(features, dim=0),
+            torch.cat(batches, dim=0),
+            num_graphs,
+            reference,
+        )
+
+    def forward(self, x, edge_index, edge_attr, batch, pool_type=None):
         atom_fea = self.base_model(x, edge_index, edge_attr, batch)
-        defect_fea = atom_fea['defect']
-        defect_batch = batch['defect']
-        num_graphs = int(defect_batch.max().item()) + 1 if defect_batch.numel() > 0 else 1
+        reference = next(value for value in atom_fea.values() if value is not None)
+        num_graphs = self._num_graphs(batch)
+        if self.fixed_pooling:
+            defect_pool = self._pool_fixed_type(atom_fea, batch, pool_type, 1, num_graphs, reference)
+            atom_pool = self._pool_fixed_type(atom_fea, batch, pool_type, 0, num_graphs, reference)
+        else:
+            defect_fea = atom_fea['defect']
+            defect_batch = batch['defect']
+            defect_pool = self._pool_node_type(defect_fea, defect_batch, num_graphs, reference)
+            atom_pool = self._pool_node_type(atom_fea.get('atom'), batch.get('atom'), num_graphs, reference)
         crys_fea = torch.cat((
-            self._pool_node_type(defect_fea, defect_batch, num_graphs, defect_fea),
-            self._pool_node_type(atom_fea.get('atom'), batch.get('atom'), num_graphs, defect_fea),
+            defect_pool,
+            atom_pool,
         ), 1)
 
         crys_fea = self.conv_to_fc(F.softplus(crys_fea))
