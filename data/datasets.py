@@ -12,7 +12,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 from pymatgen.io.cif import CifParser
-from pymatgen.core import Structure
+from pymatgen.core import Composition, Structure
 
 from .structure_utils import (
     convert_to_sparse_vacancy,
@@ -112,6 +112,14 @@ def tag_structure_source(structure, source_path, source_id=None):
     structure.source_name = Path(source_path).stem
     structure.source_id = str(source_id if source_id is not None else structure.source_name)
     return structure
+
+
+def formula_contains_element(formula, element):
+    """Return whether a chemical formula contains an element symbol."""
+    try:
+        return element in Composition(formula).get_el_amt_dict()
+    except Exception:
+        return element in formula
 
 
 def init_elem_embedding(path='atom_init.json'):
@@ -304,14 +312,20 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
-        base, impurity, _ = j.split('_')
-        if impurity not in base:
-            if df_descriptors[1][i] > -10 and df_descriptors[1][i] < 10:
-                source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
-                struct = Structure.from_file(source_path)
-                tag_structure_source(struct, source_path, j)
-                prep.append([struct, impurity])
-                targets.append(df_descriptors[1][i])
+        base, impurity, site = j.split('_')
+        if df_descriptors[1][i] <= -10 or df_descriptors[1][i] >= 10:
+            continue
+        source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
+        struct = Structure.from_file(source_path)
+        tag_structure_source(struct, source_path, j)
+        defect_info = {
+            'base': base,
+            'impurity': impurity,
+            'site': site,
+            'is_self': formula_contains_element(base, impurity),
+        }
+        prep.append([struct, defect_info])
+        targets.append(df_descriptors[1][i])
 
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:

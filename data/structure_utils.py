@@ -570,26 +570,53 @@ def convert_to_sparse_och(structure, unit_cell, supercell_size, task, state,
 #  imp2d
 # ================================================================== #
 
+def get_imp2d_defect_info(unit_cell):
+    if isinstance(unit_cell, dict):
+        return unit_cell
+    return {'impurity': unit_cell, 'is_self': False}
+
+
+def get_imp2d_defect_indices(structure, unit_cell):
+    defect_info = get_imp2d_defect_info(unit_cell)
+    if defect_info.get('is_self'):
+        return {len(structure) - 1} if len(structure) else set()
+
+    impurity = defect_info['impurity']
+    return {
+        idx
+        for idx, site in enumerate(structure)
+        if site.species_string == impurity
+    }
+
+
 def get_sparse_imp2d(structure, unit_cell, supercell_size):
-    return get_sparse_och(structure, unit_cell, supercell_size)
+    defect_indices = get_imp2d_defect_indices(structure, unit_cell)
+    return Structure.from_sites([
+        site for idx, site in enumerate(structure)
+        if idx in defect_indices
+    ])
 
 
 def get_hetero_imp2d(structure, unit_cell, supercell_size, state):
-    return get_hetero_och(structure, unit_cell, supercell_size, state)
+    structure = structure.copy()
+    defect_indices = get_imp2d_defect_indices(structure, unit_cell)
+    sites_raw = []
+    for idx, site in enumerate(structure):
+        site.properties['type'] = idx in defect_indices
+        sites_raw.append(site)
+    return Structure.from_sites(sites_raw)
 
 
 def get_local_imp2d(structure, unit_cell, supercell_size, state, local_cutoff=0):
     structure = structure.copy()
     sites_raw = []
-    base_species = unit_cell
-    defect_idx = None
-    for idx in range(len(structure)):
-        if structure[idx].species_string == base_species:
-            defect_idx = idx
+    defect_indices = get_imp2d_defect_indices(structure, unit_cell)
+    if not defect_indices:
+        return Structure.from_sites(sites_raw)
 
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
-        distance = structure.get_distance(index, defect_idx)
+        distance = min(structure.get_distance(index, defect_idx) for defect_idx in defect_indices)
         if distance <= local_cutoff:
             cur_site = structure_dict[coords]
             cur_site.properties['type'] = True
