@@ -72,23 +72,61 @@ class SafeBatchNorm1d(nn.BatchNorm1d):
         return super().forward(input)
 
 
-class AngleExpansion(nn.Module):
-    """Gaussian radial basis expansion for bond angles in radians."""
+class MLPLayer(nn.Module):
+    """Official ALIGNN helper: Linear, BatchNorm, SiLU."""
 
-    def __init__(self, num_centers=40, sigma=None):
+    def __init__(self, in_features, out_features):
         super().__init__()
-        centers = torch.linspace(0.0, math.pi, int(num_centers))
+        self.layer = nn.Sequential(
+            nn.Linear(in_features, out_features),
+            SafeBatchNorm1d(out_features),
+            nn.SiLU(),
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class RBFExpansion(nn.Module):
+    """Gaussian radial basis expansion used by the old official ALIGNN."""
+
+    def __init__(self, vmin, vmax, bins, sigma=None):
+        super().__init__()
+        centers = torch.linspace(float(vmin), float(vmax), int(bins))
         self.register_buffer("centers", centers)
         if sigma is None:
-            sigma = math.pi / max(int(num_centers) - 1, 1)
+            sigma = (float(vmax) - float(vmin)) / max(int(bins) - 1, 1)
         self.sigma = float(sigma)
 
     @property
     def out_features(self):
         return int(self.centers.numel())
 
-    def forward(self, angles):
-        return torch.exp(-((angles.view(-1, 1) - self.centers.view(1, -1)) / self.sigma) ** 2)
+    def forward(self, values):
+        return torch.exp(-((values.view(-1, 1) - self.centers.view(1, -1)) / self.sigma) ** 2)
+
+
+class AngleExpansion(RBFExpansion):
+    """Official ALIGNN angle expansion over bond-angle cosine values."""
+
+    def __init__(self, num_centers=40, sigma=None):
+        super().__init__(-1.0, 1.0, num_centers, sigma=sigma)
+
+
+def _official_feature_embedding(in_features, hidden_dim):
+    return nn.Sequential(
+        MLPLayer(in_features, hidden_dim),
+        MLPLayer(hidden_dim, hidden_dim),
+    )
+
+
+def _embed_distance_edges(edge_attr, edge_vec, distance_expansion, edge_embedding):
+    if edge_vec is not None and edge_vec.size(0) == edge_attr.size(0):
+        bond_length = edge_vec.float().norm(dim=-1)
+        edge_attr = distance_expansion(bond_length)
+    else:
+        edge_attr = edge_attr.float()
+    return edge_embedding(edge_attr)
 
 
 def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion):
@@ -112,9 +150,8 @@ def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion):
     dst = dst[valid]
     v_in = v_in[valid]
     v_out = v_out[valid]
-    cos_angle = F.cosine_similarity(v_in, v_out, dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-    angles = torch.acos(cos_angle)
-    return torch.stack([src, dst], dim=0), angle_expansion(angles)
+    cos_angle = F.cosine_similarity(v_in, v_out, dim=-1).clamp(-1.0, 1.0)
+    return torch.stack([src, dst], dim=0), angle_expansion(cos_angle)
 
 
 def _valid_edge_mask(edge_vec):
@@ -189,62 +226,63 @@ def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_ty
     return _angle_features_from_pairs(pair_src, pair_dst, edge_vec_all, angle_expansion)
 
 
-class GatedGraphConv(MessagePassing):
-    """Residual gated message-passing block used for atom and line graphs."""
+class GatedGraphConv(nn.Module):
+    """Official ALIGNN-style edge-gated convolution.
+
+    The aggregation follows ALIGNN's gate-normalized update:
+    sum(sigmoid(e_ij) * h_j) / (sum(sigmoid(e_ij)) + eps).
+    """
 
     def __init__(self, channels, edge_dim, aggr="add"):
-        super().__init__(aggr=_normalize_aggr(aggr))
+        super().__init__()
         self.channels = channels
-        self.message_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
-            nn.Linear(channels, channels),
-        )
-        self.gate_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
-            nn.Linear(channels, channels),
-            nn.Sigmoid(),
-        )
-        self.update_nn = nn.Sequential(
-            nn.Linear(2 * channels, channels), nn.SiLU(),
-            nn.Linear(channels, channels),
-        )
-        self.norm = SafeBatchNorm1d(channels)
+        self.aggr = _normalize_aggr(aggr)
+        self.src_gate = nn.Linear(channels, channels)
+        self.dst_gate = nn.Linear(channels, channels)
+        self.edge_gate = nn.Linear(edge_dim, channels)
+        self.src_update = nn.Linear(channels, channels)
+        self.dst_update = nn.Linear(channels, channels)
+        self.bn_nodes = SafeBatchNorm1d(channels)
+        self.bn_edges = SafeBatchNorm1d(channels)
 
-    def forward(self, x, edge_index, edge_attr, size=None):
-        x_dst = x[1] if isinstance(x, tuple) else x
+    @staticmethod
+    def _split_nodes(x):
+        if isinstance(x, tuple):
+            return x
+        return x, x
+
+    def forward(self, x, edge_index, edge_attr, size=None, return_edge_attr=False):
+        x_src, x_dst = self._split_nodes(x)
         if x_dst.size(0) == 0 or edge_index.size(1) == 0:
+            if return_edge_attr:
+                return x_dst, edge_attr
             return x_dst
 
-        out = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr, size=size)
-        out = self.update_nn(torch.cat([x_dst, out], dim=-1))
-        return self.norm(x_dst + out)
-
-    def message(self, x_i, x_j, edge_attr):
-        z = torch.cat([x_i, x_j, edge_attr], dim=-1)
-        return self.gate_nn(z) * self.message_nn(z)
-
-
-class EdgeFeatureUpdate(nn.Module):
-    """Residual edge update used by ALIGNN-style graph-conv blocks."""
-
-    def __init__(self, channels):
-        super().__init__()
-        self.update_nn = nn.Sequential(
-            nn.Linear(3 * channels, channels), nn.SiLU(),
-            nn.Linear(channels, channels),
-        )
-        self.norm = SafeBatchNorm1d(channels)
-
-    def forward(self, x, edge_index, edge_attr):
-        if edge_attr.size(0) == 0 or edge_index.size(1) == 0:
-            return edge_attr
-        if isinstance(x, tuple):
-            x_src, x_dst = x
-        else:
-            x_src = x_dst = x
         src, dst = edge_index
-        update = self.update_nn(torch.cat([x_src[src], x_dst[dst], edge_attr], dim=-1))
-        return self.norm(edge_attr + update)
+        edge_update = (
+            self.src_gate(x_src[src])
+            + self.dst_gate(x_dst[dst])
+            + self.edge_gate(edge_attr)
+        )
+        sigma = torch.sigmoid(edge_update)
+
+        messages = self.dst_update(x_src)[src] * sigma
+        out = x_dst.new_zeros((x_dst.size(0), self.channels))
+        norm = x_dst.new_zeros((x_dst.size(0), self.channels))
+        out.index_add_(0, dst, messages)
+        norm.index_add_(0, dst, sigma)
+
+        node_update = self.src_update(x_dst) + out / (norm + 1e-6)
+        node_update = F.silu(self.bn_nodes(node_update))
+        x_out = x_dst + node_update
+
+        if not return_edge_attr:
+            return x_out
+
+        edge_update = F.silu(self.bn_edges(edge_update))
+        if edge_attr.size(-1) == self.channels:
+            edge_update = edge_attr + edge_update
+        return x_out, edge_update
 
 
 class GraphConvLayer(nn.Module):
@@ -253,13 +291,15 @@ class GraphConvLayer(nn.Module):
     def __init__(self, hidden_dim, vertex_aggregation="add"):
         super().__init__()
         self.atom_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
-        self.edge_update = EdgeFeatureUpdate(hidden_dim)
 
     def forward(self, x, edge_index, edge_attr, size=None):
-        edge_update_x = x
-        x = self.atom_conv(x, edge_index, edge_attr, size=size)
-        edge_attr = self.edge_update(edge_update_x, edge_index, edge_attr)
-        return x, edge_attr
+        return self.atom_conv(
+            x,
+            edge_index,
+            edge_attr,
+            size=size,
+            return_edge_attr=True,
+        )
 
 
 class AtomTypeAttentionGatedGraphConv(MessagePassing):
@@ -330,18 +370,27 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
 
 
 class ALIGNNLayer(nn.Module):
-    """One ALIGNN block: line-graph bond update followed by atom update."""
+    """Old official ALIGNN block: atom graph update, then line graph update."""
 
-    def __init__(self, hidden_dim, angle_dim, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, vertex_aggregation="add"):
         super().__init__()
-        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
         self.atom_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
 
-    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion):
-        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
-        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
-        x = self.atom_conv(x, edge_index, edge_attr)
-        return x, edge_attr
+    def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr):
+        x, edge_message = self.atom_conv(
+            x,
+            edge_index,
+            edge_attr,
+            return_edge_attr=True,
+        )
+        edge_attr, angle_attr = self.line_conv(
+            edge_message,
+            line_edge_index,
+            angle_attr,
+            return_edge_attr=True,
+        )
+        return x, edge_attr, angle_attr
 
 
 class AttentionALIGNNLayer(nn.Module):
@@ -349,16 +398,20 @@ class AttentionALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, n_heads=4, vertex_aggregation="add"):
         super().__init__()
-        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
         self.atom_conv = AtomTypeAttentionGatedGraphConv(
             hidden_dim, hidden_dim, n_heads=n_heads, aggr=vertex_aggregation
         )
 
-    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion, node_type=None):
-        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
-        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
+    def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr, node_type=None):
+        edge_attr, angle_attr = self.line_conv(
+            edge_attr,
+            line_edge_index,
+            angle_attr,
+            return_edge_attr=True,
+        )
         x = self.atom_conv(x, edge_index, edge_attr, node_type=node_type)
-        return x, edge_attr
+        return x, edge_attr, angle_attr
 
     def get_attention_weights(self):
         return self.atom_conv.get_attention_weights()
@@ -369,7 +422,7 @@ class DefiNetALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, n_marker_types=2, vertex_aggregation="add"):
         super().__init__()
-        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
         self.atom_conv = DefectAwareGateConv(
             channels=hidden_dim,
             dim=hidden_dim,
@@ -377,11 +430,15 @@ class DefiNetALIGNNLayer(nn.Module):
             batch_norm=True,
         )
 
-    def forward(self, x, edge_index, edge_attr, edge_vec, angle_expansion, defect_marker=None):
-        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, angle_expansion)
-        edge_attr = self.line_conv(edge_attr, line_edge_index, angle_attr)
+    def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr, defect_marker=None):
+        edge_attr, angle_attr = self.line_conv(
+            edge_attr,
+            line_edge_index,
+            angle_attr,
+            return_edge_attr=True,
+        )
         x = self.atom_conv(x, edge_index, edge_attr, defect_marker=defect_marker)
-        return x, edge_attr
+        return x, edge_attr, angle_attr
 
     def get_attention_weights(self):
         return self.atom_conv.get_attention_weights()
@@ -394,62 +451,33 @@ class HeteroALIGNNLayer(nn.Module):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
-        self.line_conv = GatedGraphConv(hidden_dim, angle_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
         self.atom_convs = nn.ModuleDict({
             _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
             for edge_type in self.edge_types
         })
 
-    def _update_edges(self, edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion):
-        edge_parts = []
-        edge_vec_parts = []
-        edge_offsets = {}
-        offset = 0
-
-        for edge_type in self.edge_types:
-            edge_attr = edge_attr_dict[edge_type]
-            edge_vec = edge_vec_dict.get(edge_type)
-            if edge_vec is None:
-                edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
-            edge_offsets[edge_type] = offset
-            edge_parts.append(edge_attr)
-            edge_vec_parts.append(edge_vec.float())
-            offset += int(edge_attr.size(0))
-
-        if offset == 0:
-            return edge_attr_dict
-
-        edge_all = torch.cat(edge_parts, dim=0)
-        edge_vec_all = torch.cat(edge_vec_parts, dim=0)
-        line_edge_index, angle_attr = build_hetero_line_graph(
-            edge_index_dict, edge_vec_all, edge_offsets, self.edge_types, angle_expansion
-        )
-        edge_all = self.line_conv(edge_all, line_edge_index, angle_attr)
-
-        out = {}
-        for edge_type in self.edge_types:
-            start = edge_offsets[edge_type]
-            end = start + edge_attr_dict[edge_type].size(0)
-            out[edge_type] = edge_all[start:end]
-        return out
-
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion):
-        edge_attr_dict = self._update_edges(edge_index_dict, edge_attr_dict, edge_vec_dict, angle_expansion)
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict,
+                line_edge_index, angle_attr, edge_offsets):
         node_outputs = {node_type: [] for node_type in self.node_types}
+        edge_messages = {}
 
         for edge_type in self.edge_types:
             src_type, _, dst_type = edge_type
             edge_index = edge_index_dict[edge_type]
             if edge_index.size(1) == 0 or x_dict[src_type].size(0) == 0 or x_dict[dst_type].size(0) == 0:
+                edge_messages[edge_type] = edge_attr_dict[edge_type]
                 continue
 
-            out = self.atom_convs[_edge_type_key(edge_type)](
+            out, edge_message = self.atom_convs[_edge_type_key(edge_type)](
                 (x_dict[src_type], x_dict[dst_type]),
                 edge_index,
                 edge_attr_dict[edge_type],
                 size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
+                return_edge_attr=True,
             )
             node_outputs[dst_type].append(out)
+            edge_messages[edge_type] = edge_message
 
         out_dict = {}
         for node_type in self.node_types:
@@ -460,7 +488,21 @@ class HeteroALIGNNLayer(nn.Module):
                 out_dict[node_type] = outputs[0]
             else:
                 out_dict[node_type] = torch.stack(outputs, dim=0).mean(dim=0)
-        return out_dict, edge_attr_dict
+
+        edge_all = torch.cat([edge_messages[edge_type] for edge_type in self.edge_types], dim=0)
+        edge_all, angle_attr = self.line_conv(
+            edge_all,
+            line_edge_index,
+            angle_attr,
+            return_edge_attr=True,
+        )
+
+        out_edge_attr = {}
+        for edge_type in self.edge_types:
+            start = edge_offsets[edge_type]
+            end = start + edge_attr_dict[edge_type].size(0)
+            out_edge_attr[edge_type] = edge_all[start:end]
+        return out_dict, out_edge_attr, angle_attr
 
 
 class HeteroGraphConvLayer(nn.Module):
@@ -472,10 +514,6 @@ class HeteroGraphConvLayer(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = nn.ModuleDict({
             _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
-            for edge_type in self.edge_types
-        })
-        self.edge_updates = nn.ModuleDict({
-            _edge_type_key(edge_type): EdgeFeatureUpdate(hidden_dim)
             for edge_type in self.edge_types
         })
 
@@ -490,18 +528,15 @@ class HeteroGraphConvLayer(nn.Module):
                 continue
 
             x_pair = (x_dict[src_type], x_dict[dst_type])
-            out = self.atom_convs[_edge_type_key(edge_type)](
+            out, edge_update = self.atom_convs[_edge_type_key(edge_type)](
                 x_pair,
                 edge_index,
                 edge_attr_dict[edge_type],
                 size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
+                return_edge_attr=True,
             )
             node_outputs[dst_type].append(out)
-            out_edge_attr[edge_type] = self.edge_updates[_edge_type_key(edge_type)](
-                x_pair,
-                edge_index,
-                edge_attr_dict[edge_type],
-            )
+            out_edge_attr[edge_type] = edge_update
 
         out_dict = {}
         for node_type in self.node_types:
@@ -516,7 +551,7 @@ class HeteroGraphConvLayer(nn.Module):
 
 
 class ALIGNN(nn.Module):
-    """Homogeneous ALIGNN for full/local/WAS graph modes."""
+    """Homogeneous ALIGNN matching the old official ALIGNN architecture."""
 
     def __init__(
             self,
@@ -527,44 +562,58 @@ class ALIGNN(nn.Module):
             gcn_blocks=4,
             angle_embed_size=40,
             vertex_aggregation="add",
+            cutoff=8.0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
-        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
+        self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
         self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
         self.layers = nn.ModuleList([
-            ALIGNNLayer(hidden_dim, self.angle_expansion.out_features, vertex_aggregation=vertex_aggregation)
+            ALIGNNLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
         self.gcn_layers = nn.ModuleList([
             GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
             for _ in range(gcn_blocks)
         ])
-        self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
-            nn.Linear(hidden_dim // 2, 1),
+        self.fc = nn.Linear(hidden_dim, 1)
+
+    def _embed_edges(self, edge_attr, edge_vec):
+        return _embed_distance_edges(
+            edge_attr,
+            edge_vec,
+            self.distance_expansion,
+            self.edge_embedding,
         )
 
     def forward(self, x, edge_index, edge_attr, batch, edge_vec=None):
         x = self.node_embedding(x.float())
-        edge_attr = self.edge_embedding(edge_attr.float())
+        raw_edge_vec = edge_vec
         if edge_vec is None:
             edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
         else:
             edge_vec = edge_vec.float()
+        edge_attr = self._embed_edges(edge_attr, raw_edge_vec)
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, self.angle_expansion)
+        angle_attr = self.angle_embedding(angle_attr.float())
 
         for layer in self.layers:
-            x, edge_attr = layer(x, edge_index, edge_attr, edge_vec, self.angle_expansion)
+            x, edge_attr, angle_attr = layer(
+                x,
+                edge_index,
+                edge_attr,
+                line_edge_index,
+                angle_attr,
+            )
         for layer in self.gcn_layers:
             x, edge_attr = layer(x, edge_index, edge_attr)
 
         num_graphs = _graph_count(batch=batch)
         node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
-        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
-        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
-        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+        return self.fc(node_pool)
 
 
 class AttentionALIGNN(nn.Module):
@@ -580,12 +629,15 @@ class AttentionALIGNN(nn.Module):
             angle_embed_size=40,
             n_heads=4,
             vertex_aggregation="add",
+            cutoff=8.0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
-        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
+        self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
         self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
         self.layers = nn.ModuleList([
             AttentionALIGNNLayer(
                 hidden_dim,
@@ -608,19 +660,27 @@ class AttentionALIGNN(nn.Module):
 
     def forward(self, x, edge_index, edge_attr, batch, edge_vec=None, node_type=None):
         x = self.node_embedding(x.float())
-        edge_attr = self.edge_embedding(edge_attr.float())
+        raw_edge_vec = edge_vec
         if edge_vec is None:
             edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
         else:
             edge_vec = edge_vec.float()
+        edge_attr = _embed_distance_edges(
+            edge_attr,
+            raw_edge_vec,
+            self.distance_expansion,
+            self.edge_embedding,
+        )
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, self.angle_expansion)
+        angle_attr = self.angle_embedding(angle_attr.float())
         if node_type is None:
             node_type = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
         else:
             node_type = node_type.to(device=x.device, dtype=torch.long).view(-1)
 
         for layer in self.layers:
-            x, edge_attr = layer(
-                x, edge_index, edge_attr, edge_vec, self.angle_expansion, node_type=node_type
+            x, edge_attr, angle_attr = layer(
+                x, edge_index, edge_attr, line_edge_index, angle_attr, node_type=node_type
             )
         for layer in self.gcn_layers:
             x, edge_attr = layer(x, edge_index, edge_attr)
@@ -656,12 +716,15 @@ class DefiNetALIGNN(nn.Module):
             angle_embed_size=40,
             n_marker_types=2,
             vertex_aggregation="add",
+            cutoff=8.0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = nn.Linear(node_input_shape, hidden_dim)
-        self.edge_embedding = nn.Linear(edge_input_shape, hidden_dim)
+        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
+        self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
         self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
         self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
         self.global_distribute = nn.ModuleList([
             nn.Sequential(
@@ -698,11 +761,19 @@ class DefiNetALIGNN(nn.Module):
 
     def forward(self, x, edge_index, edge_attr, batch, edge_vec=None, defect_marker=None):
         x = self.node_embedding(x.float())
-        edge_attr = self.edge_embedding(edge_attr.float())
+        raw_edge_vec = edge_vec
         if edge_vec is None:
             edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
         else:
             edge_vec = edge_vec.float()
+        edge_attr = _embed_distance_edges(
+            edge_attr,
+            raw_edge_vec,
+            self.distance_expansion,
+            self.edge_embedding,
+        )
+        line_edge_index, angle_attr = build_line_graph(edge_index, edge_vec, self.angle_expansion)
+        angle_attr = self.angle_embedding(angle_attr.float())
         if defect_marker is None:
             defect_marker = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
         else:
@@ -713,8 +784,8 @@ class DefiNetALIGNN(nn.Module):
         for distribute, layer, aggregate in zip(
                 self.global_distribute, self.layers, self.global_aggregate):
             x = x + distribute(torch.cat([x, global_fea[batch]], dim=-1))
-            x, edge_attr = layer(
-                x, edge_index, edge_attr, edge_vec, self.angle_expansion,
+            x, edge_attr, angle_attr = layer(
+                x, edge_index, edge_attr, line_edge_index, angle_attr,
                 defect_marker=defect_marker,
             )
             pooled = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
@@ -750,6 +821,7 @@ class HeteroALIGNN(nn.Module):
             angle_embed_size=40,
             vertex_aggregation="add",
             fixed_pooling=False,
+            cutoff=8.0,
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
@@ -757,14 +829,16 @@ class HeteroALIGNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.fixed_pooling = fixed_pooling
         self.node_embedding = nn.ModuleDict({
-            node_type: nn.Linear(node_input_shape, hidden_dim)
+            node_type: MLPLayer(node_input_shape, hidden_dim)
             for node_type in self.node_types
         })
+        self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = nn.ModuleDict({
-            _edge_type_key(edge_type): nn.Linear(edge_input_shape, hidden_dim)
+            _edge_type_key(edge_type): _official_feature_embedding(edge_input_shape, hidden_dim)
             for edge_type in self.edge_types
         })
         self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
         self.layers = nn.ModuleList([
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
@@ -778,6 +852,35 @@ class HeteroALIGNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
+
+    def _line_graph_inputs(self, edge_index_dict, edge_attr_dict, edge_vec_dict):
+        edge_offsets = {}
+        edge_vec_parts = []
+        offset = 0
+
+        for edge_type in self.edge_types:
+            edge_attr = edge_attr_dict[edge_type]
+            edge_vec = edge_vec_dict.get(edge_type)
+            if edge_vec is None:
+                edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+            edge_offsets[edge_type] = offset
+            edge_vec_parts.append(edge_vec.float())
+            offset += int(edge_attr.size(0))
+
+        reference = next(iter(edge_attr_dict.values()))
+        if offset == 0:
+            line_edge_index = _empty_index(reference)
+            angle_attr = reference.new_empty((0, self.angle_expansion.out_features))
+        else:
+            edge_vec_all = torch.cat(edge_vec_parts, dim=0)
+            line_edge_index, angle_attr = build_hetero_line_graph(
+                edge_index_dict,
+                edge_vec_all,
+                edge_offsets,
+                self.edge_types,
+                self.angle_expansion,
+            )
+        return line_edge_index, self.angle_embedding(angle_attr.float()), edge_offsets
 
     def _edge_batches(self, edge_index_dict, batch_dict, reference):
         batches = []
@@ -835,13 +938,28 @@ class HeteroALIGNN(nn.Module):
             for node_type in self.node_types
         }
         edge_attr_dict = {
-            edge_type: self.edge_embedding[_edge_type_key(edge_type)](edge_attr_dict[edge_type].float())
+            edge_type: _embed_distance_edges(
+                edge_attr_dict[edge_type],
+                edge_vec_dict.get(edge_type),
+                self.distance_expansion,
+                self.edge_embedding[_edge_type_key(edge_type)],
+            )
             for edge_type in self.edge_types
         }
+        line_edge_index, angle_attr, edge_offsets = self._line_graph_inputs(
+            edge_index_dict,
+            edge_attr_dict,
+            edge_vec_dict,
+        )
 
         for layer in self.layers:
-            x_dict, edge_attr_dict = layer(
-                x_dict, edge_index_dict, edge_attr_dict, edge_vec_dict, self.angle_expansion
+            x_dict, edge_attr_dict, angle_attr = layer(
+                x_dict,
+                edge_index_dict,
+                edge_attr_dict,
+                line_edge_index,
+                angle_attr,
+                edge_offsets,
             )
         for layer in self.gcn_layers:
             x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)

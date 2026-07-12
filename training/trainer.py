@@ -290,6 +290,7 @@ class MEGNetTrainer:
                     self.config['model']['edge_embed_size'],
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
+                cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_HETERO_TASKS:
             self.model = HeteroALIGNN(
@@ -309,6 +310,7 @@ class MEGNetTrainer:
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 fixed_pooling=self.config["model"].get("fixed_pooling", False),
+                cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(
@@ -323,6 +325,7 @@ class MEGNetTrainer:
                 ),
                 n_heads=self.config['model'].get('n_heads', 4),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
+                cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_DEFINET_TASKS:
             self.model = DefiNetALIGNN(
@@ -337,6 +340,7 @@ class MEGNetTrainer:
                 ),
                 n_marker_types=self.config['model'].get('n_marker_types', 2),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
+                cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in MEGNET_ATTENTION_TASKS:
             self.model = AttentionMEGNet(
