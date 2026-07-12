@@ -99,12 +99,15 @@ Common arguments:
   memory is still too high. `--alignn-max-neighbors 12` is usually the first
   knob to try because ALIGNN angle edges grow roughly with neighbor count
   squared.
-- ALIGNN defaults follow the original high-level layout with 4 ALIGNN blocks
-  followed by 4 graph-conv blocks, while keeping HERA's current feature sizes
+- ALIGNN defaults use the original high-level layout with 3 ALIGNN blocks
+  followed by 3 graph-conv blocks, while keeping HERA's current feature sizes
   (`hidden=64`, `edge_embed=40`, `angle_embed=40`), `cutoff=6`, and
   `max_neighbors=12`.
 - `--alignn-embedding-size` / `--alignn-nblocks` / `--alignn-gcn-blocks` /
   `--alignn-angle-embed-size`: reduce ALIGNN model capacity for lower memory use.
+- `--alignn-grad-accum-steps`: keep an effective large batch while using a
+  smaller memory-resident micro-batch, e.g. `--alignn-train-batch-size 4
+  --alignn-grad-accum-steps 16` gives an effective ALIGNN training batch of 64.
 - `--alignn-amp`: train ALIGNN with CUDA automatic mixed precision to reduce
   activation memory without changing graph topology.
 - `--seeds`: one or more random seeds for ordinary train/val/test splits; with
@@ -130,6 +133,7 @@ python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --s
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
+python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 4 --alignn-grad-accum-steps 16 --alignn-amp
 ```
 
 ### Native OOD case studies

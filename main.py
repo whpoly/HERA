@@ -162,6 +162,8 @@ def apply_batch_size_overrides(config, args, model_name):
             config['model']['gcn_blocks'] = args.alignn_gcn_blocks
         if args.alignn_angle_embed_size is not None:
             config['model']['angle_embed_size'] = args.alignn_angle_embed_size
+        if args.alignn_grad_accum_steps is not None:
+            config['optim']['grad_accum_steps'] = args.alignn_grad_accum_steps
         if args.alignn_amp:
             config['optim']['amp'] = True
     return config
@@ -588,6 +590,8 @@ def main():
                         help='Override number of post-ALIGNN graph-conv blocks only for ALIGNN runs')
     parser.add_argument('--alignn-angle-embed-size', type=int, default=None,
                         help='Override angle basis size only for ALIGNN runs')
+    parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
+                        help='Accumulate ALIGNN gradients over this many micro-batches')
     parser.add_argument('--alignn-amp', action='store_true',
                         help='Use CUDA automatic mixed precision only for ALIGNN runs')
     parser.add_argument('--seeds', nargs='+', type=int,
@@ -636,6 +640,7 @@ def main():
             'alignn_nblocks',
             'alignn_gcn_blocks',
             'alignn_angle_embed_size',
+            'alignn_grad_accum_steps',
     ):
         arg_value = getattr(args, arg_name)
         if arg_value is not None and arg_value < 1:
@@ -820,6 +825,7 @@ def main():
                         f'nblocks={config["model"]["nblocks"]}, '
                         f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
                         f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                        f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )
                     if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:

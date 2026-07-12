@@ -155,6 +155,46 @@ def _make_grad_scaler(enabled):
     return torch.cuda.amp.GradScaler(enabled=enabled)
 
 
+def _homogeneous_batch_stats(batch):
+    if not hasattr(batch, "edge_index") or not hasattr(batch, "x"):
+        return None
+    nodes = int(batch.x.size(0))
+    edges = int(batch.edge_index.size(1))
+    if nodes == 0 or edges == 0:
+        return {"nodes": nodes, "edges": edges, "angle_edges_est": 0}
+    src = batch.edge_index[0].detach().cpu()
+    dst = batch.edge_index[1].detach().cpu()
+    out_degree = torch.bincount(src, minlength=nodes)
+    angle_edges = int(out_degree[dst].sub(1).clamp_min(0).sum().item())
+    return {"nodes": nodes, "edges": edges, "angle_edges_est": angle_edges}
+
+
+def _heterogeneous_batch_stats(batch):
+    if not hasattr(batch, "edge_index_dict") or not hasattr(batch, "x_dict"):
+        return None
+    nodes = sum(int(x.size(0)) for x in batch.x_dict.values())
+    edges = sum(int(edge_index.size(1)) for edge_index in batch.edge_index_dict.values())
+    out_degree = {}
+    angle_edges = 0
+    for edge_type, edge_index in batch.edge_index_dict.items():
+        src_type, _, _ = edge_type
+        src_count = int(batch.x_dict[src_type].size(0))
+        src = edge_index[0].detach().cpu()
+        counts = torch.bincount(src, minlength=src_count) if src.numel() > 0 else torch.zeros(src_count, dtype=torch.long)
+        out_degree[src_type] = out_degree.get(src_type, torch.zeros(src_count, dtype=torch.long))
+        out_degree[src_type] = out_degree[src_type] + counts
+    for edge_type, edge_index in batch.edge_index_dict.items():
+        _, _, dst_type = edge_type
+        dst = edge_index[1].detach().cpu()
+        if dst.numel() > 0 and dst_type in out_degree:
+            angle_edges += int(out_degree[dst_type][dst].sub(1).clamp_min(0).sum().item())
+    return {"nodes": nodes, "edges": edges, "angle_edges_est": angle_edges}
+
+
+def _batch_stats(batch):
+    return _homogeneous_batch_stats(batch) or _heterogeneous_batch_stats(batch)
+
+
 class MEGNetTrainer:
     def __init__(self, config, device, seed=None):
         self.config = config
@@ -164,6 +204,10 @@ class MEGNetTrainer:
             bool(self.config.get("optim", {}).get("amp", False))
             and str(self.device).startswith("cuda")
             and torch.cuda.is_available()
+        )
+        self.grad_accum_steps = max(
+            int(self.config.get("optim", {}).get("grad_accum_steps", 1)),
+            1,
         )
         self.grad_scaler = _make_grad_scaler(self.use_amp)
 
@@ -347,6 +391,24 @@ class MEGNetTrainer:
         else:
             raise ValueError("Unknown scheduler")
 
+    def _raise_with_cuda_context(self, error, batch):
+        if not (
+                isinstance(error, torch.cuda.OutOfMemoryError)
+                or "out of memory" in str(error).lower()
+        ):
+            raise error
+        stats = _batch_stats(batch)
+        if stats is not None:
+            print(
+                "CUDA OOM batch stats: "
+                f"nodes={stats['nodes']}, edges={stats['edges']}, "
+                f"estimated_angle_edges={stats['angle_edges_est']}, "
+                f"micro_batch={self.config['model']['train_batch_size']}, "
+                f"grad_accum={self.grad_accum_steps}, "
+                f"amp={self.use_amp}"
+            )
+        raise error
+
     def _autocast(self):
         if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
             return torch.amp.autocast("cuda", enabled=self.use_amp)
@@ -487,19 +549,38 @@ class MEGNetTrainer:
     def train_one_epoch(self):
         mses, maes = [], []
         self.model.train(True)
-        for batch in self.trainloader:
-            self.optimizer.zero_grad(set_to_none=True)
+        self.optimizer.zero_grad(set_to_none=True)
+        num_batches = len(self.trainloader)
+        for batch_idx, batch in enumerate(self.trainloader):
             batch = batch.to(self.device)
-            with self._autocast():
-                preds = self._forward(batch)
-                loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
+            try:
+                with self._autocast():
+                    preds = self._forward(batch)
+                    loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
+                    backward_loss = loss / self.grad_accum_steps
+            except RuntimeError as error:
+                self._raise_with_cuda_context(error, batch)
             if self.use_amp:
-                self.grad_scaler.scale(loss).backward()
-                self.grad_scaler.step(self.optimizer)
-                self.grad_scaler.update()
+                try:
+                    self.grad_scaler.scale(backward_loss).backward()
+                except RuntimeError as error:
+                    self._raise_with_cuda_context(error, batch)
             else:
-                loss.backward()
-                self.optimizer.step()
+                try:
+                    backward_loss.backward()
+                except RuntimeError as error:
+                    self._raise_with_cuda_context(error, batch)
+            should_step = (
+                (batch_idx + 1) % self.grad_accum_steps == 0
+                or (batch_idx + 1) == num_batches
+            )
+            if should_step:
+                if self.use_amp:
+                    self.grad_scaler.step(self.optimizer)
+                    self.grad_scaler.update()
+                else:
+                    self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
             mses.append(loss.detach().to("cpu").numpy())
             with torch.no_grad():
                 maes.append(
