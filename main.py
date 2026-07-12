@@ -139,6 +139,20 @@ def with_radius(config, radius):
     return config
 
 
+def apply_batch_size_overrides(config, args, model_name):
+    config = copy.deepcopy(config)
+    if args.train_batch_size is not None:
+        config['model']['train_batch_size'] = args.train_batch_size
+    if args.test_batch_size is not None:
+        config['model']['test_batch_size'] = args.test_batch_size
+    if model_name == 'alignn':
+        if args.alignn_train_batch_size is not None:
+            config['model']['train_batch_size'] = args.alignn_train_batch_size
+        if args.alignn_test_batch_size is not None:
+            config['model']['test_batch_size'] = args.alignn_test_batch_size
+    return config
+
+
 def radius_summary(mode, config):
     radius = config['model']['local_radius']
     if mode in LOCAL_GRAPH_SWEEP_MODES:
@@ -148,6 +162,13 @@ def radius_summary(mode, config):
 
 def subset_by_indices(values, indices):
     return [values[int(idx)] for idx in indices]
+
+
+def cpu_state_dict(model):
+    return {
+        key: value.detach().cpu().clone()
+        for key, value in model.state_dict().items()
+    }
 
 
 def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
@@ -249,7 +270,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             print(f'  [{split["display"]}] Epoch {epoch + 1}/{epochs}  train_mae={mae:.4f}  val_mae={loss:.4f}')
             if loss < min_loss:
                 min_loss = loss
-                model_best = copy.deepcopy(trainer.model.state_dict())
+                model_best = cpu_state_dict(trainer.model)
             logger.log(epoch + 1, mae, mse, loss, min_loss, cur_lr)
 
         loss_test = trainer.predict_structures(split['test_X'], split['test_y'], model_best)
@@ -525,6 +546,14 @@ def main():
                         help='Torch device (default: cuda:0)')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Number of training epochs per seed or CV fold (default: 500)')
+    parser.add_argument('--train-batch-size', type=int, default=None,
+                        help='Override training batch size for every selected run')
+    parser.add_argument('--test-batch-size', type=int, default=None,
+                        help='Override validation/test batch size for every selected run')
+    parser.add_argument('--alignn-train-batch-size', type=int, default=None,
+                        help='Override training batch size only for ALIGNN runs')
+    parser.add_argument('--alignn-test-batch-size', type=int, default=None,
+                        help='Override validation/test batch size only for ALIGNN runs')
     parser.add_argument('--seeds', nargs='+', type=int,
                         default=None,
                         help='Random seeds for train/test splits, or one random state for --cv5')
@@ -561,6 +590,15 @@ def main():
 
     args = parser.parse_args()
     warnings.filterwarnings('ignore')
+    for arg_name in (
+            'train_batch_size',
+            'test_batch_size',
+            'alignn_train_batch_size',
+            'alignn_test_batch_size',
+    ):
+        arg_value = getattr(args, arg_name)
+        if arg_value is not None and arg_value < 1:
+            parser.error(f'--{arg_name.replace("_", "-")} must be >= 1')
     if args.seeds is None:
         args.seeds = [42] if args.cv5 else DEFAULT_SEEDS
     if args.cv5 and len(args.seeds) != 1:
@@ -631,10 +669,17 @@ def main():
             results = {}
             result_labels = []
             for mode in modes:
+                def config_for_mode(mode_name):
+                    return apply_batch_size_overrides(
+                        get_config(model_name, dataset_name, mode_name),
+                        args,
+                        model_name,
+                    )
+
                 mode_runs = [{
                     'label': mode,
                     'mode': mode,
-                    'config': get_config(model_name, dataset_name, mode),
+                    'config': config_for_mode(mode),
                     'local_cutoff': None,
                     'radius_label': None,
                 }]
@@ -645,7 +690,7 @@ def main():
                             'label': f'{mode}_r{radius}',
                             'mode': mode,
                             'config': with_radius(
-                                get_config(model_name, dataset_name, mode),
+                                config_for_mode(mode),
                                 radius,
                             ),
                             'local_cutoff': None,
@@ -667,7 +712,7 @@ def main():
                             'label': f'{mode}_r{radius}',
                             'mode': mode,
                             'config': with_radius(
-                                get_config(model_name, dataset_name, mode),
+                                config_for_mode(mode),
                                 radius,
                             ),
                             'local_cutoff': radius,
@@ -719,6 +764,11 @@ def main():
 
                     print(f'\n{"=" * 60}')
                     print(f'  Training {model_name.upper()} - {run_label.upper()} mode')
+                    print(
+                        '  Batch size: '
+                        f'train={config["model"]["train_batch_size"]}, '
+                        f'val/test={config["model"]["test_batch_size"]}'
+                    )
                     if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
                         print(f'  {radius_summary(mode, config)}')
                     print(f'{"=" * 60}')

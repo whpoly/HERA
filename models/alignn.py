@@ -99,6 +99,12 @@ def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion):
     return torch.stack([src, dst], dim=0), angle_expansion(angles)
 
 
+def _valid_edge_mask(edge_vec):
+    if edge_vec.numel() == 0:
+        return []
+    return (edge_vec.detach().norm(dim=-1) > 1e-8).cpu().tolist()
+
+
 def build_line_graph(edge_index, edge_vec, angle_expansion):
     """Build directed bond-angle line graph edges for a homogeneous graph."""
 
@@ -107,13 +113,17 @@ def build_line_graph(edge_index, edge_vec, angle_expansion):
 
     sources = edge_index[0].detach().cpu().tolist()
     targets = edge_index[1].detach().cpu().tolist()
+    valid_edges = _valid_edge_mask(edge_vec)
     outgoing = defaultdict(list)
     for edge_id, src in enumerate(sources):
-        outgoing[int(src)].append(edge_id)
+        if valid_edges[edge_id]:
+            outgoing[int(src)].append(edge_id)
 
     pair_src = []
     pair_dst = []
     for first_edge, shared_node in enumerate(targets):
+        if not valid_edges[first_edge]:
+            continue
         for second_edge in outgoing.get(int(shared_node), []):
             if first_edge == second_edge:
                 continue
@@ -129,6 +139,7 @@ def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_ty
     if edge_vec_all.size(0) == 0:
         return _empty_index(edge_vec_all), edge_vec_all.new_empty((0, angle_expansion.out_features))
 
+    valid_edges = _valid_edge_mask(edge_vec_all)
     outgoing = defaultdict(list)
     edge_targets = []
 
@@ -140,9 +151,13 @@ def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_ty
         targets = edge_index[1].detach().cpu().tolist()
 
         for local_edge, src in enumerate(sources):
-            outgoing[(src_type, int(src))].append(offset + local_edge)
+            global_edge = offset + local_edge
+            if valid_edges[global_edge]:
+                outgoing[(src_type, int(src))].append(global_edge)
         for local_edge, dst in enumerate(targets):
-            edge_targets.append(((dst_type, int(dst)), offset + local_edge))
+            global_edge = offset + local_edge
+            if valid_edges[global_edge]:
+                edge_targets.append(((dst_type, int(dst)), global_edge))
 
     pair_src = []
     pair_dst = []

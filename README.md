@@ -90,6 +90,11 @@ Common arguments:
   are `definet` and `definet_was` for CGCNN and ALIGNN.
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed or CV fold
+- `--train-batch-size` / `--test-batch-size`: override batch size for all runs
+- `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size
+  only for ALIGNN runs. ALIGNN defaults to `16` for training and `1` for
+  validation/test because its bond-angle line graph is much more memory
+  intensive.
 - `--seeds`: one or more random seeds for ordinary train/val/test splits; with
   `--cv5`, pass exactly one random state
 - `--cv5` / `--five-fold-cv`: use 5-fold cross validation. Each run uses one
@@ -111,6 +116,7 @@ python -m HERA.main --model all --dataset all --mode all --r all
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --seeds 42
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
+python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
 ```
 
 ### Native OOD case studies

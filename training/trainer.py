@@ -142,6 +142,10 @@ def _collect_hetero_attr(batch, attr):
         return getattr(batch, f'{attr}_dict', None)
 
 
+def _prediction_vector(preds):
+    return preds.reshape(-1)
+
+
 class MEGNetTrainer:
     def __init__(self, config, device, seed=None):
         self.config = config
@@ -386,11 +390,11 @@ class MEGNetTrainer:
                 batch.batch_dict,
                 batch.bond_batch_dict,
             )
-            return self.model(
+            return _prediction_vector(self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch.state, batch_dict, bond_batch_dict,
                 pool_type=_collect_hetero_attr(batch, 'pool_type'),
-            ).squeeze()
+            ))
         elif task in CGCNN_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
                 batch.x_dict,
@@ -398,11 +402,11 @@ class MEGNetTrainer:
                 batch.edge_attr_dict,
                 batch.batch_dict,
             )
-            return self.model(
+            return _prediction_vector(self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch_dict,
                 pool_type=_collect_hetero_attr(batch, 'pool_type'),
-            ).squeeze()
+            ))
         elif task in ALIGNN_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
                 batch.x_dict,
@@ -414,42 +418,42 @@ class MEGNetTrainer:
                 _collect_hetero_attr(batch, 'edge_vec'),
                 edge_attr_dict,
             )
-            return self.model(
+            return _prediction_vector(self.model(
                 x_dict, edge_index_dict, edge_attr_dict,
                 batch_dict,
                 edge_vec_dict=edge_vec_dict,
                 state=batch.state,
                 pool_type=_collect_hetero_attr(batch, 'pool_type'),
-            ).squeeze()
+            ))
         elif task in ALIGNN_HOMOGENEOUS_TASKS:
-            return self.model(
+            return _prediction_vector(self.model(
                 batch.x, batch.edge_index, batch.edge_attr, batch.batch,
                 edge_vec=getattr(batch, 'edge_vec', None),
-            ).squeeze()
+            ))
         elif task in ALIGNN_ATTENTION_TASKS:
-            return self.model(
+            return _prediction_vector(self.model(
                 batch.x, batch.edge_index, batch.edge_attr, batch.batch,
                 edge_vec=getattr(batch, 'edge_vec', None),
                 node_type=batch.node_type,
-            ).squeeze()
+            ))
         elif task in ALIGNN_DEFINET_TASKS:
             marker = getattr(batch, 'defect_marker', getattr(batch, 'node_type', None))
-            return self.model(
+            return _prediction_vector(self.model(
                 batch.x, batch.edge_index, batch.edge_attr, batch.batch,
                 edge_vec=getattr(batch, 'edge_vec', None),
                 defect_marker=marker,
-            ).squeeze()
+            ))
         elif task in ('cgcnn_full', 'cgcnn_full_x', 'cgcnn_local', 'cgcnn_was_x'):
-            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch).squeeze()
+            return _prediction_vector(self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch))
         elif task in CGCNN_ATTENTION_TASKS:
-            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type).squeeze()
+            return _prediction_vector(self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, node_type=batch.node_type))
         elif task in DEFINET_ATTENTION_TASKS:
             marker = getattr(batch, 'defect_marker', getattr(batch, 'node_type', None))
-            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, defect_marker=marker).squeeze()
+            return _prediction_vector(self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, defect_marker=marker))
         elif task in MEGNET_ATTENTION_TASKS:
-            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch, node_type=batch.node_type).squeeze()
+            return _prediction_vector(self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch, node_type=batch.node_type))
         else:
-            return self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch).squeeze()
+            return _prediction_vector(self.model(batch.x, batch.edge_index, batch.edge_attr, batch.state, batch.batch, batch.bond_batch))
 
     # -------------------------------------------------------------- #
     #  Training / evaluation
@@ -459,17 +463,18 @@ class MEGNetTrainer:
         mses, maes = [], []
         self.model.train(True)
         for batch in self.trainloader:
+            self.optimizer.zero_grad(set_to_none=True)
             batch = batch.to(self.device)
             preds = self._forward(batch)
             loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
             loss.backward()
             self.optimizer.step()
-            self.optimizer.zero_grad()
-            mses.append(loss.to("cpu").data.numpy())
-            maes.append(
-                MAELoss(self.scaler.inverse_transform(preds), batch.y,
-                        weights=batch.weight, reduction='sum').to('cpu').data.numpy()
-            )
+            mses.append(loss.detach().to("cpu").numpy())
+            with torch.no_grad():
+                maes.append(
+                    MAELoss(self.scaler.inverse_transform(preds), batch.y,
+                            weights=batch.weight, reduction='sum').to('cpu').numpy()
+                )
         train_mae = sum(maes) / len(self.train_structures)
         self.scheduler.step(train_mae)
         return train_mae, np.mean(mses)
