@@ -146,11 +146,26 @@ def _prediction_vector(preds):
     return preds.reshape(-1)
 
 
+def _make_grad_scaler(enabled):
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        try:
+            return torch.amp.GradScaler("cuda", enabled=enabled)
+        except TypeError:
+            return torch.amp.GradScaler(enabled=enabled)
+    return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
 class MEGNetTrainer:
     def __init__(self, config, device, seed=None):
         self.config = config
         self.device = device
         self.seed = None if seed is None else int(seed)
+        self.use_amp = (
+            bool(self.config.get("optim", {}).get("amp", False))
+            and str(self.device).startswith("cuda")
+            and torch.cuda.is_available()
+        )
+        self.grad_scaler = _make_grad_scaler(self.use_amp)
 
         if self.config["model"]["add_z_bond_coord"]:
             bond_converter = FlattenGaussianDistanceConverter(
@@ -167,6 +182,7 @@ class MEGNetTrainer:
             atom_converter=atom_converter,
             cutoff=self.config["model"]["cutoff"],
             local_radius=self.config["model"].get("local_radius", self.config["model"]["cutoff"]),
+            max_neighbors=self.config["model"].get("max_neighbors"),
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
         )
@@ -224,6 +240,7 @@ class MEGNetTrainer:
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
                 angle_embed_size=self.config['model'].get(
                     'angle_embed_size',
                     self.config['model']['edge_embed_size'],
@@ -241,6 +258,7 @@ class MEGNetTrainer:
                            ('defect', 'da', 'atom')]),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
                 angle_embed_size=self.config['model'].get(
                     'angle_embed_size',
                     self.config['model']['edge_embed_size'],
@@ -254,6 +272,7 @@ class MEGNetTrainer:
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
                 angle_embed_size=self.config['model'].get(
                     'angle_embed_size',
                     self.config['model']['edge_embed_size'],
@@ -267,6 +286,7 @@ class MEGNetTrainer:
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
                 angle_embed_size=self.config['model'].get(
                     'angle_embed_size',
                     self.config['model']['edge_embed_size'],
@@ -326,6 +346,11 @@ class MEGNetTrainer:
             )
         else:
             raise ValueError("Unknown scheduler")
+
+    def _autocast(self):
+        if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+            return torch.amp.autocast("cuda", enabled=self.use_amp)
+        return torch.cuda.amp.autocast(enabled=self.use_amp)
 
     def _make_generator(self, offset=0):
         if self.seed is None:
@@ -465,10 +490,16 @@ class MEGNetTrainer:
         for batch in self.trainloader:
             self.optimizer.zero_grad(set_to_none=True)
             batch = batch.to(self.device)
-            preds = self._forward(batch)
-            loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
-            loss.backward()
-            self.optimizer.step()
+            with self._autocast():
+                preds = self._forward(batch)
+                loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
+            if self.use_amp:
+                self.grad_scaler.scale(loss).backward()
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
             mses.append(loss.detach().to("cpu").numpy())
             with torch.no_grad():
                 maes.append(
@@ -485,7 +516,8 @@ class MEGNetTrainer:
         with torch.no_grad():
             for batch in self.testloader:
                 batch = batch.to(self.device)
-                preds = self._forward(batch)
+                with self._autocast():
+                    preds = self._forward(batch)
                 total.append(
                     MAELoss(self.scaler.inverse_transform(preds), batch.y,
                             weights=batch.weight, reduction='sum').to('cpu').data.numpy()
@@ -514,7 +546,8 @@ class MEGNetTrainer:
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(self.device)
-                preds = self._forward(batch)
+                with self._autocast():
+                    preds = self._forward(batch)
                 preds = self.scaler.inverse_transform(preds)
                 total.append(
                     MAELoss(preds, batch.y,

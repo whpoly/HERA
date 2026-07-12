@@ -150,6 +150,20 @@ def apply_batch_size_overrides(config, args, model_name):
             config['model']['train_batch_size'] = args.alignn_train_batch_size
         if args.alignn_test_batch_size is not None:
             config['model']['test_batch_size'] = args.alignn_test_batch_size
+        if args.alignn_cutoff is not None:
+            config['model']['cutoff'] = args.alignn_cutoff
+        if args.alignn_max_neighbors is not None:
+            config['model']['max_neighbors'] = args.alignn_max_neighbors
+        if args.alignn_embedding_size is not None:
+            config['model']['embedding_size'] = args.alignn_embedding_size
+        if args.alignn_nblocks is not None:
+            config['model']['nblocks'] = args.alignn_nblocks
+        if args.alignn_gcn_blocks is not None:
+            config['model']['gcn_blocks'] = args.alignn_gcn_blocks
+        if args.alignn_angle_embed_size is not None:
+            config['model']['angle_embed_size'] = args.alignn_angle_embed_size
+        if args.alignn_amp:
+            config['optim']['amp'] = True
     return config
 
 
@@ -169,6 +183,11 @@ def cpu_state_dict(model):
         key: value.detach().cpu().clone()
         for key, value in model.state_dict().items()
     }
+
+
+def clear_cuda_cache(device):
+    if str(device).startswith('cuda') and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
@@ -316,6 +335,9 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                 f'({summary.index_csv})'
             )
         losses.append(loss_test)
+        del trainer
+        del model_best
+        clear_cuda_cache(device)
 
     if resume and skipped:
         total = skipped + trained
@@ -554,6 +576,20 @@ def main():
                         help='Override training batch size only for ALIGNN runs')
     parser.add_argument('--alignn-test-batch-size', type=int, default=None,
                         help='Override validation/test batch size only for ALIGNN runs')
+    parser.add_argument('--alignn-cutoff', type=float, default=None,
+                        help='Override graph edge cutoff only for ALIGNN runs')
+    parser.add_argument('--alignn-max-neighbors', type=int, default=None,
+                        help='Cap neighbors per atom only for ALIGNN graph construction')
+    parser.add_argument('--alignn-embedding-size', type=int, default=None,
+                        help='Override hidden dimension only for ALIGNN runs')
+    parser.add_argument('--alignn-nblocks', type=int, default=None,
+                        help='Override number of ALIGNN blocks only for ALIGNN runs')
+    parser.add_argument('--alignn-gcn-blocks', type=int, default=None,
+                        help='Override number of post-ALIGNN graph-conv blocks only for ALIGNN runs')
+    parser.add_argument('--alignn-angle-embed-size', type=int, default=None,
+                        help='Override angle basis size only for ALIGNN runs')
+    parser.add_argument('--alignn-amp', action='store_true',
+                        help='Use CUDA automatic mixed precision only for ALIGNN runs')
     parser.add_argument('--seeds', nargs='+', type=int,
                         default=None,
                         help='Random seeds for train/test splits, or one random state for --cv5')
@@ -595,10 +631,17 @@ def main():
             'test_batch_size',
             'alignn_train_batch_size',
             'alignn_test_batch_size',
+            'alignn_max_neighbors',
+            'alignn_embedding_size',
+            'alignn_nblocks',
+            'alignn_gcn_blocks',
+            'alignn_angle_embed_size',
     ):
         arg_value = getattr(args, arg_name)
         if arg_value is not None and arg_value < 1:
             parser.error(f'--{arg_name.replace("_", "-")} must be >= 1')
+    if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
+        parser.error('--alignn-cutoff must be > 0')
     if args.seeds is None:
         args.seeds = [42] if args.cv5 else DEFAULT_SEEDS
     if args.cv5 and len(args.seeds) != 1:
@@ -768,6 +811,16 @@ def main():
                         '  Batch size: '
                         f'train={config["model"]["train_batch_size"]}, '
                         f'val/test={config["model"]["test_batch_size"]}'
+                    )
+                    print(
+                        '  Graph/model: '
+                        f'cutoff={config["model"]["cutoff"]}, '
+                        f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
+                        f'hidden={config["model"]["embedding_size"]}, '
+                        f'nblocks={config["model"]["nblocks"]}, '
+                        f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
+                        f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                        f'amp={config["optim"].get("amp", False)}'
                     )
                     if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
                         print(f'  {radius_summary(mode, config)}')

@@ -92,9 +92,21 @@ Common arguments:
 - `--epochs`: number of epochs per seed or CV fold
 - `--train-batch-size` / `--test-batch-size`: override batch size for all runs
 - `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size
-  only for ALIGNN runs. ALIGNN defaults to `16` for training and `1` for
+  only for ALIGNN runs. ALIGNN defaults to `64` for training and `1` for
   validation/test because its bond-angle line graph is much more memory
   intensive.
+- `--alignn-max-neighbors` / `--alignn-cutoff`: reduce ALIGNN graph size when
+  memory is still too high. `--alignn-max-neighbors 12` is usually the first
+  knob to try because ALIGNN angle edges grow roughly with neighbor count
+  squared.
+- ALIGNN defaults follow the original high-level layout with 4 ALIGNN blocks
+  followed by 4 graph-conv blocks, while keeping HERA's current feature sizes
+  (`hidden=64`, `edge_embed=40`, `angle_embed=40`), `cutoff=6`, and
+  `max_neighbors=12`.
+- `--alignn-embedding-size` / `--alignn-nblocks` / `--alignn-gcn-blocks` /
+  `--alignn-angle-embed-size`: reduce ALIGNN model capacity for lower memory use.
+- `--alignn-amp`: train ALIGNN with CUDA automatic mixed precision to reduce
+  activation memory without changing graph topology.
 - `--seeds`: one or more random seeds for ordinary train/val/test splits; with
   `--cv5`, pass exactly one random state
 - `--cv5` / `--five-fold-cv`: use 5-fold cross validation. Each run uses one
@@ -117,6 +129,7 @@ python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --seeds 42
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
+python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
 ```
 
 ### Native OOD case studies

@@ -11,7 +11,6 @@ from torch_geometric.nn import MessagePassing
 from .modules import (
     AtomTypeGlobalAttentionReadout,
     DefectAwareGateConv,
-    ShiftedSoftplus,
 )
 
 
@@ -52,6 +51,25 @@ def _graph_count(batch_dict=None, batch=None, state=None):
         if counts:
             return max(counts)
     return 1
+
+
+class SafeBatchNorm1d(nn.BatchNorm1d):
+    """BatchNorm1d that falls back to running stats for single-row inputs."""
+
+    def forward(self, input):
+        values_per_channel = input.numel() // input.size(1) if input.dim() >= 2 else input.numel()
+        if self.training and values_per_channel <= 1:
+            return F.batch_norm(
+                input,
+                self.running_mean,
+                self.running_var,
+                self.weight,
+                self.bias,
+                training=False,
+                momentum=self.momentum,
+                eps=self.eps,
+            )
+        return super().forward(input)
 
 
 class AngleExpansion(nn.Module):
@@ -178,19 +196,19 @@ class GatedGraphConv(MessagePassing):
         super().__init__(aggr=_normalize_aggr(aggr))
         self.channels = channels
         self.message_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
             nn.Linear(channels, channels),
         )
         self.gate_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
             nn.Linear(channels, channels),
             nn.Sigmoid(),
         )
         self.update_nn = nn.Sequential(
-            nn.Linear(2 * channels, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels, channels), nn.SiLU(),
             nn.Linear(channels, channels),
         )
-        self.norm = nn.LayerNorm(channels)
+        self.norm = SafeBatchNorm1d(channels)
 
     def forward(self, x, edge_index, edge_attr, size=None):
         x_dst = x[1] if isinstance(x, tuple) else x
@@ -206,6 +224,44 @@ class GatedGraphConv(MessagePassing):
         return self.gate_nn(z) * self.message_nn(z)
 
 
+class EdgeFeatureUpdate(nn.Module):
+    """Residual edge update used by ALIGNN-style graph-conv blocks."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.update_nn = nn.Sequential(
+            nn.Linear(3 * channels, channels), nn.SiLU(),
+            nn.Linear(channels, channels),
+        )
+        self.norm = SafeBatchNorm1d(channels)
+
+    def forward(self, x, edge_index, edge_attr):
+        if edge_attr.size(0) == 0 or edge_index.size(1) == 0:
+            return edge_attr
+        if isinstance(x, tuple):
+            x_src, x_dst = x
+        else:
+            x_src = x_dst = x
+        src, dst = edge_index
+        update = self.update_nn(torch.cat([x_src[src], x_dst[dst], edge_attr], dim=-1))
+        return self.norm(edge_attr + update)
+
+
+class GraphConvLayer(nn.Module):
+    """Atom graph update block used after ALIGNN line-graph blocks."""
+
+    def __init__(self, hidden_dim, vertex_aggregation="add"):
+        super().__init__()
+        self.atom_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.edge_update = EdgeFeatureUpdate(hidden_dim)
+
+    def forward(self, x, edge_index, edge_attr, size=None):
+        edge_update_x = x
+        x = self.atom_conv(x, edge_index, edge_attr, size=size)
+        edge_attr = self.edge_update(edge_update_x, edge_index, edge_attr)
+        return x, edge_attr
+
+
 class AtomTypeAttentionGatedGraphConv(MessagePassing):
     """Gated atom update with neighbor attention conditioned on atom type."""
 
@@ -214,24 +270,24 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
         self.channels = channels
         self.n_heads = n_heads
         self.message_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
             nn.Linear(channels, channels),
         )
         self.gate_nn = nn.Sequential(
-            nn.Linear(2 * channels + edge_dim, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
             nn.Linear(channels, channels),
             nn.Sigmoid(),
         )
         self.attn_nn = nn.Sequential(
-            nn.Linear(4 * channels + edge_dim, 2 * n_heads), ShiftedSoftplus(),
+            nn.Linear(4 * channels + edge_dim, 2 * n_heads), nn.SiLU(),
             nn.Linear(2 * n_heads, n_heads),
         )
         self.update_nn = nn.Sequential(
-            nn.Linear(2 * channels, channels), ShiftedSoftplus(),
+            nn.Linear(2 * channels, channels), nn.SiLU(),
             nn.Linear(channels, channels),
         )
         self.type_emb = nn.Embedding(2, channels)
-        self.norm = nn.LayerNorm(channels)
+        self.norm = SafeBatchNorm1d(channels)
         self._edge_index = None
         self._type_emb = None
         self._attention_weights = None
@@ -407,6 +463,58 @@ class HeteroALIGNNLayer(nn.Module):
         return out_dict, edge_attr_dict
 
 
+class HeteroGraphConvLayer(nn.Module):
+    """Heterogeneous graph-conv block after ALIGNN line-graph blocks."""
+
+    def __init__(self, hidden_dim, metadata, vertex_aggregation="add"):
+        super().__init__()
+        self.node_types = tuple(metadata[0])
+        self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
+        self.atom_convs = nn.ModuleDict({
+            _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+            for edge_type in self.edge_types
+        })
+        self.edge_updates = nn.ModuleDict({
+            _edge_type_key(edge_type): EdgeFeatureUpdate(hidden_dim)
+            for edge_type in self.edge_types
+        })
+
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict):
+        node_outputs = {node_type: [] for node_type in self.node_types}
+        out_edge_attr = dict(edge_attr_dict)
+
+        for edge_type in self.edge_types:
+            src_type, _, dst_type = edge_type
+            edge_index = edge_index_dict[edge_type]
+            if edge_index.size(1) == 0 or x_dict[src_type].size(0) == 0 or x_dict[dst_type].size(0) == 0:
+                continue
+
+            x_pair = (x_dict[src_type], x_dict[dst_type])
+            out = self.atom_convs[_edge_type_key(edge_type)](
+                x_pair,
+                edge_index,
+                edge_attr_dict[edge_type],
+                size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
+            )
+            node_outputs[dst_type].append(out)
+            out_edge_attr[edge_type] = self.edge_updates[_edge_type_key(edge_type)](
+                x_pair,
+                edge_index,
+                edge_attr_dict[edge_type],
+            )
+
+        out_dict = {}
+        for node_type in self.node_types:
+            outputs = node_outputs[node_type]
+            if not outputs:
+                out_dict[node_type] = x_dict[node_type]
+            elif len(outputs) == 1:
+                out_dict[node_type] = outputs[0]
+            else:
+                out_dict[node_type] = torch.stack(outputs, dim=0).mean(dim=0)
+        return out_dict, out_edge_attr
+
+
 class ALIGNN(nn.Module):
     """Homogeneous ALIGNN for full/local/WAS graph modes."""
 
@@ -416,6 +524,7 @@ class ALIGNN(nn.Module):
             edge_input_shape,
             hidden_dim=64,
             n_blocks=3,
+            gcn_blocks=4,
             angle_embed_size=40,
             vertex_aggregation="add",
     ):
@@ -428,9 +537,13 @@ class ALIGNN(nn.Module):
             ALIGNNLayer(hidden_dim, self.angle_expansion.out_features, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
+        self.gcn_layers = nn.ModuleList([
+            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            for _ in range(gcn_blocks)
+        ])
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
-            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -444,6 +557,8 @@ class ALIGNN(nn.Module):
 
         for layer in self.layers:
             x, edge_attr = layer(x, edge_index, edge_attr, edge_vec, self.angle_expansion)
+        for layer in self.gcn_layers:
+            x, edge_attr = layer(x, edge_index, edge_attr)
 
         num_graphs = _graph_count(batch=batch)
         node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
@@ -461,6 +576,7 @@ class AttentionALIGNN(nn.Module):
             edge_input_shape,
             hidden_dim=64,
             n_blocks=3,
+            gcn_blocks=4,
             angle_embed_size=40,
             n_heads=4,
             vertex_aggregation="add",
@@ -479,10 +595,14 @@ class AttentionALIGNN(nn.Module):
             )
             for _ in range(n_blocks)
         ])
+        self.gcn_layers = nn.ModuleList([
+            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            for _ in range(gcn_blocks)
+        ])
         self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
-            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -502,6 +622,8 @@ class AttentionALIGNN(nn.Module):
             x, edge_attr = layer(
                 x, edge_index, edge_attr, edge_vec, self.angle_expansion, node_type=node_type
             )
+        for layer in self.gcn_layers:
+            x, edge_attr = layer(x, edge_index, edge_attr)
 
         num_graphs = _graph_count(batch=batch)
         node_pool = self.node_readout(x, batch, node_type=node_type)
@@ -530,6 +652,7 @@ class DefiNetALIGNN(nn.Module):
             edge_input_shape,
             hidden_dim=64,
             n_blocks=4,
+            gcn_blocks=4,
             angle_embed_size=40,
             n_marker_types=2,
             vertex_aggregation="add",
@@ -542,7 +665,7 @@ class DefiNetALIGNN(nn.Module):
         self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
         self.global_distribute = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+                nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
                 nn.Linear(hidden_dim, hidden_dim),
             )
             for _ in range(n_blocks)
@@ -558,14 +681,18 @@ class DefiNetALIGNN(nn.Module):
         ])
         self.global_aggregate = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(2 * hidden_dim, hidden_dim), ShiftedSoftplus(),
+                nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
                 nn.Linear(hidden_dim, hidden_dim),
             )
             for _ in range(n_blocks)
         ])
+        self.gcn_layers = nn.ModuleList([
+            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            for _ in range(gcn_blocks)
+        ])
         self.readout = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim), ShiftedSoftplus(),
-            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -592,6 +719,8 @@ class DefiNetALIGNN(nn.Module):
             )
             pooled = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
             global_fea = global_fea + aggregate(torch.cat([pooled, global_fea], dim=-1))
+        for layer in self.gcn_layers:
+            x, edge_attr = layer(x, edge_index, edge_attr)
 
         node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
         edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
@@ -617,6 +746,7 @@ class HeteroALIGNN(nn.Module):
             metadata,
             hidden_dim=64,
             n_blocks=3,
+            gcn_blocks=4,
             angle_embed_size=40,
             vertex_aggregation="add",
             fixed_pooling=False,
@@ -639,9 +769,13 @@ class HeteroALIGNN(nn.Module):
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
+        self.gcn_layers = nn.ModuleList([
+            HeteroGraphConvLayer(hidden_dim, metadata, vertex_aggregation=vertex_aggregation)
+            for _ in range(gcn_blocks)
+        ])
         self.readout = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim), ShiftedSoftplus(),
-            nn.Linear(hidden_dim, hidden_dim // 2), ShiftedSoftplus(),
+            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -709,6 +843,8 @@ class HeteroALIGNN(nn.Module):
             x_dict, edge_attr_dict = layer(
                 x_dict, edge_index_dict, edge_attr_dict, edge_vec_dict, self.angle_expansion
             )
+        for layer in self.gcn_layers:
+            x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)

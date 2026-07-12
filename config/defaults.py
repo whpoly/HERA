@@ -173,8 +173,11 @@ _CONFIG_REGISTRY = {
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['megnet', 'cgcnn', 'definet', 'alignn']
-ALIGNN_TRAIN_BATCH_SIZE = 16
+ALIGNN_TRAIN_BATCH_SIZE = 64
 ALIGNN_TEST_BATCH_SIZE = 1
+ALIGNN_BLOCKS = 4
+ALIGNN_GCN_BLOCKS = 4
+ALIGNN_MAX_NEIGHBORS = 12
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
@@ -237,17 +240,13 @@ def _finalize_config(config, model):
     """Apply model-specific defaults that differ from the shared base configs."""
     config = copy.deepcopy(config)
     if model == 'alignn':
-        # ALIGNN builds a bond-angle line graph whose edge count grows much
-        # faster than the original atom graph. The shared 50/100 batch defaults
-        # are too large for common 16 GB GPUs on the larger datasets.
-        config['model']['train_batch_size'] = min(
-            config['model']['train_batch_size'],
-            ALIGNN_TRAIN_BATCH_SIZE,
-        )
-        config['model']['test_batch_size'] = min(
-            config['model']['test_batch_size'],
-            ALIGNN_TEST_BATCH_SIZE,
-        )
+        config['model']['nblocks'] = ALIGNN_BLOCKS
+        config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
+        config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
+        # Keep ALIGNN defaults close to the original training setup while using
+        # a single validation/test graph to limit line-graph memory.
+        config['model']['train_batch_size'] = ALIGNN_TRAIN_BATCH_SIZE
+        config['model']['test_batch_size'] = ALIGNN_TEST_BATCH_SIZE
     return config
 
 

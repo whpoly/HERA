@@ -160,10 +160,14 @@ class SimpleCrystalConverter:
             add_eos_features=False,
             cutoff=6.0,
             local_radius=None,
+            max_neighbors=None,
             ignore_state=False,
     ):
         self.cutoff = cutoff
         self.local_radius = cutoff if local_radius is None else local_radius
+        self.max_neighbors = None if max_neighbors is None else int(max_neighbors)
+        if self.max_neighbors is not None and self.max_neighbors < 1:
+            raise ValueError("max_neighbors must be >= 1")
         self.atom_converter = atom_converter if atom_converter else DummyConverter()
         self.bond_converter = bond_converter if bond_converter else DummyConverter()
         self.model_family = getattr(self.atom_converter, 'task', None)
@@ -220,6 +224,13 @@ class SimpleCrystalConverter:
         local_structure = Structure.from_sites([structure[idx] for idx in sorted(selected)])
         return self._copy_structure_metadata(structure, local_structure)
 
+    def _neighbor_lists(self, structure):
+        all_nbrs = structure.get_all_neighbors(self.cutoff, include_index=True)
+        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+        if self.max_neighbors is not None:
+            all_nbrs = [nbrs[:self.max_neighbors] for nbrs in all_nbrs]
+        return all_nbrs
+
     def convert(self, d):
         if self.task == 'sparse':
             raise ValueError("Sparse mode has been removed; use local mode with --r 0 instead.")
@@ -231,8 +242,7 @@ class SimpleCrystalConverter:
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []
-            all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
-            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+            all_nbrs = self._neighbor_lists(d)
             for i, nbrs in enumerate(all_nbrs):
                 bond_index[0] += [i] * len(nbrs)
                 bond_index[1].extend(list(map(lambda x: x[2], nbrs)))
@@ -290,8 +300,7 @@ class SimpleCrystalConverter:
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []
-            all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
-            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+            all_nbrs = self._neighbor_lists(d)
             for i, nbrs in enumerate(all_nbrs):
                 bond_index[0] += [i] * len(nbrs)
                 bond_index[1].extend(list(map(lambda x: x[2], nbrs)))
@@ -348,8 +357,7 @@ class SimpleCrystalConverter:
                 int(site.properties.get('pool_type', site.properties['type']))
                 for site in d
             ])
-            all_nbrs = d.get_all_neighbors(self.cutoff, include_index=True)
-            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+            all_nbrs = self._neighbor_lists(d)
             add_synthetic_self_loops = self.model_family != 'megnet'
             for i, nbrs in enumerate(all_nbrs):
                 if add_synthetic_self_loops:
