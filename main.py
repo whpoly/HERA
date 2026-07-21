@@ -82,6 +82,7 @@ ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 ATTENTION_ABLATION_MODES = (
     'attention_was',
 )
+FULL_X_DISTINCT_DATASETS = frozenset(('vacancy', '2dmd_high', 'native'))
 CGCNN_DEFAULT_MODES = [
     'full',
     'full_x',
@@ -509,6 +510,13 @@ def resolve_modes(requested_modes, model_name, parser):
     return requested_modes
 
 
+def modes_for_dataset(modes, dataset_name):
+    """Avoid duplicate full/full_x benchmarks when a dataset has no vacancies."""
+    if dataset_name in FULL_X_DISTINCT_DATASETS or not {'full', 'full_x'} <= set(modes):
+        return list(modes)
+    return [mode for mode in modes if mode != 'full_x']
+
+
 def parse_radius_values(raw_values, parser):
     if raw_values is None:
         return None
@@ -693,12 +701,15 @@ def main():
 
         model_results = {}
         for dataset_name in dataset_names:
+            dataset_modes = modes_for_dataset(modes, dataset_name)
             dataset_dir = os.path.join(model_dir, dataset_name)
             os.makedirs(dataset_dir, exist_ok=True)
 
             print(f'\n{"#" * 60}')
             print(f'  Dataset: {dataset_name}')
             print(f'{"#" * 60}')
+            if dataset_modes != modes:
+                print('  Skipping FULL_X: this dataset has no vacancies, so it is identical to FULL.')
 
             dataset_cache = {}
 
@@ -716,7 +727,7 @@ def main():
 
             results = {}
             result_labels = []
-            for mode in modes:
+            for mode in dataset_modes:
                 def config_for_mode(mode_name):
                     return apply_batch_size_overrides(
                         get_config(model_name, dataset_name, mode_name),

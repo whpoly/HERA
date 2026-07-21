@@ -79,7 +79,9 @@ Common arguments:
   currently `6`; no reduced/cropped graph modes are exposed.
 - `full_x` is the old full-graph-with-X comparison: vacancy-style datasets
   such as `vacancy` and `2dmd_high` add DummySpecies/X vacancy sites to the
-  full graph; datasets without an X site use the same graph as `full`.
+  full graph; datasets without an X site use the same graph as `full`. When a
+  benchmark requests both modes, `full_x` is therefore skipped for datasets
+  that contain no vacancy samples (`och`, `imp2d`, and `semi`).
 - `was_x` applies WAS atom features to the `full_x` representation. The old
   full-graph-only `was` mode is no longer exposed.
 - `hetero` and `hetero_was` use the `--r` values as the local/host boundary
