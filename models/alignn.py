@@ -297,6 +297,109 @@ class GatedGraphConv(nn.Module):
         return x_out, edge_update
 
 
+class HeteroRelationConv(nn.Module):
+    """Relation-specific gated messages without a relation-local root update.
+
+    Each relation returns the numerator and gate normalization required by the
+    ALIGNN update.  Callers combine those tensors per destination node across
+    only the relations that actually have incoming edges, then apply one
+    node-type self/root update.
+    """
+
+    def __init__(self, channels, edge_dim):
+        super().__init__()
+        self.channels = channels
+        self.src_gate = nn.Linear(channels, channels)
+        self.dst_gate = nn.Linear(channels, channels)
+        self.edge_gate = nn.Linear(edge_dim, channels)
+        self.message_update = nn.Linear(channels, channels)
+        self.bn_edges = SafeBatchNorm1d(channels)
+
+    @staticmethod
+    def _split_nodes(x):
+        if isinstance(x, tuple):
+            return x
+        return x, x
+
+    def forward(self, x, edge_index, edge_attr):
+        x_src, x_dst = self._split_nodes(x)
+        message_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
+        gate_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
+        if x_src.size(0) == 0 or x_dst.size(0) == 0 or edge_index.size(1) == 0:
+            return message_sum, gate_sum, edge_attr
+
+        src, dst = edge_index
+        edge_update = (
+            self.src_gate(x_src[src])
+            + self.dst_gate(x_dst[dst])
+            + self.edge_gate(edge_attr)
+        )
+        sigma = torch.sigmoid(edge_update)
+        messages = self.message_update(x_src)[src] * sigma
+        message_sum.index_add_(0, dst, messages)
+        gate_sum.index_add_(0, dst, sigma)
+
+        edge_update = F.silu(self.bn_edges(edge_update))
+        if edge_attr.size(-1) == self.channels:
+            edge_update = edge_attr + edge_update
+        return message_sum, gate_sum, edge_update
+
+
+class HeteroNodeUpdate(nn.Module):
+    """Apply one self/root update after all incoming relations are combined."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.self_update = nn.Linear(channels, channels)
+        self.bn = SafeBatchNorm1d(channels)
+
+    def forward(self, x, incoming):
+        if x.size(0) == 0:
+            return x
+        update = self.self_update(x) + incoming
+        return x + F.silu(self.bn(update))
+
+
+def _hetero_relation_update(
+        x_dict,
+        edge_index_dict,
+        edge_attr_dict,
+        node_types,
+        edge_types,
+        relation_convs,
+        node_updates,
+):
+    """Aggregate gated relation messages independently for every node."""
+    message_sums = {
+        node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
+        for node_type in node_types
+    }
+    gate_sums = {
+        node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
+        for node_type in node_types
+    }
+    out_edge_attr = {}
+
+    for edge_type in edge_types:
+        src_type, _, dst_type = edge_type
+        message_sum, gate_sum, edge_update = relation_convs[
+            _edge_parameter_key(edge_type)
+        ](
+            (x_dict[src_type], x_dict[dst_type]),
+            edge_index_dict[edge_type],
+            edge_attr_dict[edge_type],
+        )
+        message_sums[dst_type] = message_sums[dst_type] + message_sum
+        gate_sums[dst_type] = gate_sums[dst_type] + gate_sum
+        out_edge_attr[edge_type] = edge_update
+
+    out_dict = {}
+    for node_type in node_types:
+        incoming = message_sums[node_type] / (gate_sums[node_type] + 1e-6)
+        out_dict[node_type] = node_updates[node_type](x_dict[node_type], incoming)
+    return out_dict, out_edge_attr
+
+
 class GraphConvLayer(nn.Module):
     """Atom graph update block used after ALIGNN line-graph blocks."""
 
@@ -465,45 +568,27 @@ class HeteroALIGNNLayer(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
         self.atom_convs = nn.ModuleDict({
-            parameter_key: GatedGraphConv(
-                hidden_dim, hidden_dim, aggr=vertex_aggregation
-            )
+            parameter_key: HeteroRelationConv(hidden_dim, hidden_dim)
             for parameter_key in dict.fromkeys(
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
         })
+        self.node_updates = nn.ModuleDict({
+            node_type: HeteroNodeUpdate(hidden_dim)
+            for node_type in self.node_types
+        })
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict,
                 line_edge_index, angle_attr, edge_offsets):
-        node_outputs = {node_type: [] for node_type in self.node_types}
-        edge_messages = {}
-
-        for edge_type in self.edge_types:
-            src_type, _, dst_type = edge_type
-            edge_index = edge_index_dict[edge_type]
-            if edge_index.size(1) == 0 or x_dict[src_type].size(0) == 0 or x_dict[dst_type].size(0) == 0:
-                edge_messages[edge_type] = edge_attr_dict[edge_type]
-                continue
-
-            out, edge_message = self.atom_convs[_edge_parameter_key(edge_type)](
-                (x_dict[src_type], x_dict[dst_type]),
-                edge_index,
-                edge_attr_dict[edge_type],
-                size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
-                return_edge_attr=True,
-            )
-            node_outputs[dst_type].append(out)
-            edge_messages[edge_type] = edge_message
-
-        out_dict = {}
-        for node_type in self.node_types:
-            outputs = node_outputs[node_type]
-            if not outputs:
-                out_dict[node_type] = x_dict[node_type]
-            elif len(outputs) == 1:
-                out_dict[node_type] = outputs[0]
-            else:
-                out_dict[node_type] = torch.stack(outputs, dim=0).mean(dim=0)
+        out_dict, edge_messages = _hetero_relation_update(
+            x_dict,
+            edge_index_dict,
+            edge_attr_dict,
+            self.node_types,
+            self.edge_types,
+            self.atom_convs,
+            self.node_updates,
+        )
 
         edge_all = torch.cat([edge_messages[edge_type] for edge_type in self.edge_types], dim=0)
         edge_all, angle_attr = self.line_conv(
@@ -529,45 +614,26 @@ class HeteroGraphConvLayer(nn.Module):
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = nn.ModuleDict({
-            parameter_key: GatedGraphConv(
-                hidden_dim, hidden_dim, aggr=vertex_aggregation
-            )
+            parameter_key: HeteroRelationConv(hidden_dim, hidden_dim)
             for parameter_key in dict.fromkeys(
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
         })
+        self.node_updates = nn.ModuleDict({
+            node_type: HeteroNodeUpdate(hidden_dim)
+            for node_type in self.node_types
+        })
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict):
-        node_outputs = {node_type: [] for node_type in self.node_types}
-        out_edge_attr = dict(edge_attr_dict)
-
-        for edge_type in self.edge_types:
-            src_type, _, dst_type = edge_type
-            edge_index = edge_index_dict[edge_type]
-            if edge_index.size(1) == 0 or x_dict[src_type].size(0) == 0 or x_dict[dst_type].size(0) == 0:
-                continue
-
-            x_pair = (x_dict[src_type], x_dict[dst_type])
-            out, edge_update = self.atom_convs[_edge_parameter_key(edge_type)](
-                x_pair,
-                edge_index,
-                edge_attr_dict[edge_type],
-                size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
-                return_edge_attr=True,
-            )
-            node_outputs[dst_type].append(out)
-            out_edge_attr[edge_type] = edge_update
-
-        out_dict = {}
-        for node_type in self.node_types:
-            outputs = node_outputs[node_type]
-            if not outputs:
-                out_dict[node_type] = x_dict[node_type]
-            elif len(outputs) == 1:
-                out_dict[node_type] = outputs[0]
-            else:
-                out_dict[node_type] = torch.stack(outputs, dim=0).mean(dim=0)
-        return out_dict, out_edge_attr
+        return _hetero_relation_update(
+            x_dict,
+            edge_index_dict,
+            edge_attr_dict,
+            self.node_types,
+            self.edge_types,
+            self.atom_convs,
+            self.node_updates,
+        )
 
 
 class ALIGNN(nn.Module):
@@ -841,6 +907,7 @@ class HeteroALIGNN(nn.Module):
             angle_embed_size=40,
             vertex_aggregation="add",
             fixed_pooling=False,
+            use_global_node=False,
             cutoff=8.0,
     ):
         super().__init__()
@@ -848,6 +915,7 @@ class HeteroALIGNN(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.hidden_dim = hidden_dim
         self.fixed_pooling = fixed_pooling
+        self.use_global_node = bool(use_global_node)
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim)
             for node_type in self.node_types
@@ -865,12 +933,33 @@ class HeteroALIGNN(nn.Module):
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
+        if self.use_global_node:
+            self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
+            self.global_distribute = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+                    nn.Linear(hidden_dim, hidden_dim),
+                )
+                for _ in range(n_blocks)
+            ])
+            self.global_aggregate = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(
+                        (len(self.node_types) + 1) * hidden_dim,
+                        hidden_dim,
+                    ),
+                    nn.SiLU(),
+                    nn.Linear(hidden_dim, hidden_dim),
+                )
+                for _ in range(n_blocks)
+            ])
         self.gcn_layers = nn.ModuleList([
             HeteroGraphConvLayer(hidden_dim, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(gcn_blocks)
         ])
+        readout_parts = 4 if self.use_global_node else 3
         self.readout = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(readout_parts * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -952,6 +1041,21 @@ class HeteroALIGNN(nn.Module):
             reference,
         )
 
+    def _pool_nodes_by_type(self, x_dict, batch_dict, num_graphs, reference):
+        pooled = []
+        for node_type in self.node_types:
+            x = x_dict.get(node_type)
+            batch = batch_dict.get(node_type)
+            if x is None or batch is None or x.size(0) == 0:
+                pooled.append(_pool_mean_or_zeros(
+                    None, None, num_graphs, self.hidden_dim, reference
+                ))
+            else:
+                pooled.append(_pool_mean_or_zeros(
+                    x, batch, num_graphs, self.hidden_dim, reference
+                ))
+        return pooled
+
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict,
                 edge_vec_dict=None, state=None, pool_type=None):
         edge_vec_dict = {} if edge_vec_dict is None else edge_vec_dict
@@ -974,20 +1078,48 @@ class HeteroALIGNN(nn.Module):
             edge_vec_dict,
         )
 
-        for layer in self.layers:
-            x_dict, edge_attr_dict, angle_attr = layer(
-                x_dict,
-                edge_index_dict,
-                edge_attr_dict,
-                line_edge_index,
-                angle_attr,
-                edge_offsets,
+        reference = next(value for value in x_dict.values() if value is not None)
+        num_graphs = _graph_count(batch_dict=batch_dict, state=state)
+        global_fea = None
+        if self.use_global_node:
+            global_fea = self.global_seed.expand(num_graphs, -1)
+            layer_steps = zip(
+                self.global_distribute, self.layers, self.global_aggregate
             )
+            for distribute, layer, aggregate in layer_steps:
+                x_dict = {
+                    node_type: x + distribute(torch.cat([
+                        x, global_fea[batch_dict[node_type]]
+                    ], dim=-1))
+                    for node_type, x in x_dict.items()
+                }
+                x_dict, edge_attr_dict, angle_attr = layer(
+                    x_dict,
+                    edge_index_dict,
+                    edge_attr_dict,
+                    line_edge_index,
+                    angle_attr,
+                    edge_offsets,
+                )
+                pooled_by_type = self._pool_nodes_by_type(
+                    x_dict, batch_dict, num_graphs, reference
+                )
+                global_fea = global_fea + aggregate(torch.cat(
+                    [*pooled_by_type, global_fea], dim=-1
+                ))
+        else:
+            for layer in self.layers:
+                x_dict, edge_attr_dict, angle_attr = layer(
+                    x_dict,
+                    edge_index_dict,
+                    edge_attr_dict,
+                    line_edge_index,
+                    angle_attr,
+                    edge_offsets,
+                )
         for layer in self.gcn_layers:
             x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)
 
-        reference = next(value for value in x_dict.values() if value is not None)
-        num_graphs = _graph_count(batch_dict=batch_dict, state=state)
         if self.fixed_pooling:
             atom_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 0, num_graphs, reference)
             defect_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 1, num_graphs, reference)
@@ -1009,4 +1141,7 @@ class HeteroALIGNN(nn.Module):
             edge_batch = reference.new_empty((0,), dtype=torch.long)
         edge_pool = _pool_mean_or_zeros(edge_features, edge_batch, num_graphs, self.hidden_dim, reference)
 
-        return self.readout(torch.cat([atom_pool, defect_pool, edge_pool], dim=-1))
+        readout_parts = [atom_pool, defect_pool, edge_pool]
+        if global_fea is not None:
+            readout_parts.append(global_fea)
+        return self.readout(torch.cat(readout_parts, dim=-1))

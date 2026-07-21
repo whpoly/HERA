@@ -83,6 +83,7 @@ def mark_local_region(structure, local_cutoff):
 def is_hetero_task(task):
     return (
         task.endswith('_hetero')
+        or task.endswith('_hetero_global')
         or task.endswith('_hetero_was')
         or task.endswith('_hetero_fixed_pool')
         or task.endswith('_hetero_local')

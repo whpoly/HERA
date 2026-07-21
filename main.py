@@ -19,7 +19,7 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, full_x, hetero, hetero_fixed_pool, attention,
+  Modes   : full, full_x, hetero, hetero_global, hetero_fixed_pool, attention,
             was_x, hetero_was, attention_was, definet, definet_was, all
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
 """
@@ -58,13 +58,16 @@ CGCNN_DEFINET_MODES = (
     'definet_was',
 )
 LOCAL_GRAPH_SWEEP_MODES = ()
-LOCAL_CUTOFF_SWEEP_MODES = ('hetero', 'hetero_fixed_pool', 'hetero_was')
+LOCAL_CUTOFF_SWEEP_MODES = (
+    'hetero', 'hetero_global', 'hetero_fixed_pool', 'hetero_was'
+)
 FIXED_POOL_MODES = ('hetero_fixed_pool',)
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
+    'hetero_global',
     'hetero_fixed_pool',
     'attention',
     'was_x',
@@ -109,6 +112,7 @@ ALIGNN_DEFAULT_MODES = [
     'full',
     'full_x',
     'hetero',
+    'hetero_global',
     'hetero_fixed_pool',
     'attention',
     'was_x',
@@ -491,10 +495,12 @@ def validate_modes_for_model(model_name, modes, parser):
         parser.error('The definet model only supports --mode attention attention_was')
     if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
         parser.error(
-            'The alignn model supports --mode full full_x hetero '
+            'The alignn model supports --mode full full_x hetero hetero_global '
             'hetero_fixed_pool attention was_x hetero_was attention_was '
             'definet definet_was'
         )
+    if model_name != 'alignn' and 'hetero_global' in modes:
+        parser.error('The hetero_global mode is only supported with --model alignn')
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
         parser.error('The was_x and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):

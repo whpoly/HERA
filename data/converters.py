@@ -180,6 +180,8 @@ class SimpleCrystalConverter:
     def _graph_mode(task):
         if task == 'hetero_cgcnn_was':
             return 'hetero_was'
+        if task == 'alignn_hetero_global':
+            return 'hetero'
         alignn_definet_modes = {
             'alignn_definet': 'attention',
             'alignn_definet_was': 'attention_was',
