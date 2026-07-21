@@ -18,6 +18,18 @@ def _edge_type_key(edge_type):
     return "__".join(edge_type)
 
 
+def _edge_parameter_key(edge_type):
+    """Return the parameter-sharing key for a heterogeneous edge type.
+
+    Atom-to-defect and defect-to-atom edges keep separate directed topology,
+    but use the same learnable interaction because they describe reciprocal
+    directions of the same host-defect bond.
+    """
+    if edge_type[1] in {"ad", "da"}:
+        return "atom__ad_da__defect"
+    return _edge_type_key(edge_type)
+
+
 def _empty_index(reference):
     return torch.empty((2, 0), dtype=torch.long, device=reference.device)
 
@@ -453,8 +465,12 @@ class HeteroALIGNNLayer(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
         self.atom_convs = nn.ModuleDict({
-            _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
-            for edge_type in self.edge_types
+            parameter_key: GatedGraphConv(
+                hidden_dim, hidden_dim, aggr=vertex_aggregation
+            )
+            for parameter_key in dict.fromkeys(
+                _edge_parameter_key(edge_type) for edge_type in self.edge_types
+            )
         })
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict,
@@ -469,7 +485,7 @@ class HeteroALIGNNLayer(nn.Module):
                 edge_messages[edge_type] = edge_attr_dict[edge_type]
                 continue
 
-            out, edge_message = self.atom_convs[_edge_type_key(edge_type)](
+            out, edge_message = self.atom_convs[_edge_parameter_key(edge_type)](
                 (x_dict[src_type], x_dict[dst_type]),
                 edge_index,
                 edge_attr_dict[edge_type],
@@ -513,8 +529,12 @@ class HeteroGraphConvLayer(nn.Module):
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = nn.ModuleDict({
-            _edge_type_key(edge_type): GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
-            for edge_type in self.edge_types
+            parameter_key: GatedGraphConv(
+                hidden_dim, hidden_dim, aggr=vertex_aggregation
+            )
+            for parameter_key in dict.fromkeys(
+                _edge_parameter_key(edge_type) for edge_type in self.edge_types
+            )
         })
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict):
@@ -528,7 +548,7 @@ class HeteroGraphConvLayer(nn.Module):
                 continue
 
             x_pair = (x_dict[src_type], x_dict[dst_type])
-            out, edge_update = self.atom_convs[_edge_type_key(edge_type)](
+            out, edge_update = self.atom_convs[_edge_parameter_key(edge_type)](
                 x_pair,
                 edge_index,
                 edge_attr_dict[edge_type],
@@ -834,8 +854,10 @@ class HeteroALIGNN(nn.Module):
         })
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = nn.ModuleDict({
-            _edge_type_key(edge_type): _official_feature_embedding(edge_input_shape, hidden_dim)
-            for edge_type in self.edge_types
+            parameter_key: _official_feature_embedding(edge_input_shape, hidden_dim)
+            for parameter_key in dict.fromkeys(
+                _edge_parameter_key(edge_type) for edge_type in self.edge_types
+            )
         })
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
@@ -942,7 +964,7 @@ class HeteroALIGNN(nn.Module):
                 edge_attr_dict[edge_type],
                 edge_vec_dict.get(edge_type),
                 self.distance_expansion,
-                self.edge_embedding[_edge_type_key(edge_type)],
+                self.edge_embedding[_edge_parameter_key(edge_type)],
             )
             for edge_type in self.edge_types
         }

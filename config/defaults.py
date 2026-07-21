@@ -172,7 +172,7 @@ _CONFIG_REGISTRY = {
 }
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
-VALID_MODELS = ['megnet', 'cgcnn', 'definet', 'alignn']
+VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet']
 ALIGNN_TRAIN_BATCH_SIZE = 64
 ALIGNN_TEST_BATCH_SIZE = 1
 ALIGNN_BLOCKS = 3

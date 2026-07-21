@@ -51,7 +51,7 @@ from .training.history import TrainingLogger
 
 LOCAL_CUTOFF_CHOICES = [0, 3, 4, 5, 6, 7]
 DEFAULT_SEEDS = [123, 11, 1245, 34, 42, 80, 13232, 8, 99, 101]
-ALL_MODEL_SUITES = ('cgcnn', 'megnet', 'alignn')
+ALL_MODEL_SUITES = ('alignn', 'megnet', 'cgcnn')
 DEFINET_HOST_MODELS = ('cgcnn', 'alignn')
 CGCNN_DEFINET_MODES = (
     'definet',

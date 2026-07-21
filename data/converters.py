@@ -358,7 +358,14 @@ class SimpleCrystalConverter:
                 for site in d
             ])
             all_nbrs = self._neighbor_lists(d)
-            add_synthetic_self_loops = self.model_family != 'megnet'
+            # HeteroALIGNN's gated convolutions already contain an explicit
+            # root/residual update, so zero-distance self-loops are not needed
+            # to preserve a node's own features.  Keeping those synthetic
+            # edges would also manufacture a ``dd`` relation in single-defect
+            # graphs and make the otherwise empty relation participate in the
+            # relation-wise mean aggregation.  CGCNN keeps its legacy loops;
+            # MEGNet and ALIGNN use only physical periodic-neighbor edges.
+            add_synthetic_self_loops = self.model_family == 'cgcnn'
             for i, nbrs in enumerate(all_nbrs):
                 if add_synthetic_self_loops:
                     bond_index[0] += [i]

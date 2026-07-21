@@ -69,8 +69,8 @@ python -m HERA.main --help
 
 Common arguments:
 
-- `--model`: `megnet`, `cgcnn`, `definet`, `alignn`, or `all`; `all` runs the MEGNet,
-  CGCNN, and ALIGNN suites, with DeFiNet-style modes included for CGCNN and ALIGNN
+- `--model`: `alignn`, `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the ALIGNN,
+  MEGNet, and CGCNN suites in that order, with DeFiNet-style modes included for ALIGNN and CGCNN
 - `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
@@ -249,6 +249,14 @@ Supported ALIGNN modes are `full`, `full_x`, `hetero`, `attention`, `was_x`,
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
 from periodic edge vectors during each forward pass.
+
+HeteroALIGNN uses only physical periodic-neighbor edges. It does not add
+synthetic zero-distance self-loops because its gated convolutions already have
+root/residual updates. Consequently, a single-defect graph with no physical
+defect-defect bond keeps the `dd` edge store empty and skips that relation branch.
+The directed `ad` and `da` edge stores are both retained for message routing,
+but they share one reciprocal host-defect edge embedding and one convolutional
+network at every HeteroALIGNN/GCN layer.
 
 ## Smoke Check
 
