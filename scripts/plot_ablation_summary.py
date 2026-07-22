@@ -12,8 +12,8 @@ like ``hetero_r3`` and ``hetero_was_r3``, and writes:
 
 1. ``ablation_summary.csv`` with one row per model/dataset/mode result.
 2. WAS ablation bar charts comparing paired non-radius modes with and without WAS.
-3. Hetero radius line charts for ``hetero_r*`` plus optional
-   ``hetero_global_r*`` and ``hetero_was_r*`` comparison lines.
+3. Hetero radius line charts for ``hetero_r*`` plus an optional
+   ``hetero_was_r*`` comparison line.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ MODE_DISPLAY = {
     "was_x": "Full + X + WAS",
     "was": "WAS",
     "hetero": "Hetero",
-    "hetero_global": "Hetero + Global",
     "hetero_was": "Hetero + WAS",
     "hetero_local": "Hetero Local",
     "hetero_local_was": "Hetero Local + WAS",
@@ -60,20 +59,18 @@ PAIR_ORDER = {
     "full": 0,
     "full_x": 1,
     "hetero": 2,
-    "hetero_global": 3,
-    "hetero_local": 4,
-    "local": 5,
-    "attention": 6,
-    "attention_local": 7,
-    "definet": 8,
-    "definet_local": 9,
+    "hetero_local": 3,
+    "local": 4,
+    "attention": 5,
+    "attention_local": 6,
+    "definet": 7,
+    "definet_local": 8,
 }
 
 COLORS = {
     "no_was": "#5aa0c8",
     "was": "#e8896d",
     "hetero": "#5aa0c8",
-    "hetero_global": "#d99a3e",
     "hetero_was": "#e8896d",
     "hetero_local": "#72c4a8",
     "hetero_local_was": "#9b8bd6",
@@ -452,13 +449,12 @@ def plot_hetero_radius(
     ylim: tuple[float, float] | None,
 ) -> Path | None:
     radius_df = group[
-        group["pair_base"].isin(("hetero", "hetero_global"))
-        & group["radius"].notna()
+        group["pair_base"].eq("hetero") & group["radius"].notna()
     ].copy()
     if radius_df.empty:
         return None
     radius_df = radius_df.drop_duplicates(
-        subset=["pair_base", "uses_was", "radius"],
+        subset=["uses_was", "radius"],
         keep="last",
     ).copy()
 
@@ -471,15 +467,11 @@ def plot_hetero_radius(
     radii = sorted(radius_df["radius"].dropna().astype(int).unique())
     radius_positions = {radius: idx for idx, radius in enumerate(radii)}
     plotted = 0
-    for pair_base, uses_was, label, color, marker in [
-        ("hetero", False, "Hetero", COLORS["hetero"], "o"),
-        ("hetero_global", False, "Hetero + Global", COLORS["hetero_global"], "^"),
-        ("hetero", True, "Hetero + WAS", COLORS["hetero_was"], "s"),
+    for uses_was, label, color, marker in [
+        (False, "Hetero", COLORS["hetero"], "o"),
+        (True, "Hetero + WAS", COLORS["hetero_was"], "s"),
     ]:
-        series = radius_df[
-            radius_df["pair_base"].eq(pair_base)
-            & radius_df["uses_was"].eq(uses_was)
-        ].copy()
+        series = radius_df[radius_df["uses_was"].eq(uses_was)].copy()
         if series.empty:
             continue
         series = series.sort_values("radius")

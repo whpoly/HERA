@@ -183,7 +183,6 @@ ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
-    'hetero_global',
     'hetero_fixed_pool',
     'attention',
     'was_x',
@@ -194,9 +193,6 @@ ALIGNN_MODES = (
 )
 FIXED_POOL_MODES = (
     'hetero_fixed_pool',
-)
-ALIGNN_GLOBAL_HETERO_MODES = (
-    'hetero_global',
 )
 CGCNN_DEFINET_MODES = (
     'definet',
@@ -216,7 +212,6 @@ VALID_MODES = [
     'full',
     'full_x',
     'hetero',
-    'hetero_global',
     'hetero_fixed_pool',
     'attention',
     'was_x',
@@ -261,8 +256,7 @@ def get_config(model: str, dataset: str, mode: str):
     Args:
         model: 'megnet', 'cgcnn', 'definet', or 'alignn'
         dataset: one of VALID_DATASETS
-        mode: one of 'full', 'full_x', 'hetero', 'hetero_global',
-            'hetero_fixed_pool',
+        mode: one of 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
             'attention', 'was_x', 'hetero_was', 'attention_was',
             'definet', 'definet_was'
 
@@ -281,8 +275,6 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"The definet model only supports {DEFINET_MODES}")
     if model == 'alignn' and mode not in ALIGNN_MODES:
         raise ValueError(f"The alignn model only supports {ALIGNN_MODES}")
-    if mode in ALIGNN_GLOBAL_HETERO_MODES and model != 'alignn':
-        raise ValueError("The hetero_global mode is only supported for alignn")
     if mode in FIXED_POOL_MODES and model not in ('cgcnn', 'megnet', 'alignn'):
         raise ValueError("The hetero_fixed_pool mode is only supported for cgcnn, megnet, and alignn")
     if model not in WAS_MODELS and mode in (
@@ -313,11 +305,6 @@ def get_config(model: str, dataset: str, mode: str):
         config = copy.deepcopy(config_hetero)
         config['task'] = f'{model}_hetero_fixed_pool'
         config['model']['fixed_pooling'] = True
-        return _finalize_config(config, model)
-    if mode == 'hetero_global':
-        config = copy.deepcopy(config_hetero)
-        config['task'] = 'alignn_hetero_global'
-        config['model']['use_global_node'] = True
         return _finalize_config(config, model)
     if mode == 'was_x':
         config = copy.deepcopy(config_was_x)

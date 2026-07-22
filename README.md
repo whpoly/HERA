@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `full`, `full_x`, `hetero`, `hetero_global`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
+| Modes | `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -244,8 +244,8 @@ HERA-compatible heterogeneous variant. Use it with:
 python -m HERA.main --model alignn --dataset native --mode hetero --r 0
 ```
 
-Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_global`,
-`hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`,
+Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
+`attention`, `was_x`, `hetero_was`, `attention_was`,
 `definet`, and `definet_was`. HeteroALIGNN uses the same
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
@@ -264,18 +264,9 @@ edges of that type, and atom/defect nodes each receive one self/root update
 after all of their incoming relation messages have been combined. This avoids
 cross-graph leakage from relation types that occur elsewhere in a mixed batch.
 
-`hetero` is the no-global baseline. `hetero_global` adds one learned graph-level
-virtual node per crystal. At every ALIGNN block it broadcasts its state to the
-real nodes, then pools `atom` and `defect` nodes separately. The global update
-uses `[atom_mean, defect_mean, global]`, so the two node types remain distinct
-instead of being mixed into one all-node average. The final readout also includes
-the updated global state. Both modes use the same heterogeneous graph construction.
-
-To compare the controlled pair over the same radii:
-
-```bash
-python -m HERA.main --model alignn --dataset native --mode hetero hetero_global --r 0 3 4 5
-```
+For a controlled ALIGNN comparison, neither HeteroALIGNN nor DefiNetALIGNN uses
+a learned graph-level virtual node. HeteroALIGNN reads out separate atom, defect,
+and edge pools; DefiNetALIGNN reads out its shared node and edge pools.
 
 ## Smoke Check
 

@@ -790,7 +790,7 @@ class AttentionALIGNN(nn.Module):
 
 
 class DefiNetALIGNN(nn.Module):
-    """Scalar-property ALIGNN adapter with DeFiNet-style defect-aware gates."""
+    """DeFiNet-style ALIGNN gates without a graph-level virtual token."""
 
     def __init__(
             self,
@@ -811,14 +811,6 @@ class DefiNetALIGNN(nn.Module):
         self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
-        self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
-        self.global_distribute = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-            )
-            for _ in range(n_blocks)
-        ])
         self.layers = nn.ModuleList([
             DefiNetALIGNNLayer(
                 hidden_dim,
@@ -828,19 +820,12 @@ class DefiNetALIGNN(nn.Module):
             )
             for _ in range(n_blocks)
         ])
-        self.global_aggregate = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-            )
-            for _ in range(n_blocks)
-        ])
         self.gcn_layers = nn.ModuleList([
             GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -865,24 +850,19 @@ class DefiNetALIGNN(nn.Module):
         else:
             defect_marker = defect_marker.to(device=x.device, dtype=torch.long).view(-1)
 
-        num_graphs = _graph_count(batch=batch)
-        global_fea = self.global_seed.expand(num_graphs, -1)
-        for distribute, layer, aggregate in zip(
-                self.global_distribute, self.layers, self.global_aggregate):
-            x = x + distribute(torch.cat([x, global_fea[batch]], dim=-1))
+        for layer in self.layers:
             x, edge_attr, angle_attr = layer(
                 x, edge_index, edge_attr, line_edge_index, angle_attr,
                 defect_marker=defect_marker,
             )
-            pooled = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
-            global_fea = global_fea + aggregate(torch.cat([pooled, global_fea], dim=-1))
         for layer in self.gcn_layers:
             x, edge_attr = layer(x, edge_index, edge_attr)
 
+        num_graphs = _graph_count(batch=batch)
         node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
         edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
         edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
-        return self.readout(torch.cat([node_pool, global_fea, edge_pool], dim=-1))
+        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
 
     def get_all_attention_weights(self):
         results = []
@@ -894,7 +874,7 @@ class DefiNetALIGNN(nn.Module):
 
 
 class HeteroALIGNN(nn.Module):
-    """Heterogeneous ALIGNN for HERA atom/defect graph modes."""
+    """Heterogeneous ALIGNN without a graph-level virtual token."""
 
     def __init__(
             self,
@@ -907,7 +887,6 @@ class HeteroALIGNN(nn.Module):
             angle_embed_size=40,
             vertex_aggregation="add",
             fixed_pooling=False,
-            use_global_node=False,
             cutoff=8.0,
     ):
         super().__init__()
@@ -915,7 +894,6 @@ class HeteroALIGNN(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.hidden_dim = hidden_dim
         self.fixed_pooling = fixed_pooling
-        self.use_global_node = bool(use_global_node)
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim)
             for node_type in self.node_types
@@ -933,33 +911,12 @@ class HeteroALIGNN(nn.Module):
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
-        if self.use_global_node:
-            self.global_seed = nn.Parameter(torch.zeros(1, hidden_dim))
-            self.global_distribute = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
-                    nn.Linear(hidden_dim, hidden_dim),
-                )
-                for _ in range(n_blocks)
-            ])
-            self.global_aggregate = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(
-                        (len(self.node_types) + 1) * hidden_dim,
-                        hidden_dim,
-                    ),
-                    nn.SiLU(),
-                    nn.Linear(hidden_dim, hidden_dim),
-                )
-                for _ in range(n_blocks)
-            ])
         self.gcn_layers = nn.ModuleList([
             HeteroGraphConvLayer(hidden_dim, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(gcn_blocks)
         ])
-        readout_parts = 4 if self.use_global_node else 3
         self.readout = nn.Sequential(
-            nn.Linear(readout_parts * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -1041,21 +998,6 @@ class HeteroALIGNN(nn.Module):
             reference,
         )
 
-    def _pool_nodes_by_type(self, x_dict, batch_dict, num_graphs, reference):
-        pooled = []
-        for node_type in self.node_types:
-            x = x_dict.get(node_type)
-            batch = batch_dict.get(node_type)
-            if x is None or batch is None or x.size(0) == 0:
-                pooled.append(_pool_mean_or_zeros(
-                    None, None, num_graphs, self.hidden_dim, reference
-                ))
-            else:
-                pooled.append(_pool_mean_or_zeros(
-                    x, batch, num_graphs, self.hidden_dim, reference
-                ))
-        return pooled
-
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict,
                 edge_vec_dict=None, state=None, pool_type=None):
         edge_vec_dict = {} if edge_vec_dict is None else edge_vec_dict
@@ -1078,48 +1020,20 @@ class HeteroALIGNN(nn.Module):
             edge_vec_dict,
         )
 
-        reference = next(value for value in x_dict.values() if value is not None)
-        num_graphs = _graph_count(batch_dict=batch_dict, state=state)
-        global_fea = None
-        if self.use_global_node:
-            global_fea = self.global_seed.expand(num_graphs, -1)
-            layer_steps = zip(
-                self.global_distribute, self.layers, self.global_aggregate
+        for layer in self.layers:
+            x_dict, edge_attr_dict, angle_attr = layer(
+                x_dict,
+                edge_index_dict,
+                edge_attr_dict,
+                line_edge_index,
+                angle_attr,
+                edge_offsets,
             )
-            for distribute, layer, aggregate in layer_steps:
-                x_dict = {
-                    node_type: x + distribute(torch.cat([
-                        x, global_fea[batch_dict[node_type]]
-                    ], dim=-1))
-                    for node_type, x in x_dict.items()
-                }
-                x_dict, edge_attr_dict, angle_attr = layer(
-                    x_dict,
-                    edge_index_dict,
-                    edge_attr_dict,
-                    line_edge_index,
-                    angle_attr,
-                    edge_offsets,
-                )
-                pooled_by_type = self._pool_nodes_by_type(
-                    x_dict, batch_dict, num_graphs, reference
-                )
-                global_fea = global_fea + aggregate(torch.cat(
-                    [*pooled_by_type, global_fea], dim=-1
-                ))
-        else:
-            for layer in self.layers:
-                x_dict, edge_attr_dict, angle_attr = layer(
-                    x_dict,
-                    edge_index_dict,
-                    edge_attr_dict,
-                    line_edge_index,
-                    angle_attr,
-                    edge_offsets,
-                )
         for layer in self.gcn_layers:
             x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)
 
+        reference = next(value for value in x_dict.values() if value is not None)
+        num_graphs = _graph_count(batch_dict=batch_dict, state=state)
         if self.fixed_pooling:
             atom_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 0, num_graphs, reference)
             defect_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 1, num_graphs, reference)
@@ -1141,7 +1055,4 @@ class HeteroALIGNN(nn.Module):
             edge_batch = reference.new_empty((0,), dtype=torch.long)
         edge_pool = _pool_mean_or_zeros(edge_features, edge_batch, num_graphs, self.hidden_dim, reference)
 
-        readout_parts = [atom_pool, defect_pool, edge_pool]
-        if global_fea is not None:
-            readout_parts.append(global_fea)
-        return self.readout(torch.cat(readout_parts, dim=-1))
+        return self.readout(torch.cat([atom_pool, defect_pool, edge_pool], dim=-1))

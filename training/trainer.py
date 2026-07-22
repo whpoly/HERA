@@ -55,7 +55,6 @@ ALIGNN_HOMOGENEOUS_TASKS = (
 )
 ALIGNN_HETERO_TASKS = (
     'alignn_hetero',
-    'alignn_hetero_global',
     'alignn_hetero_fixed_pool',
     'alignn_hetero_was',
     'alignn_hetero_local',
@@ -311,7 +310,6 @@ class MEGNetTrainer:
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 fixed_pooling=self.config["model"].get("fixed_pooling", False),
-                use_global_node=self.config["model"].get("use_global_node", False),
                 cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
