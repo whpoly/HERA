@@ -728,16 +728,15 @@ def main():
                     )
                 return dataset_cache[cache_key]
 
-            results = {}
-            result_labels = []
-            for mode in dataset_modes:
-                def config_for_mode(mode_name):
-                    return apply_batch_size_overrides(
-                        get_config(model_name, dataset_name, mode_name),
-                        args,
-                        model_name,
-                    )
+            def config_for_mode(mode_name):
+                return apply_batch_size_overrides(
+                    get_config(model_name, dataset_name, mode_name),
+                    args,
+                    model_name,
+                )
 
+            run_specs = []
+            for mode in dataset_modes:
                 mode_runs = [{
                     'label': mode,
                     'mode': mode,
@@ -786,17 +785,154 @@ def main():
                 for run in mode_runs:
                     run_label = run['label']
                     train_mode = run['mode']
-                    config = run['config']
-                    result_labels.append(run_label)
                     mode_parts = [dataset_dir, train_mode]
                     if run['radius_label'] is not None:
                         mode_parts.append(run['radius_label'])
                     mode_dir = os.path.join(*mode_parts)
                     os.makedirs(mode_dir, exist_ok=True)
-                    mode_summary_path = os.path.join(mode_dir, 'summary.txt')
+                    run['mode_dir'] = mode_dir
+                    run['summary_path'] = os.path.join(mode_dir, 'summary.txt')
+                    run_specs.append(run)
 
+            def train_run_for_seeds(run, selected_seeds):
+                run_label = run['label']
+                train_mode = run['mode']
+                config = run['config']
+                mode_dir = run['mode_dir']
+                run_dataset = dataset_for_run(run['local_cutoff'], train_mode)
+
+                print(f'\n{"=" * 60}')
+                print(f'  Training {model_name.upper()} - {run_label.upper()} mode')
+                print(
+                    '  Batch size: '
+                    f'train={config["model"]["train_batch_size"]}, '
+                    f'val/test={config["model"]["test_batch_size"]}'
+                )
+                print(
+                    '  Graph/model: '
+                    f'cutoff={config["model"]["cutoff"]}, '
+                    f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
+                    f'hidden={config["model"]["embedding_size"]}, '
+                    f'nblocks={config["model"]["nblocks"]}, '
+                    f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
+                    f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                    f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
+                    f'amp={config["optim"].get("amp", False)}'
+                )
+                if train_mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
+                    print(f'  {radius_summary(train_mode, config)}')
+                print(f'{"=" * 60}')
+
+                explain_options = None
+                if args.explain:
+                    if args.explain_dir is not None:
+                        explain_parts = [args.explain_dir, model_name, dataset_name, train_mode]
+                        if run['radius_label'] is not None:
+                            explain_parts.append(run['radius_label'])
+                        explain_root = os.path.join(*explain_parts)
+                    else:
+                        explain_root = os.path.join(mode_dir, 'explanations')
+                    explain_options = {
+                        'root_dir': explain_root,
+                        'max_samples': args.explain_max_samples,
+                        'epochs': args.explain_epochs,
+                        'lr': args.explain_lr,
+                        'formats': args.explain_formats,
+                        'cmap': args.explain_cmap,
+                        'strict': args.explain_strict,
+                    }
+
+                return train_single_mode(
+                    train_mode,
+                    config,
+                    run_dataset[:3],
+                    run_dataset[3],
+                    selected_seeds,
+                    args.epochs,
+                    args.device,
+                    model_name=model_name,
+                    dataset_name=dataset_name,
+                    log_dir=mode_dir,
+                    explain_options=explain_options,
+                    run_label=run_label,
+                    cv5=args.cv5,
+                    resume=args.resume,
+                )
+
+            results = {}
+            result_labels = [run['label'] for run in run_specs]
+            if model_name == 'alignn' and not args.cv5:
+                completed_labels = set()
+                losses_by_seed = {run['label']: {} for run in run_specs}
+
+                if args.resume:
+                    for run in run_specs:
+                        summary_losses = read_mode_summary_losses(run['summary_path'])
+                        if (
+                                summary_losses is not None
+                                and len(summary_losses) == len(args.seeds)
+                        ):
+                            print(
+                                f'\nResume: complete summary found for '
+                                f'{model_name.upper()} - {run["label"].upper()}; '
+                                'skipping all seeds.'
+                            )
+                            results[run['label']] = summary_losses
+                            completed_labels.add(run['label'])
+                            continue
+
+                        completed_losses = completed_resume_losses(
+                            run['mode_dir'],
+                            args.seeds,
+                            cv5=False,
+                        )
+                        if completed_losses is not None:
+                            print(
+                                f'\nResume: all completed histories found for '
+                                f'{model_name.upper()} - {run["label"].upper()}; '
+                                'skipping all seeds.'
+                            )
+                            results[run['label']] = completed_losses
+                            completed_labels.add(run['label'])
+
+                for seed in args.seeds:
+                    print(f'\n{"#" * 60}')
+                    print(f'  ALIGNN benchmark seed: {seed}')
+                    print(f'{"#" * 60}')
+                    for run in run_specs:
+                        if run['label'] in completed_labels:
+                            continue
+                        seed_losses = train_run_for_seeds(run, [seed])
+                        if len(seed_losses) != 1:
+                            raise RuntimeError(
+                                f'Expected one loss for seed {seed}, got {seed_losses}'
+                            )
+                        losses_by_seed[run['label']][seed] = seed_losses[0]
+
+                for run in run_specs:
+                    run_label = run['label']
+                    if run_label not in results:
+                        results[run_label] = [
+                            losses_by_seed[run_label][seed]
+                            for seed in args.seeds
+                        ]
+                    write_mode_summary(
+                        run['summary_path'],
+                        model_name,
+                        dataset_name,
+                        run_label,
+                        results[run_label],
+                        args.epochs,
+                        args.seeds,
+                        run['config'],
+                        radius_label=run['radius_label'],
+                        cv5=False,
+                    )
+            else:
+                for run in run_specs:
+                    run_label = run['label']
                     if args.resume:
-                        summary_losses = read_mode_summary_losses(mode_summary_path)
+                        summary_losses = read_mode_summary_losses(run['summary_path'])
                         if summary_losses is not None:
                             print(
                                 f'\nResume: summary found for '
@@ -806,7 +942,11 @@ def main():
                             results[run_label] = summary_losses
                             continue
 
-                        completed_losses = completed_resume_losses(mode_dir, args.seeds, args.cv5)
+                        completed_losses = completed_resume_losses(
+                            run['mode_dir'],
+                            args.seeds,
+                            args.cv5,
+                        )
                         if completed_losses is not None:
                             print(
                                 f'\nResume: all completed histories found for '
@@ -815,66 +955,32 @@ def main():
                             )
                             results[run_label] = completed_losses
                             write_mode_summary(
-                                mode_summary_path,
-                                model_name, dataset_name, run_label, completed_losses,
-                                args.epochs, args.seeds, config,
-                                radius_label=run['radius_label'], cv5=args.cv5,
+                                run['summary_path'],
+                                model_name,
+                                dataset_name,
+                                run_label,
+                                completed_losses,
+                                args.epochs,
+                                args.seeds,
+                                run['config'],
+                                radius_label=run['radius_label'],
+                                cv5=args.cv5,
                             )
                             continue
 
-                    run_dataset = dataset_for_run(run['local_cutoff'], train_mode)
-
-                    print(f'\n{"=" * 60}')
-                    print(f'  Training {model_name.upper()} - {run_label.upper()} mode')
-                    print(
-                        '  Batch size: '
-                        f'train={config["model"]["train_batch_size"]}, '
-                        f'val/test={config["model"]["test_batch_size"]}'
-                    )
-                    print(
-                        '  Graph/model: '
-                        f'cutoff={config["model"]["cutoff"]}, '
-                        f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
-                        f'hidden={config["model"]["embedding_size"]}, '
-                        f'nblocks={config["model"]["nblocks"]}, '
-                        f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
-                        f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
-                        f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
-                        f'amp={config["optim"].get("amp", False)}'
-                    )
-                    if mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
-                        print(f'  {radius_summary(mode, config)}')
-                    print(f'{"=" * 60}')
-                    explain_options = None
-                    if args.explain:
-                        if args.explain_dir is not None:
-                            explain_parts = [args.explain_dir, model_name, dataset_name, train_mode]
-                            if run['radius_label'] is not None:
-                                explain_parts.append(run['radius_label'])
-                            explain_root = os.path.join(*explain_parts)
-                        else:
-                            explain_root = os.path.join(mode_dir, 'explanations')
-                        explain_options = {
-                            'root_dir': explain_root,
-                            'max_samples': args.explain_max_samples,
-                            'epochs': args.explain_epochs,
-                            'lr': args.explain_lr,
-                            'formats': args.explain_formats,
-                            'cmap': args.explain_cmap,
-                            'strict': args.explain_strict,
-                        }
-                    losses = train_single_mode(
-                        train_mode, config, run_dataset[:3], run_dataset[3], args.seeds, args.epochs, args.device,
-                        model_name=model_name, dataset_name=dataset_name,
-                        log_dir=mode_dir, explain_options=explain_options,
-                        run_label=run_label, cv5=args.cv5, resume=args.resume,
-                    )
+                    losses = train_run_for_seeds(run, args.seeds)
                     results[run_label] = losses
                     write_mode_summary(
-                        mode_summary_path,
-                        model_name, dataset_name, run_label, losses,
-                        args.epochs, args.seeds, config,
-                        radius_label=run['radius_label'], cv5=args.cv5,
+                        run['summary_path'],
+                        model_name,
+                        dataset_name,
+                        run_label,
+                        losses,
+                        args.epochs,
+                        args.seeds,
+                        run['config'],
+                        radius_label=run['radius_label'],
+                        cv5=args.cv5,
                     )
 
             model_results[dataset_name] = results

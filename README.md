@@ -75,6 +75,10 @@ Common arguments:
   `hetero` runs first and `definet` runs second, followed by their related
   `hetero_fixed_pool`, `hetero_was`, and `definet_was` modes. Explicitly
   listed modes keep the order supplied on the command line.
+- Multi-seed ALIGNN benchmarks run in seed-major order: every requested mode
+  is completed for one seed before the next seed starts. Each mode still writes
+  to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
+  checkpoints, summaries, and `--resume` remain mode-specific.
 - `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
@@ -258,12 +262,9 @@ Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
 from periodic edge vectors during each forward pass.
 
-HeteroALIGNN assigns one learnable scalar message weight to each ordered
-relation pair of a line-graph angle edge. Reverse traversals share one weight
-(for example, `aa->ad` and `da->aa`), giving six learnable angle-relation
-weights for the standard four edge types without introducing an artificial
-direction dependence. All six weights start at `1`, so the initial model
-matches the unweighted geometric-angle update.
+HeteroALIGNN uses one shared geometric-angle update for every line-graph edge.
+The angle convolution does not distinguish `aa`/`dd`/`ad`/`da` relation
+combinations.
 
 HeteroALIGNN uses only physical periodic-neighbor edges. It does not add
 synthetic zero-distance self-loops because its gated convolutions already have
@@ -278,11 +279,10 @@ edges of that type, and atom/defect nodes each receive one self/root update
 after all of their incoming relation messages have been combined. This avoids
 cross-graph leakage from relation types that occur elsewhere in a mixed batch.
 
-For a controlled ALIGNN comparison, neither HeteroALIGNN nor DefiNetALIGNN uses
-a learned graph-level virtual node. HeteroALIGNN reads out separate atom, defect,
-node pools; the homogeneous ALIGNN variants read out a single node pool. Edge
-embeddings participate in message passing but are not pooled directly by any
-ALIGNN prediction head.
+For a controlled comparison with DefiNetALIGNN, HeteroALIGNN has no learned
+global graph feature and does not pool edge embeddings into its prediction
+head. It concatenates only the separate atom and defect node pools, while
+DefiNetALIGNN uses its homogeneous node pool.
 
 ## Smoke Check
 
