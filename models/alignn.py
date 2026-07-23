@@ -30,6 +30,56 @@ def _edge_parameter_key(edge_type):
     return _edge_type_key(edge_type)
 
 
+def _angle_relation_lookup(edge_types):
+    """Map valid ordered bond-type pairs to reversal-symmetric relation IDs.
+
+    A line-graph edge represents two consecutive directed bonds ``r1 -> r2``.
+    Its reversed geometric path is ``reverse(r2) -> reverse(r1)``; both paths
+    share one relation embedding so the angle representation does not depend
+    on which direction the same three-site path is traversed.
+    """
+
+    edge_types = tuple(tuple(edge_type) for edge_type in edge_types)
+    reverse_indices = []
+    for edge_idx, edge_type in enumerate(edge_types):
+        src_type, _, dst_type = edge_type
+        if src_type == dst_type:
+            reverse_indices.append(edge_idx)
+            continue
+
+        candidates = [
+            idx
+            for idx, candidate in enumerate(edge_types)
+            if candidate[0] == dst_type and candidate[2] == src_type
+        ]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Expected exactly one reciprocal edge type for {edge_type}, "
+                f"found {len(candidates)}"
+            )
+        reverse_indices.append(candidates[0])
+
+    canonical_pairs = {}
+    lookup = torch.full(
+        (len(edge_types), len(edge_types)),
+        -1,
+        dtype=torch.long,
+    )
+    for first_idx, first_type in enumerate(edge_types):
+        for second_idx, second_type in enumerate(edge_types):
+            if first_type[2] != second_type[0]:
+                continue
+            reverse_pair = (
+                reverse_indices[second_idx],
+                reverse_indices[first_idx],
+            )
+            canonical_pair = min((first_idx, second_idx), reverse_pair)
+            if canonical_pair not in canonical_pairs:
+                canonical_pairs[canonical_pair] = len(canonical_pairs)
+            lookup[first_idx, second_idx] = canonical_pairs[canonical_pair]
+    return lookup, len(canonical_pairs)
+
+
 def _empty_index(reference):
     return torch.empty((2, 0), dtype=torch.long, device=reference.device)
 
@@ -200,22 +250,36 @@ def build_line_graph(edge_index, edge_vec, angle_expansion):
     return _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion)
 
 
-def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_types, angle_expansion):
+def build_hetero_line_graph(
+        edge_index_dict,
+        edge_vec_all,
+        edge_offsets,
+        edge_types,
+        angle_expansion,
+        return_angle_types=False,
+):
     """Build a line graph over the concatenated heterogeneous bond nodes."""
 
     if edge_vec_all.size(0) == 0:
-        return _empty_index(edge_vec_all), edge_vec_all.new_empty((0, angle_expansion.out_features))
+        line_edge_index = _empty_index(edge_vec_all)
+        angle_attr = edge_vec_all.new_empty((0, angle_expansion.out_features))
+        if return_angle_types:
+            angle_types = edge_vec_all.new_empty((0, 2), dtype=torch.long)
+            return line_edge_index, angle_attr, angle_types
+        return line_edge_index, angle_attr
 
     valid_edges = _valid_edge_mask(edge_vec_all)
     outgoing = defaultdict(list)
     edge_targets = []
+    edge_type_ids = edge_vec_all.new_empty((edge_vec_all.size(0),), dtype=torch.long)
 
-    for edge_type in edge_types:
+    for edge_type_idx, edge_type in enumerate(edge_types):
         edge_index = edge_index_dict[edge_type]
         src_type, _, dst_type = edge_type
         offset = edge_offsets[edge_type]
         sources = edge_index[0].detach().cpu().tolist()
         targets = edge_index[1].detach().cpu().tolist()
+        edge_type_ids[offset:offset + edge_index.size(1)] = edge_type_idx
 
         for local_edge, src in enumerate(sources):
             global_edge = offset + local_edge
@@ -235,7 +299,26 @@ def build_hetero_line_graph(edge_index_dict, edge_vec_all, edge_offsets, edge_ty
             pair_src.append(first_edge)
             pair_dst.append(second_edge)
 
-    return _angle_features_from_pairs(pair_src, pair_dst, edge_vec_all, angle_expansion)
+    line_edge_index, angle_attr = _angle_features_from_pairs(
+        pair_src,
+        pair_dst,
+        edge_vec_all,
+        angle_expansion,
+    )
+    if not return_angle_types:
+        return line_edge_index, angle_attr
+
+    if line_edge_index.size(1) == 0:
+        angle_types = edge_vec_all.new_empty((0, 2), dtype=torch.long)
+    else:
+        angle_types = torch.stack(
+            [
+                edge_type_ids[line_edge_index[0]],
+                edge_type_ids[line_edge_index[1]],
+            ],
+            dim=-1,
+        )
+    return line_edge_index, angle_attr, angle_types
 
 
 class GatedGraphConv(nn.Module):
@@ -906,7 +989,17 @@ class HeteroALIGNN(nn.Module):
             )
         })
         self.angle_expansion = AngleExpansion(angle_embed_size)
-        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
+        angle_relation_lookup, num_angle_relations = _angle_relation_lookup(self.edge_types)
+        self.register_buffer("angle_relation_lookup", angle_relation_lookup)
+        self.angle_relation_embedding = nn.Embedding(
+            num_angle_relations,
+            self.angle_expansion.out_features,
+        )
+        nn.init.zeros_(self.angle_relation_embedding.weight)
+        self.angle_embedding = _official_feature_embedding(
+            2 * self.angle_expansion.out_features,
+            hidden_dim,
+        )
         self.layers = nn.ModuleList([
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
@@ -939,16 +1032,31 @@ class HeteroALIGNN(nn.Module):
         if offset == 0:
             line_edge_index = _empty_index(reference)
             angle_attr = reference.new_empty((0, self.angle_expansion.out_features))
+            angle_types = reference.new_empty((0, 2), dtype=torch.long)
         else:
             edge_vec_all = torch.cat(edge_vec_parts, dim=0)
-            line_edge_index, angle_attr = build_hetero_line_graph(
+            line_edge_index, angle_attr, angle_types = build_hetero_line_graph(
                 edge_index_dict,
                 edge_vec_all,
                 edge_offsets,
                 self.edge_types,
                 self.angle_expansion,
+                return_angle_types=True,
             )
-        return line_edge_index, self.angle_embedding(angle_attr.float()), edge_offsets
+        if angle_types.size(0) == 0:
+            relation_attr = angle_attr.new_empty(
+                (0, self.angle_expansion.out_features)
+            )
+        else:
+            relation_ids = self.angle_relation_lookup[
+                angle_types[:, 0],
+                angle_types[:, 1],
+            ]
+            if torch.any(relation_ids < 0):
+                raise ValueError("Encountered an invalid heterogeneous angle relation")
+            relation_attr = self.angle_relation_embedding(relation_ids)
+        angle_input = torch.cat([angle_attr.float(), relation_attr], dim=-1)
+        return line_edge_index, self.angle_embedding(angle_input), edge_offsets
 
     def _edge_batches(self, edge_index_dict, batch_dict, reference):
         batches = []

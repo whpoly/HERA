@@ -251,6 +251,12 @@ Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
 from periodic edge vectors during each forward pass.
 
+HeteroALIGNN also embeds the ordered relation pair of every line-graph angle
+edge alongside its geometric angle RBF features. Reverse traversals share one
+embedding (for example, `aa->ad` and `da->aa`), giving six learnable angle
+relation classes for the standard four edge types without introducing an
+artificial direction dependence.
+
 HeteroALIGNN uses only physical periodic-neighbor edges. It does not add
 synthetic zero-distance self-loops because its gated convolutions already have
 root/residual updates. Consequently, a single-defect graph with no physical
