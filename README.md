@@ -71,6 +71,10 @@ Common arguments:
 
 - `--model`: `alignn`, `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the ALIGNN,
   MEGNet, and CGCNN suites in that order, with DeFiNet-style modes included for ALIGNN and CGCNN
+- For the default ALIGNN benchmark (`--mode all` or no explicit `--mode`),
+  `hetero` runs first and `definet` runs second, followed by their related
+  `hetero_fixed_pool`, `hetero_was`, and `definet_was` modes. Explicitly
+  listed modes keep the order supplied on the command line.
 - `--dataset`: dataset name, or `all` to run every dataset
 - `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`

@@ -108,16 +108,16 @@ MEGNET_DEFAULT_MODES = [
     'attention_was',
 ]
 ALIGNN_DEFAULT_MODES = [
+    'hetero',
+    'definet',
+    'hetero_fixed_pool',
+    'hetero_was',
+    'definet_was',
     'full',
     'full_x',
-    'hetero',
-    'hetero_fixed_pool',
     'attention',
     'was_x',
-    'hetero_was',
     'attention_was',
-    'definet',
-    'definet_was',
 ]
 
 
