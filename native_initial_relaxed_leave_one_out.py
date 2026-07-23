@@ -194,6 +194,7 @@ def train_with_validation(
     for epoch in range(epochs):
         train_mae, train_mse = trainer.train_one_epoch()
         val_mae = trainer.evaluate_on_test()
+        trainer.step_scheduler(val_mae)
         cur_lr = trainer.optimizer.param_groups[0]["lr"]
         if val_mae < best_val:
             best_val = float(val_mae)

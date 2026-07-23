@@ -126,6 +126,9 @@ Common arguments:
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
 - `--resume`: skip a completed mode/radius immediately when its per-mode
   `summary.txt` exists; otherwise skip completed seed/fold tasks inside that mode
+- The `ReduceLROnPlateau` scheduler monitors validation MAE. Protocols that
+  intentionally have no validation split, such as native POSCAR0 fixed-epoch
+  training, keep a fixed learning rate.
 
 Example training commands:
 
@@ -255,11 +258,12 @@ Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
 from periodic edge vectors during each forward pass.
 
-HeteroALIGNN also embeds the ordered relation pair of every line-graph angle
-edge alongside its geometric angle RBF features. Reverse traversals share one
-embedding (for example, `aa->ad` and `da->aa`), giving six learnable angle
-relation classes for the standard four edge types without introducing an
-artificial direction dependence.
+HeteroALIGNN assigns one learnable scalar message weight to each ordered
+relation pair of a line-graph angle edge. Reverse traversals share one weight
+(for example, `aa->ad` and `da->aa`), giving six learnable angle-relation
+weights for the standard four edge types without introducing an artificial
+direction dependence. All six weights start at `1`, so the initial model
+matches the unweighted geometric-angle update.
 
 HeteroALIGNN uses only physical periodic-neighbor edges. It does not add
 synthetic zero-distance self-loops because its gated convolutions already have

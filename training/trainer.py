@@ -592,8 +592,11 @@ class MEGNetTrainer:
                             weights=batch.weight, reduction='sum').to('cpu').numpy()
                 )
         train_mae = sum(maes) / len(self.train_structures)
-        self.scheduler.step(train_mae)
         return train_mae, np.mean(mses)
+
+    def step_scheduler(self, validation_loss):
+        """Update the learning-rate scheduler from a validation metric."""
+        self.scheduler.step(float(validation_loss))
 
     def evaluate_on_test(self, return_predictions=False):
         total, results = [], []

@@ -290,6 +290,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         for epoch in range(epochs):
             mae, mse = trainer.train_one_epoch()
             loss = trainer.evaluate_on_test()
+            trainer.step_scheduler(loss)
             cur_lr = trainer.optimizer.param_groups[0]['lr']
             print(f'  [{split["display"]}] Epoch {epoch + 1}/{epochs}  train_mae={mae:.4f}  val_mae={loss:.4f}')
             if loss < min_loss:

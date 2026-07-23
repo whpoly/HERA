@@ -35,7 +35,7 @@ def _angle_relation_lookup(edge_types):
 
     A line-graph edge represents two consecutive directed bonds ``r1 -> r2``.
     Its reversed geometric path is ``reverse(r2) -> reverse(r1)``; both paths
-    share one relation embedding so the angle representation does not depend
+    share one relation weight so the angle update does not depend
     on which direction the same three-site path is traversed.
     """
 
@@ -346,7 +346,15 @@ class GatedGraphConv(nn.Module):
             return x
         return x, x
 
-    def forward(self, x, edge_index, edge_attr, size=None, return_edge_attr=False):
+    def forward(
+            self,
+            x,
+            edge_index,
+            edge_attr,
+            size=None,
+            return_edge_attr=False,
+            edge_weight=None,
+    ):
         x_src, x_dst = self._split_nodes(x)
         if x_dst.size(0) == 0 or edge_index.size(1) == 0:
             if return_edge_attr:
@@ -362,6 +370,16 @@ class GatedGraphConv(nn.Module):
         sigma = torch.sigmoid(edge_update)
 
         messages = self.dst_update(x_src)[src] * sigma
+        if edge_weight is not None:
+            edge_weight = edge_weight.to(
+                device=messages.device,
+                dtype=messages.dtype,
+            ).view(-1, 1)
+            if edge_weight.size(0) != messages.size(0):
+                raise ValueError(
+                    "edge_weight must contain one scalar per graph edge"
+                )
+            messages = messages * edge_weight
         out = x_dst.new_zeros((x_dst.size(0), self.channels))
         norm = x_dst.new_zeros((x_dst.size(0), self.channels))
         out.index_add_(0, dst, messages)
@@ -662,7 +680,8 @@ class HeteroALIGNNLayer(nn.Module):
         })
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict,
-                line_edge_index, angle_attr, edge_offsets):
+                line_edge_index, angle_attr, edge_offsets,
+                angle_relation_weight=None):
         out_dict, edge_messages = _hetero_relation_update(
             x_dict,
             edge_index_dict,
@@ -679,6 +698,7 @@ class HeteroALIGNNLayer(nn.Module):
             line_edge_index,
             angle_attr,
             return_edge_attr=True,
+            edge_weight=angle_relation_weight,
         )
 
         out_edge_attr = {}
@@ -991,14 +1011,11 @@ class HeteroALIGNN(nn.Module):
         self.angle_expansion = AngleExpansion(angle_embed_size)
         angle_relation_lookup, num_angle_relations = _angle_relation_lookup(self.edge_types)
         self.register_buffer("angle_relation_lookup", angle_relation_lookup)
-        self.angle_relation_embedding = nn.Embedding(
-            num_angle_relations,
-            self.angle_expansion.out_features,
+        self.angle_relation_weights = nn.Parameter(
+            torch.ones(num_angle_relations)
         )
-        nn.init.zeros_(self.angle_relation_embedding.weight)
         self.angle_embedding = _official_feature_embedding(
-            2 * self.angle_expansion.out_features,
-            hidden_dim,
+            self.angle_expansion.out_features, hidden_dim
         )
         self.layers = nn.ModuleList([
             HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
@@ -1044,9 +1061,7 @@ class HeteroALIGNN(nn.Module):
                 return_angle_types=True,
             )
         if angle_types.size(0) == 0:
-            relation_attr = angle_attr.new_empty(
-                (0, self.angle_expansion.out_features)
-            )
+            relation_weight = angle_attr.new_empty((0,))
         else:
             relation_ids = self.angle_relation_lookup[
                 angle_types[:, 0],
@@ -1054,9 +1069,13 @@ class HeteroALIGNN(nn.Module):
             ]
             if torch.any(relation_ids < 0):
                 raise ValueError("Encountered an invalid heterogeneous angle relation")
-            relation_attr = self.angle_relation_embedding(relation_ids)
-        angle_input = torch.cat([angle_attr.float(), relation_attr], dim=-1)
-        return line_edge_index, self.angle_embedding(angle_input), edge_offsets
+            relation_weight = self.angle_relation_weights[relation_ids]
+        return (
+            line_edge_index,
+            self.angle_embedding(angle_attr.float()),
+            edge_offsets,
+            relation_weight,
+        )
 
     def _edge_batches(self, edge_index_dict, batch_dict, reference):
         batches = []
@@ -1122,7 +1141,7 @@ class HeteroALIGNN(nn.Module):
             )
             for edge_type in self.edge_types
         }
-        line_edge_index, angle_attr, edge_offsets = self._line_graph_inputs(
+        line_edge_index, angle_attr, edge_offsets, angle_relation_weight = self._line_graph_inputs(
             edge_index_dict,
             edge_attr_dict,
             edge_vec_dict,
@@ -1136,6 +1155,7 @@ class HeteroALIGNN(nn.Module):
                 line_edge_index,
                 angle_attr,
                 edge_offsets,
+                angle_relation_weight,
             )
         for layer in self.gcn_layers:
             x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)

@@ -116,6 +116,7 @@ def set_train_loader_fit_scaler(trainer, train_data, train_targets):
 
 
 def train_fixed_epochs(trainer, epochs, history_path, phase):
+    """Train without scheduler updates because this protocol has no validation set."""
     rows = []
     for epoch in range(epochs):
         train_mae, train_mse = trainer.train_one_epoch()
