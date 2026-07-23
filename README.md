@@ -280,7 +280,9 @@ cross-graph leakage from relation types that occur elsewhere in a mixed batch.
 
 For a controlled ALIGNN comparison, neither HeteroALIGNN nor DefiNetALIGNN uses
 a learned graph-level virtual node. HeteroALIGNN reads out separate atom, defect,
-and edge pools; DefiNetALIGNN reads out its shared node and edge pools.
+node pools; the homogeneous ALIGNN variants read out a single node pool. Edge
+embeddings participate in message passing but are not pooled directly by any
+ALIGNN prediction head.
 
 ## Smoke Check
 

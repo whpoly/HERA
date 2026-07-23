@@ -842,7 +842,7 @@ class AttentionALIGNN(nn.Module):
         ])
         self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -874,11 +874,8 @@ class AttentionALIGNN(nn.Module):
         for layer in self.gcn_layers:
             x, edge_attr = layer(x, edge_index, edge_attr)
 
-        num_graphs = _graph_count(batch=batch)
         node_pool = self.node_readout(x, batch, node_type=node_type)
-        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
-        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
-        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+        return self.readout(node_pool)
 
     def get_all_attention_weights(self):
         results = []
@@ -928,7 +925,7 @@ class DefiNetALIGNN(nn.Module):
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -963,9 +960,7 @@ class DefiNetALIGNN(nn.Module):
 
         num_graphs = _graph_count(batch=batch)
         node_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
-        edge_batch = batch[edge_index[0]] if edge_index.size(1) > 0 else batch.new_empty((0,))
-        edge_pool = _pool_mean_or_zeros(edge_attr, edge_batch, num_graphs, self.hidden_dim, x)
-        return self.readout(torch.cat([node_pool, edge_pool], dim=-1))
+        return self.readout(node_pool)
 
     def get_all_attention_weights(self):
         results = []
@@ -1026,7 +1021,7 @@ class HeteroALIGNN(nn.Module):
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -1076,19 +1071,6 @@ class HeteroALIGNN(nn.Module):
             edge_offsets,
             relation_weight,
         )
-
-    def _edge_batches(self, edge_index_dict, batch_dict, reference):
-        batches = []
-        for edge_type in self.edge_types:
-            src_type, _, dst_type = edge_type
-            edge_index = edge_index_dict[edge_type]
-            if edge_index.size(1) == 0:
-                batches.append(reference.new_empty((0,), dtype=torch.long))
-            elif batch_dict[src_type].numel() > 0:
-                batches.append(batch_dict[src_type][edge_index[0]])
-            else:
-                batches.append(batch_dict[dst_type][edge_index[1]])
-        return batches
 
     @staticmethod
     def _pool_type_for_node_store(pool_type, node_type, x):
@@ -1173,14 +1155,4 @@ class HeteroALIGNN(nn.Module):
                 x_dict.get("defect"), batch_dict.get("defect"), num_graphs, self.hidden_dim, reference
             )
 
-        edge_parts = [edge_attr_dict[edge_type] for edge_type in self.edge_types]
-        edge_batch_parts = self._edge_batches(edge_index_dict, batch_dict, reference)
-        if edge_parts:
-            edge_features = torch.cat(edge_parts, dim=0)
-            edge_batch = torch.cat(edge_batch_parts, dim=0)
-        else:
-            edge_features = reference.new_empty((0, self.hidden_dim))
-            edge_batch = reference.new_empty((0,), dtype=torch.long)
-        edge_pool = _pool_mean_or_zeros(edge_features, edge_batch, num_graphs, self.hidden_dim, reference)
-
-        return self.readout(torch.cat([atom_pool, defect_pool, edge_pool], dim=-1))
+        return self.readout(torch.cat([atom_pool, defect_pool], dim=-1))
