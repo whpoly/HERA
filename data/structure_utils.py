@@ -106,6 +106,8 @@ def preserve_pool_type(structure):
 
 
 def mark_hetero_region_if_needed(structure, task, local_cutoff):
+    if structure is None:
+        return None
     structure = preserve_pool_type(structure)
     if is_hetero_local_task(task):
         return structure
