@@ -382,33 +382,50 @@ def _hetero_relation_update(
         relation_convs,
         node_updates,
 ):
-    """Aggregate gated relation messages independently for every node."""
-    message_sums = {
+    """Mean independently normalized relation messages for every node."""
+    relation_sums = {
         node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
         for node_type in node_types
     }
-    gate_sums = {
-        node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
+    relation_counts = {
+        node_type: x_dict[node_type].new_zeros(
+            (x_dict[node_type].size(0), 1)
+        )
         for node_type in node_types
     }
     out_edge_attr = {}
 
     for edge_type in edge_types:
         src_type, _, dst_type = edge_type
+        edge_index = edge_index_dict[edge_type]
         message_sum, gate_sum, edge_update = relation_convs[
             _edge_parameter_key(edge_type)
         ](
             (x_dict[src_type], x_dict[dst_type]),
-            edge_index_dict[edge_type],
+            edge_index,
             edge_attr_dict[edge_type],
         )
-        message_sums[dst_type] = message_sums[dst_type] + message_sum
-        gate_sums[dst_type] = gate_sums[dst_type] + gate_sum
+        relation_incoming = message_sum / (gate_sum + 1e-6)
+        relation_present = relation_counts[dst_type].new_zeros(
+            relation_counts[dst_type].shape
+        )
+        if edge_index.size(1) > 0:
+            relation_present[edge_index[1].unique()] = 1
+        relation_sums[dst_type] = (
+            relation_sums[dst_type]
+            + relation_incoming * relation_present
+        )
+        relation_counts[dst_type] = (
+            relation_counts[dst_type] + relation_present
+        )
         out_edge_attr[edge_type] = edge_update
 
     out_dict = {}
     for node_type in node_types:
-        incoming = message_sums[node_type] / (gate_sums[node_type] + 1e-6)
+        incoming = (
+            relation_sums[node_type]
+            / relation_counts[node_type].clamp_min(1.0)
+        )
         out_dict[node_type] = node_updates[node_type](x_dict[node_type], incoming)
     return out_dict, out_edge_attr
 
