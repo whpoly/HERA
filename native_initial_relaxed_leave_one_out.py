@@ -31,7 +31,7 @@ from sklearn.model_selection import train_test_split
 
 from .config.defaults import VALID_MODES
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
-from .main import parse_radius_values, set_seed
+from .main import parse_radius_values, parse_seed_values, set_seed
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
     color_for_label,
@@ -1196,6 +1196,102 @@ def write_material_outputs(run_dir, summary_rows, skipped_rows, material):
     return plot_paths
 
 
+def run_single_seed(args, run_dir, radii):
+    set_seed(args.seed)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset_cache = {}
+    summary_rows = []
+    skipped_rows = []
+    run_specs = []
+    for model_name in args.models:
+        model_modes = modes_for_model(model_name, args.mode)
+        runs = expand_mode_runs(model_name, model_modes, radii)
+        for run in runs:
+            run_specs.append((model_name, run))
+
+    if not run_specs:
+        raise ValueError("No model/mode combinations selected.")
+
+    def load_dataset_for_run(model_name, run):
+        representation = representation_for_mode(run["mode"])
+        cache_key = (model_name, run["local_cutoff"], representation)
+        if cache_key not in dataset_cache:
+            datasets, raw_targets, raw_metadata = load_native_with_metadata(
+                model_name,
+                args.native_csv,
+                local_cutoff=run["local_cutoff"],
+                representations=[representation],
+            )
+            metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
+            final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
+            dataset_cache[cache_key] = (datasets, final_targets, metadata)
+        return dataset_cache[cache_key]
+
+    first_model, first_run = run_specs[0]
+    _, _, first_metadata = load_dataset_for_run(first_model, first_run)
+    all_materials, material_table = eligible_materials(first_metadata)
+    material_table.to_csv(run_dir / "material_eligibility.csv", index=False)
+    materials = args.materials or all_materials
+    if not materials:
+        raise ValueError("No eligible materials found.")
+
+    for material in materials:
+        print(f"\n######## Seed {args.seed} | Held-out material: {material} ########")
+        material_started_rows = len(summary_rows)
+        for model_name, run in run_specs:
+            datasets, targets, metadata = load_dataset_for_run(model_name, run)
+            data = datasets[dataset_index_for_mode(run["mode"])]
+
+            print(
+                f"\n=== Seed {args.seed} | {model_name} | "
+                f"{run['label']} | held out {material} ==="
+            )
+            out_dir = run_dir / str(material) / model_name / run["label"]
+            rows, skipped = run_material(
+                args,
+                model_name,
+                run,
+                data,
+                targets,
+                metadata,
+                material,
+                out_dir,
+            )
+            if skipped is not None:
+                print(f"  Skip {material}: {skipped['reason']}")
+                skipped_rows.append(
+                    {
+                        "model": model_name,
+                        "mode": run["label"],
+                        **skipped,
+                    }
+                )
+            summary_rows.extend(rows)
+            write_progress_outputs(run_dir, summary_rows, skipped_rows)
+
+        if len(summary_rows) > material_started_rows:
+            plot_paths = write_material_outputs(run_dir, summary_rows, skipped_rows, material)
+            if plot_paths:
+                print(f"\nUpdated {material} figures:")
+                for path in plot_paths:
+                    print(f"  {path}")
+
+    summary_df = pd.DataFrame(summary_rows)
+    skipped_df = pd.DataFrame(skipped_rows)
+    summary_df.to_csv(run_dir / "summary.csv", index=False)
+    if not skipped_df.empty:
+        skipped_df.to_csv(run_dir / "skipped_materials.csv", index=False)
+    completed_materials = sorted(set(summary_df["material"])) if "material" in summary_df else []
+    write_settings(run_dir, args, completed_materials)
+    write_summary_markdown(summary_df, skipped_df, run_dir)
+
+    print(f"\nSummary written to {run_dir / 'summary.csv'}")
+    print(f"Markdown summary written to {run_dir / 'summary.md'}")
+    print("Figures are updated after each completed material under <run-dir>/<material>/figures")
+    return summary_df, skipped_df
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -1203,7 +1299,17 @@ def main():
             "relaxed structures to predict final relaxed DFE."
         )
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seed",
+        dest="seeds",
+        nargs="+",
+        default=None,
+        metavar="SEED|all",
+        help=(
+            "One or more random seeds (default: 123), or all for the standard "
+            "10-seed benchmark."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--val-fraction", type=float, default=0.2)
@@ -1250,104 +1356,43 @@ def main():
         ),
     )
     args = parser.parse_args()
+    args.seeds = parse_seed_values(args.seeds, parser)
 
     if not 0 < args.val_fraction < 1:
         parser.error("--val-fraction must be between 0 and 1.")
 
     radii = parse_radius_values(args.r, parser)
     init_elem_embedding(args.atom_init)
-    set_seed(args.seed)
 
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(args.log_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
+    all_summaries = []
+    all_skipped = []
+    multi_seed = len(args.seeds) > 1
+    requested_seeds = list(args.seeds)
+    for seed in requested_seeds:
+        args.seed = seed
+        seed_run_dir = run_dir / f"seed_{seed}" if multi_seed else run_dir
+        summary_df, skipped_df = run_single_seed(args, seed_run_dir, radii)
+        all_summaries.append(summary_df)
+        if not skipped_df.empty:
+            all_skipped.append(skipped_df)
 
-    dataset_cache = {}
-    summary_rows = []
-    skipped_rows = []
-    run_specs = []
-    for model_name in args.models:
-        model_modes = modes_for_model(model_name, args.mode)
-        runs = expand_mode_runs(model_name, model_modes, radii)
-        for run in runs:
-            run_specs.append((model_name, run))
-
-    if not run_specs:
-        raise ValueError("No model/mode combinations selected.")
-
-    def load_dataset_for_run(model_name, run):
-        representation = representation_for_mode(run["mode"])
-        cache_key = (model_name, run["local_cutoff"], representation)
-        if cache_key not in dataset_cache:
-            datasets, raw_targets, raw_metadata = load_native_with_metadata(
-                model_name,
-                args.native_csv,
-                local_cutoff=run["local_cutoff"],
-                representations=[representation],
-            )
-            metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
-            final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
-            dataset_cache[cache_key] = (datasets, final_targets, metadata)
-        return dataset_cache[cache_key]
-
-    first_model, first_run = run_specs[0]
-    _, _, first_metadata = load_dataset_for_run(first_model, first_run)
-    all_materials, material_table = eligible_materials(first_metadata)
-    material_table.to_csv(run_dir / "material_eligibility.csv", index=False)
-    materials = args.materials or all_materials
-    if not materials:
-        raise ValueError("No eligible materials found.")
-
-    for material in materials:
-        print(f"\n######## Held-out material: {material} ########")
-        material_started_rows = len(summary_rows)
-        for model_name, run in run_specs:
-            representation = representation_for_mode(run["mode"])
-            datasets, targets, metadata = load_dataset_for_run(model_name, run)
-            data = datasets[dataset_index_for_mode(run["mode"])]
-
-            print(f"\n=== {model_name} | {run['label']} | held out {material} ===")
-            out_dir = run_dir / str(material) / model_name / run["label"]
-            rows, skipped = run_material(
-                args,
-                model_name,
-                run,
-                data,
-                targets,
-                metadata,
-                material,
-                out_dir,
-            )
-            if skipped is not None:
-                print(f"  Skip {material}: {skipped['reason']}")
-                skipped_rows.append(
-                    {
-                        "model": model_name,
-                        "mode": run["label"],
-                        **skipped,
-                    }
-                )
-            summary_rows.extend(rows)
-            write_progress_outputs(run_dir, summary_rows, skipped_rows)
-
-        if len(summary_rows) > material_started_rows:
-            plot_paths = write_material_outputs(run_dir, summary_rows, skipped_rows, material)
-            if plot_paths:
-                print(f"\nUpdated {material} figures:")
-                for path in plot_paths:
-                    print(f"  {path}")
-
-    summary_df = pd.DataFrame(summary_rows)
-    skipped_df = pd.DataFrame(skipped_rows)
-    summary_df.to_csv(run_dir / "summary.csv", index=False)
-    if not skipped_df.empty:
-        skipped_df.to_csv(run_dir / "skipped_materials.csv", index=False)
-    completed_materials = sorted(set(summary_df["material"])) if "material" in summary_df else []
-    write_settings(run_dir, args, completed_materials)
-    write_summary_markdown(summary_df, skipped_df, run_dir)
-
-    print(f"\nSummary written to {run_dir / 'summary.csv'}")
-    print(f"Markdown summary written to {run_dir / 'summary.md'}")
-    print(f"Figures are updated after each completed material under <run-dir>/<material>/figures")
+    if multi_seed:
+        combined_summary = pd.concat(all_summaries, ignore_index=True)
+        combined_skipped = (
+            pd.concat(all_skipped, ignore_index=True) if all_skipped else pd.DataFrame()
+        )
+        combined_summary.to_csv(run_dir / "summary.csv", index=False)
+        if not combined_skipped.empty:
+            combined_skipped.to_csv(run_dir / "skipped_materials.csv", index=False)
+        write_summary_markdown(combined_summary, combined_skipped, run_dir)
+        settings = vars(args).copy()
+        settings["seeds"] = requested_seeds
+        (run_dir / "settings.json").write_text(
+            json.dumps(settings, indent=2), encoding="utf-8"
+        )
+        print(f"\nCombined multi-seed summary written to {run_dir / 'summary.csv'}")
 
 
 if __name__ == "__main__":

@@ -11,8 +11,11 @@ Usage examples:
   # Run every configured dataset/mode/radius for MEGNet, CGCNN, and ALIGNN
   python -m HERA.main --model all --dataset all --mode all --r all
 
-  # Custom device, epochs, and random seeds
-  python -m HERA.main --model cgcnn --dataset native --device cuda:1 --epochs 300 --seeds 42 123
+  # Custom device, epochs, and random seed
+  python -m HERA.main --model cgcnn --dataset native --device cuda:1 --epochs 300 --seed 42
+
+  # Run the standard 10-seed benchmark
+  python -m HERA.main --model cgcnn --dataset native --seed all
 
   # Resume an existing run; completed mode summaries are skipped
   python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
@@ -50,7 +53,9 @@ from .training.history import TrainingLogger
 
 
 LOCAL_CUTOFF_CHOICES = [0, 3, 4, 5, 6, 7]
-DEFAULT_SEEDS = [123, 11, 1245, 34, 42, 80, 13232, 8, 99, 101]
+DEFAULT_SEED = 123
+DEFAULT_SEEDS = [DEFAULT_SEED]
+ALL_BENCHMARK_SEEDS = [123, 11, 1245, 34, 42, 80, 13232, 8, 99, 101]
 ALL_MODEL_SUITES = ('alignn', 'megnet', 'cgcnn')
 DEFINET_HOST_MODELS = ('cgcnn', 'alignn')
 CGCNN_DEFINET_MODES = (
@@ -139,6 +144,26 @@ def set_seed(seed):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 
+def parse_seed_values(values, parser):
+    """Resolve CLI seed tokens to one seed or the standard 10-seed suite."""
+    if values is None:
+        return [DEFAULT_SEED]
+    if not isinstance(values, (list, tuple)):
+        values = [values]
+    tokens = [str(value).strip() for value in values]
+    if any(token.lower() == 'all' for token in tokens):
+        if len(tokens) != 1:
+            parser.error('--seed all cannot be combined with explicit seed values')
+        return list(ALL_BENCHMARK_SEEDS)
+    try:
+        seeds = [int(token) for token in tokens]
+    except ValueError:
+        parser.error('--seed must be an integer or all')
+    if any(seed < 0 for seed in seeds):
+        parser.error('--seed must be non-negative')
+    return seeds
+
+
 def with_radius(config, radius):
     config = copy.deepcopy(config)
     config['model']['local_radius'] = radius
@@ -214,7 +239,7 @@ def clear_cuda_cache(device):
 def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
     if cv5:
         if len(random_seeds) != 1:
-            raise ValueError('5-fold cross validation requires exactly one random state in --seeds')
+            raise ValueError('5-fold cross validation requires exactly one --seed value')
         if len(data) < 5:
             raise ValueError('5-fold cross validation requires at least 5 valid structures')
 
@@ -679,11 +704,19 @@ def main():
                               'early stopping patience, in percent (default: 0.5)'))
     parser.add_argument('--alignn-amp', action='store_true',
                         help='Use CUDA automatic mixed precision only for ALIGNN runs')
-    parser.add_argument('--seeds', nargs='+', type=int,
-                        default=None,
-                        help='Random seeds for train/test splits, or one random state for --cv5')
+    parser.add_argument(
+        '--seed',
+        dest='seeds',
+        nargs='+',
+        default=None,
+        metavar='SEED|all',
+        help=(
+            'One or more random seeds for train/val/test splits (default: 123). '
+            'Use all for the standard 10-seed benchmark.'
+        ),
+    )
     parser.add_argument('--cv5', '--five-fold-cv', action='store_true',
-                        help='Use 5-fold cross validation. Requires exactly one --seeds value.')
+                        help='Use 5-fold cross validation. Requires exactly one --seed value.')
     parser.add_argument('--atom-init', default='./HERA/atom_init.json',
                         help='Path to atom_init.json (default: atom_init.json)')
     parser.add_argument('--log-dir', default='logs',
@@ -743,12 +776,11 @@ def main():
         parser.error('--alignn-early-stopping-min-delta-percent must be in [0, 100)')
     if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
         parser.error('--alignn-cutoff must be > 0')
-    if args.seeds is None:
-        args.seeds = [42] if args.cv5 else DEFAULT_SEEDS
+    args.seeds = parse_seed_values(args.seeds, parser)
     if args.cv5 and len(args.seeds) != 1:
-        parser.error('--cv5 requires exactly one --seeds value, e.g. --cv5 --seeds 42')
+        parser.error('--cv5 requires exactly one --seed value, e.g. --cv5 --seed 123')
     args.r = parse_radius_values(args.r, parser)
-    set_seed(42)
+    set_seed(args.seeds[0])
 
     model_names = list(ALL_MODEL_SUITES) if args.model == 'all' else [args.model]
     dataset_names = VALID_DATASETS if args.dataset == 'all' else [args.dataset]

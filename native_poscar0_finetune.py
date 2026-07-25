@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 from .config.defaults import VALID_MODES
 from .data.datasets import dataset_index_for_mode, representation_for_mode
-from .main import parse_radius_values, set_seed
+from .main import parse_radius_values, parse_seed_values, set_seed
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
     evaluate_case_metrics,
@@ -486,6 +486,62 @@ def plot_comparison(comparison_df, run_dir):
     return outputs
 
 
+def run_single_seed(args, run_dir, radii):
+    set_seed(args.seed)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "settings.json").write_text(
+        json.dumps(vars(args), indent=2), encoding="utf-8"
+    )
+
+    dataset_cache = {}
+    all_summary_rows = []
+    all_comparison_rows = []
+
+    for model_name in args.models:
+        model_modes = modes_for_model(model_name, args.mode)
+        runs = expand_mode_runs(model_name, model_modes, radii)
+        for run in runs:
+            representation = representation_for_mode(run["mode"])
+            cache_key = (model_name, run["local_cutoff"], representation)
+            if cache_key not in dataset_cache:
+                dataset_cache[cache_key] = load_native_with_metadata(
+                    model_name,
+                    args.native_csv,
+                    local_cutoff=run["local_cutoff"],
+                    representations=[representation],
+                )
+            datasets, targets, metadata = dataset_cache[cache_key]
+
+            print(f"\n=== Seed {args.seed} | {model_name} | {run['label']} ===")
+            summary_rows, comparison_rows = run_model_mode(
+                args,
+                model_name,
+                run,
+                datasets,
+                targets,
+                metadata,
+                run_dir,
+            )
+            all_summary_rows.extend(summary_rows)
+            all_comparison_rows.extend(comparison_rows)
+            pd.DataFrame(all_summary_rows).to_csv(run_dir / "summary.csv", index=False)
+            pd.DataFrame(all_comparison_rows).to_csv(run_dir / "comparison.csv", index=False)
+
+    summary_df = pd.DataFrame(all_summary_rows)
+    comparison_df = pd.DataFrame(all_comparison_rows)
+    summary_df.to_csv(run_dir / "summary.csv", index=False)
+    comparison_df.to_csv(run_dir / "comparison.csv", index=False)
+    plot_paths = plot_comparison(comparison_df, run_dir)
+
+    print(f"\nSummary written to {run_dir / 'summary.csv'}")
+    print(f"Comparison written to {run_dir / 'comparison.csv'}")
+    if plot_paths:
+        print("Figures written:")
+        for path in plot_paths:
+            print(f"  {path}")
+    return summary_df, comparison_df
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Train native-defect models, POSCAR0 fine-tune target materials, and compare."
@@ -515,7 +571,17 @@ def main():
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--finetune-epochs", type=int, default=100)
     parser.add_argument("--finetune-lr", type=float, default=1e-4)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seed",
+        dest="seeds",
+        nargs="+",
+        default=None,
+        metavar="SEED|all",
+        help=(
+            "One or more random seeds (default: 123), or all for the standard "
+            "10-seed benchmark."
+        ),
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--atom-init", default="./HERA/atom_init.json")
     parser.add_argument("--native-csv", default=DEFAULT_NATIVE_CSV)
@@ -532,9 +598,9 @@ def main():
         ),
     )
     args = parser.parse_args()
+    args.seeds = parse_seed_values(args.seeds, parser)
 
     radii = parse_radius_values(args.r, parser)
-    set_seed(args.seed)
 
     from .data.datasets import init_elem_embedding
 
@@ -542,56 +608,31 @@ def main():
 
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(args.log_dir, args.materials)
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "settings.json").write_text(
-        json.dumps(vars(args), indent=2), encoding="utf-8"
-    )
+    all_summaries = []
+    all_comparisons = []
+    multi_seed = len(args.seeds) > 1
+    requested_seeds = list(args.seeds)
+    for seed in requested_seeds:
+        args.seed = seed
+        seed_run_dir = run_dir / f"seed_{seed}" if multi_seed else run_dir
+        summary_df, comparison_df = run_single_seed(args, seed_run_dir, radii)
+        all_summaries.append(summary_df)
+        all_comparisons.append(comparison_df)
 
-    dataset_cache = {}
-    all_summary_rows = []
-    all_comparison_rows = []
-
-    for model_name in args.models:
-        model_modes = modes_for_model(model_name, args.mode)
-        runs = expand_mode_runs(model_name, model_modes, radii)
-        for run in runs:
-            representation = representation_for_mode(run["mode"])
-            cache_key = (model_name, run["local_cutoff"], representation)
-            if cache_key not in dataset_cache:
-                dataset_cache[cache_key] = load_native_with_metadata(
-                    model_name,
-                    args.native_csv,
-                    local_cutoff=run["local_cutoff"],
-                    representations=[representation],
-                )
-            datasets, targets, metadata = dataset_cache[cache_key]
-
-            print(f"\n=== {model_name} | {run['label']} ===")
-            summary_rows, comparison_rows = run_model_mode(
-                args,
-                model_name,
-                run,
-                datasets,
-                targets,
-                metadata,
-                run_dir,
-            )
-            all_summary_rows.extend(summary_rows)
-            all_comparison_rows.extend(comparison_rows)
-            pd.DataFrame(all_summary_rows).to_csv(run_dir / "summary.csv", index=False)
-            pd.DataFrame(all_comparison_rows).to_csv(run_dir / "comparison.csv", index=False)
-
-    summary_df = pd.DataFrame(all_summary_rows)
-    comparison_df = pd.DataFrame(all_comparison_rows)
-    summary_df.to_csv(run_dir / "summary.csv", index=False)
-    comparison_df.to_csv(run_dir / "comparison.csv", index=False)
-    plot_paths = plot_comparison(comparison_df, run_dir)
-
-    print(f"\nSummary written to {run_dir / 'summary.csv'}")
-    print(f"Comparison written to {run_dir / 'comparison.csv'}")
-    if plot_paths:
-        print("Figures written:")
-        for path in plot_paths:
-            print(f"  {path}")
+    if multi_seed:
+        pd.concat(all_summaries, ignore_index=True).to_csv(
+            run_dir / "summary.csv", index=False
+        )
+        combined_comparison = pd.concat(all_comparisons, ignore_index=True)
+        combined_comparison.to_csv(run_dir / "comparison.csv", index=False)
+        plot_comparison(combined_comparison, run_dir)
+        settings = vars(args).copy()
+        settings["seeds"] = requested_seeds
+        (run_dir / "settings.json").write_text(
+            json.dumps(settings, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nCombined multi-seed summary written to {run_dir / 'summary.csv'}")
 
 
 if __name__ == "__main__":

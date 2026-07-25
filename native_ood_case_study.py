@@ -36,11 +36,11 @@ from .data.datasets import (
 )
 from .data.structure_utils import convert_to_sparse_native
 from .main import (
-    DEFAULT_SEEDS,
     LOCAL_CUTOFF_CHOICES,
     LOCAL_CUTOFF_SWEEP_MODES,
     LOCAL_GRAPH_SWEEP_MODES,
     parse_radius_values,
+    parse_seed_values,
     set_seed,
     with_radius,
 )
@@ -1066,7 +1066,17 @@ def main():
         help="Held-out native-defect material(s), e.g. --material GaN.",
     )
     parser.add_argument("--epochs", type=int, default=500)
-    parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
+    parser.add_argument(
+        "--seed",
+        dest="seeds",
+        nargs="+",
+        default=None,
+        metavar="SEED|all",
+        help=(
+            "One or more random seeds (default: 123), or all for the standard "
+            "10-seed benchmark."
+        ),
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--atom-init", default="./HERA/atom_init.json")
@@ -1090,6 +1100,7 @@ def main():
         ),
     )
     args = parser.parse_args()
+    args.seeds = parse_seed_values(args.seeds, parser)
 
     if not 0 < args.val_fraction < 1:
         parser.error("--val-fraction must be between 0 and 1.")

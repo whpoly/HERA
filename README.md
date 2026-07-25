@@ -128,8 +128,9 @@ Common arguments:
   for the final test evaluation.
 - `--alignn-amp`: train ALIGNN with CUDA automatic mixed precision to reduce
   activation memory without changing graph topology.
-- `--seeds`: one or more random seeds for ordinary train/val/test splits; with
-  `--cv5`, pass exactly one random state
+- `--seed`: one or more random seeds for ordinary train/val/test splits
+  (default: `123`), for example `--seed 123 42 99`; use `--seed all` for the
+  standard 10-seed benchmark. With `--cv5`, pass exactly one seed.
 - `--cv5` / `--five-fold-cv`: use 5-fold cross validation. Each run uses one
   fold for test, the next fold for validation, and the remaining three folds
   for training, so the train/val/test split is roughly 60/20/20.
@@ -149,8 +150,9 @@ python -m HERA.main --model megnet --dataset vacancy
 python -m HERA.main --model megnet --dataset semi --mode hetero --r 0
 python -m HERA.main --model all --dataset vacancy --mode all --r 0
 python -m HERA.main --model all --dataset all --mode all --r all
-python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seeds 42 123
-python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --seeds 42
+python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seed 123
+python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seed all
+python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --seed 123
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
@@ -170,7 +172,7 @@ python -m HERA.native_ood_case_study \
   --mode full full_x hetero attention \
   --material GaN \
   --epochs 500 \
-  --seeds 123 11 1245 34 42 80 13232 8 99 101 \
+  --seed all \
   --device cuda:0 \
   --log-dir HERA/logs \
   --resume \
@@ -209,7 +211,7 @@ python -m HERA.native_poscar0_finetune \
   --epochs 500 \
   --finetune-epochs 100 \
   --finetune-lr 1e-4 \
-  --seed 42 \
+  --seed 123 \
   --device cuda:0 \
   --log-dir HERA/logs \
   --resume \
@@ -233,7 +235,7 @@ materials, and predict the final relaxed defect formation energy from initial
 and relaxed structures:
 
 ```bash
-python -m HERA.native_initial_relaxed_leave_one_out --seed 42 --model cgcnn megnet definet --mode full hetero attention --epochs 500 --device cuda:0 --run-dir HERA/logs/native_initial_relaxed_seed42 --atom-init HERA/atom_init.json
+python -m HERA.native_initial_relaxed_leave_one_out --seed 123 --model cgcnn megnet definet --mode full hetero attention --epochs 500 --device cuda:0 --run-dir HERA/logs/native_initial_relaxed_seed123 --atom-init HERA/atom_init.json
 ```
 
 By default the script discovers all materials that have both POSCAR0 initial
@@ -304,7 +306,7 @@ pools as `hetero`, with no edge or global pooling.
 
 ```bash
 python -m HERA.main --model alignn --dataset native \
-  --mode hetero hetero_bidir definet --r 0 --seeds 42 123
+  --mode hetero hetero_bidir definet --r 0 --seed 123
 ```
 
 ## Smoke Check
@@ -330,7 +332,7 @@ python -m HERA.main \
   --r 0 \
   --device cpu \
   --epochs 500 \
-  --seeds 42 \
+  --seed 123 \
   --atom-init HERA/atom_init.json \
   --log-dir HERA/logs_hetero_r0_cgcnn
 ```
