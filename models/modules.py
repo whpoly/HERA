@@ -163,16 +163,25 @@ class HeteroMegnetLayer(nn.Module):
         self.edge_types = metadata[1]
         self.embedding_size = embedding_size
         self.megnets = nn.ModuleDict()
+        self.relation_module_keys = {}
         for etype in self.edge_types:
-            self.megnets['__'.join(etype)] = MegnetModule(
-                edge_input_shape=edge_input_shape,
-                node_input_shape=node_input_shape,
-                state_input_shape=state_input_shape,
-                embed_size=embedding_size,
-                vertex_aggregation=vertex_aggregation,
-                global_aggregation=global_aggregation,
-                inner_skip=inner_skip,
-            )
+            src, relation, dst = etype
+            if relation in ('ad', 'da') and src != dst:
+                endpoint_pair = '__'.join(sorted((src, dst)))
+                module_key = f'{endpoint_pair}__ad_da_shared'
+            else:
+                module_key = '__'.join(etype)
+            self.relation_module_keys[etype] = module_key
+            if module_key not in self.megnets:
+                self.megnets[module_key] = MegnetModule(
+                    edge_input_shape=edge_input_shape,
+                    node_input_shape=node_input_shape,
+                    state_input_shape=state_input_shape,
+                    embed_size=embedding_size,
+                    vertex_aggregation=vertex_aggregation,
+                    global_aggregation=global_aggregation,
+                    inner_skip=inner_skip,
+                )
         self.node_fallbacks = nn.ModuleDict({
             ntype: self._make_fallback(node_input_shape, embedding_size)
             for ntype in self.node_types
@@ -195,7 +204,7 @@ class HeteroMegnetLayer(nn.Module):
         fallback_state = self.state_fallback(state)
         edge_out_dict = {}
         for etype in self.edge_types:
-            k = '__'.join(etype)
+            module_key = self.relation_module_keys[etype]
             src, rel, dst = etype
             if (
                     x_dict[src].size(0) == 0
@@ -220,7 +229,7 @@ class HeteroMegnetLayer(nn.Module):
 
             edge_attr = edge_attr_dict[etype]
             bond_batch = bond_batch_dict[etype]
-            x_out, edge_attr_out, state_out = self.megnets[k](
+            x_out, edge_attr_out, state_out = self.megnets[module_key](
                 x_input, edge_index, edge_attr, state, batch, bond_batch
             )
             x_dst = x_out[dst_slice, :]

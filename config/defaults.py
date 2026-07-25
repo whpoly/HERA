@@ -173,6 +173,11 @@ _CONFIG_REGISTRY = {
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet']
+CGCNN_MEGNET_TRAIN_BATCH_SIZE = 64
+CGCNN_MEGNET_TEST_BATCH_SIZE = 1
+CGCNN_MEGNET_MAX_NEIGHBORS = 12
+MEGNET_EMBEDDING_SIZE = 32
+MEGNET_HETERO_EMBEDDING_SIZE = 32
 ALIGNN_TRAIN_BATCH_SIZE = 64
 ALIGNN_TEST_BATCH_SIZE = 1
 ALIGNN_BLOCKS = 3
@@ -243,6 +248,16 @@ def _definet_attention_config(base_config, mode, model='cgcnn'):
 def _finalize_config(config, model):
     """Apply model-specific defaults that differ from the shared base configs."""
     config = copy.deepcopy(config)
+    if model in ('cgcnn', 'megnet'):
+        config['model']['train_batch_size'] = CGCNN_MEGNET_TRAIN_BATCH_SIZE
+        config['model']['test_batch_size'] = CGCNN_MEGNET_TEST_BATCH_SIZE
+        config['model']['max_neighbors'] = CGCNN_MEGNET_MAX_NEIGHBORS
+    if model == 'megnet':
+        is_hetero = '_hetero' in config['task']
+        config['model']['embedding_size'] = (
+            MEGNET_HETERO_EMBEDDING_SIZE if is_hetero
+            else MEGNET_EMBEDDING_SIZE
+        )
     if model == 'alignn':
         config['model']['nblocks'] = ALIGNN_BLOCKS
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
