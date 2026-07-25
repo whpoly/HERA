@@ -172,6 +172,10 @@ def apply_batch_size_overrides(config, args, model_name):
             config['model']['relation_adapter_rank'] = args.alignn_relation_adapter_rank
         if args.alignn_grad_accum_steps is not None:
             config['optim']['grad_accum_steps'] = args.alignn_grad_accum_steps
+        if args.alignn_early_stopping_patience is not None:
+            config['optim']['early_stopping_patience'] = args.alignn_early_stopping_patience
+        if args.alignn_early_stopping_min_delta_percent is not None:
+            config['optim']['early_stopping_min_delta_percent'] = args.alignn_early_stopping_min_delta_percent
         if args.alignn_amp:
             config['optim']['amp'] = True
     return config
@@ -193,6 +197,13 @@ def cpu_state_dict(model):
         key: value.detach().cpu().clone()
         for key, value in model.state_dict().items()
     }
+
+
+def is_meaningful_relative_improvement(value, reference, min_delta_percent):
+    """Return whether a non-negative metric improved by the requested percent."""
+    if not np.isfinite(reference):
+        return True
+    return value < reference * (1.0 - min_delta_percent / 100.0)
 
 
 def clear_cuda_cache(device):
@@ -292,6 +303,15 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
 
         min_loss = 1e8
         model_best = None
+        best_epoch = 0
+        early_stopping_patience = int(config['optim'].get('early_stopping_patience', 0))
+        early_stopping_min_delta_percent = float(
+            config['optim'].get('early_stopping_min_delta_percent', 0.0)
+        )
+        early_stopping_best = float('inf')
+        epochs_without_improvement = 0
+        epochs_completed = 0
+        stopped_early = False
         for epoch in range(epochs):
             mae, mse = trainer.train_one_epoch()
             loss = trainer.evaluate_on_test()
@@ -301,7 +321,31 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             if loss < min_loss:
                 min_loss = loss
                 model_best = cpu_state_dict(trainer.model)
+                best_epoch = epoch + 1
+            if is_meaningful_relative_improvement(
+                    loss,
+                    early_stopping_best,
+                    early_stopping_min_delta_percent,
+            ):
+                early_stopping_best = loss
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
             logger.log(epoch + 1, mae, mse, loss, min_loss, cur_lr)
+            epochs_completed = epoch + 1
+            if (
+                    early_stopping_patience > 0
+                    and epochs_without_improvement >= early_stopping_patience
+            ):
+                stopped_early = True
+                print(
+                    f'  [{split["display"]}] Early stopping at epoch '
+                    f'{epochs_completed}/{epochs}: no validation MAE improvement '
+                    f'> {early_stopping_min_delta_percent:g}% for '
+                    f'{early_stopping_patience} epochs '
+                    f'(best={min_loss:.4f} at epoch {best_epoch}).'
+                )
+                break
 
         loss_test = trainer.predict_structures(split['test_X'], split['test_y'], model_best)
         logger.log_test_result(loss_test)
@@ -319,6 +363,11 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             min_loss,
             loss_test,
             epochs,
+            epochs_completed,
+            best_epoch,
+            stopped_early,
+            early_stopping_patience,
+            early_stopping_min_delta_percent,
         )
         print(f'  [{split["display"]}] Best checkpoint saved: {checkpoint_path}')
         print(f'  [{split["display"]}] Test MAE: {loss_test:.4f}')
@@ -378,7 +427,9 @@ def _structure_source_metadata(structures):
 
 def save_best_checkpoint(path, trainer, model_state_dict, config, split,
                          model_name, dataset_name, mode, run_label,
-                         best_val_mae, test_mae, epochs):
+                         best_val_mae, test_mae, epochs, epochs_completed,
+                         best_epoch, stopped_early, early_stopping_patience,
+                         early_stopping_min_delta_percent):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(
         {
@@ -393,6 +444,11 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
             'best_val_mae': float(best_val_mae),
             'test_mae': float(test_mae),
             'epochs': int(epochs),
+            'epochs_completed': int(epochs_completed),
+            'best_epoch': int(best_epoch),
+            'stopped_early': bool(stopped_early),
+            'early_stopping_patience': int(early_stopping_patience),
+            'early_stopping_min_delta_percent': float(early_stopping_min_delta_percent),
             'split': {
                 'display': split['display'],
                 'logger_id': split['logger_id'],
@@ -615,6 +671,12 @@ def main():
                         help='Override low-rank relation adapter size for ALIGNN hetero_bidir')
     parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
                         help='Accumulate ALIGNN gradients over this many micro-batches')
+    parser.add_argument('--alignn-early-stopping-patience', type=int, default=None,
+                        help=('Stop ALIGNN after this many epochs without meaningful '
+                              'validation improvement (default: 50; 0 disables)'))
+    parser.add_argument('--alignn-early-stopping-min-delta-percent', type=float, default=None,
+                        help=('Minimum relative validation MAE decrease that resets ALIGNN '
+                              'early stopping patience, in percent (default: 0.5)'))
     parser.add_argument('--alignn-amp', action='store_true',
                         help='Use CUDA automatic mixed precision only for ALIGNN runs')
     parser.add_argument('--seeds', nargs='+', type=int,
@@ -669,6 +731,16 @@ def main():
         arg_value = getattr(args, arg_name)
         if arg_value is not None and arg_value < 1:
             parser.error(f'--{arg_name.replace("_", "-")} must be >= 1')
+    if (
+            args.alignn_early_stopping_patience is not None
+            and args.alignn_early_stopping_patience < 0
+    ):
+        parser.error('--alignn-early-stopping-patience must be >= 0')
+    if (
+            args.alignn_early_stopping_min_delta_percent is not None
+            and not 0 <= args.alignn_early_stopping_min_delta_percent < 100
+    ):
+        parser.error('--alignn-early-stopping-min-delta-percent must be in [0, 100)')
     if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
         parser.error('--alignn-cutoff must be > 0')
     if args.seeds is None:
@@ -833,6 +905,14 @@ def main():
                     f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                     f'amp={config["optim"].get("amp", False)}'
                 )
+                early_stopping_patience = config['optim'].get('early_stopping_patience', 0)
+                if early_stopping_patience:
+                    print(
+                        '  Early stopping: '
+                        f'patience={early_stopping_patience}, '
+                        'minimum relative improvement='
+                        f'{config["optim"].get("early_stopping_min_delta_percent", 0):g}%'
+                    )
                 if train_mode in LOCAL_GRAPH_SWEEP_MODES + LOCAL_CUTOFF_SWEEP_MODES:
                     print(f'  {radius_summary(train_mode, config)}')
                 print(f'{"=" * 60}')

@@ -120,6 +120,12 @@ Common arguments:
 - `--alignn-grad-accum-steps`: keep an effective large batch while using a
   smaller memory-resident micro-batch, e.g. `--alignn-train-batch-size 4
   --alignn-grad-accum-steps 16` gives an effective ALIGNN training batch of 64.
+- ALIGNN runs stop early by default after 50 epochs without a relative
+  validation MAE improvement greater than `0.5%`. Use
+  `--alignn-early-stopping-patience` and
+  `--alignn-early-stopping-min-delta-percent` to tune this, or set patience to
+  `0` to disable early stopping. The best-validation checkpoint is still used
+  for the final test evaluation.
 - `--alignn-amp`: train ALIGNN with CUDA automatic mixed precision to reduce
   activation memory without changing graph topology.
 - `--seeds`: one or more random seeds for ordinary train/val/test splits; with
