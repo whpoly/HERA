@@ -579,10 +579,78 @@ def get_imp2d_defect_info(unit_cell):
     return {'impurity': unit_cell, 'is_self': False}
 
 
+def resolve_imp2d_self_defect_index(structure, impurity, reference_frac_coords):
+    """Match a self-impurity atom to non-self structures at the same site.
+
+    CIF parsing does not preserve a reliable insertion order, so a self-defect
+    cannot be identified by taking the first or last atom.  Non-self imp2d
+    structures contain exactly one atom of the impurity species and therefore
+    provide unambiguous reference coordinates for the same ``(base, site)``.
+    """
+    candidate_indices = [
+        idx
+        for idx, site in enumerate(structure)
+        if site.species_string == impurity
+    ]
+    if not candidate_indices:
+        raise ValueError(
+            f"Cannot locate self-defect {impurity}: the structure contains no "
+            "candidate atom of that species"
+        )
+
+    references = np.asarray(reference_frac_coords, dtype=float).reshape(-1, 3)
+    if references.size == 0:
+        raise ValueError(
+            f"Cannot locate self-defect {impurity}: no non-self reference "
+            "coordinates were provided"
+        )
+
+    candidates = np.asarray(
+        [structure[idx].frac_coords for idx in candidate_indices],
+        dtype=float,
+    )
+    fractional_deltas = candidates[:, None, :] - references[None, :, :]
+    fractional_deltas -= np.round(fractional_deltas)
+    cartesian_deltas = fractional_deltas @ np.asarray(
+        structure.lattice.matrix,
+        dtype=float,
+    )
+    distances = np.linalg.norm(cartesian_deltas, axis=-1)
+    # The median is insensitive to a minority of reference impurities that
+    # relax away from the nominal adsorption/interstitial site.
+    scores = np.median(distances, axis=1)
+    return candidate_indices[int(np.argmin(scores))]
+
+
 def get_imp2d_defect_indices(structure, unit_cell):
     defect_info = get_imp2d_defect_info(unit_cell)
     if defect_info.get('is_self'):
-        return {len(structure) - 1} if len(structure) else set()
+        defect_index = defect_info.get('defect_index')
+        if defect_index is None:
+            reference_frac_coords = defect_info.get('reference_frac_coords')
+            if reference_frac_coords is None:
+                raise ValueError(
+                    "Self-impurity defects require an explicit defect_index or "
+                    "same-site non-self reference coordinates"
+                )
+            defect_index = resolve_imp2d_self_defect_index(
+                structure,
+                defect_info['impurity'],
+                reference_frac_coords,
+            )
+        defect_index = int(defect_index)
+        if defect_index < 0 or defect_index >= len(structure):
+            raise ValueError(
+                f"Self-defect index {defect_index} is outside a structure with "
+                f"{len(structure)} sites"
+            )
+        selected_species = structure[defect_index].species_string
+        if selected_species != defect_info['impurity']:
+            raise ValueError(
+                f"Self-defect index {defect_index} selects {selected_species}, "
+                f"expected {defect_info['impurity']}"
+            )
+        return {defect_index}
 
     impurity = defect_info['impurity']
     return {

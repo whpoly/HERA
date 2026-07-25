@@ -28,6 +28,9 @@ elem_embedding = {}
 
 DATASET_REPRESENTATIONS = ('full', 'full_x', 'hetero', 'attention')
 DEFAULT_DATASET_REPRESENTATIONS = ('full', 'hetero', 'attention')
+IMP2D_SELF_DEFECT_LOOKUP_PATH = Path(__file__).with_name(
+    'imp2d_self_defect_sites.json'
+)
 REPRESENTATION_INDEX = {
     'full': 0,
     'full_x': 0,
@@ -121,6 +124,51 @@ def formula_contains_element(formula, element):
         return element in Composition(formula).get_el_amt_dict()
     except Exception:
         return element in formula
+
+
+def _load_imp2d_self_defect_labels():
+    """Load the checked source-id -> CIF-site-label mapping."""
+    with IMP2D_SELF_DEFECT_LOOKUP_PATH.open(encoding='utf-8') as handle:
+        payload = json.load(handle)
+    labels = payload.get('sites')
+    if not isinstance(labels, dict):
+        raise ValueError(
+            f"Invalid imp2d self-defect lookup: "
+            f"{IMP2D_SELF_DEFECT_LOOKUP_PATH}"
+        )
+    expected_entries = payload.get('entries')
+    if expected_entries is not None and int(expected_entries) != len(labels):
+        raise ValueError(
+            "imp2d self-defect lookup entry count does not match its contents"
+        )
+    return labels
+
+
+def _assign_imp2d_self_defect_indices(prep, self_defect_labels):
+    """Assign self-defect indices directly from checked CIF site labels."""
+    for struct, defect_info in prep:
+        if not defect_info['is_self']:
+            continue
+        source_id = getattr(struct, 'source_id', None)
+        defect_label = self_defect_labels.get(source_id)
+        if defect_label is None:
+            raise ValueError(
+                f"Self-defect {source_id!r} is missing from "
+                f"{IMP2D_SELF_DEFECT_LOOKUP_PATH.name}"
+            )
+        matches = [
+            idx
+            for idx, struct_site in enumerate(struct)
+            if getattr(struct_site, 'label', None) == defect_label
+            and struct_site.species_string == defect_info['impurity']
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Self-defect lookup for {source_id} selects label "
+                f"{defect_label!r}, but found {len(matches)} matching "
+                f"{defect_info['impurity']} sites"
+            )
+        defect_info['defect_index'] = matches[0]
 
 
 def init_elem_embedding(path='atom_init.json'):
@@ -319,14 +367,21 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
         source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
         struct = Structure.from_file(source_path)
         tag_structure_source(struct, source_path, j)
+        is_self = formula_contains_element(base, impurity)
         defect_info = {
             'base': base,
             'impurity': impurity,
             'site': site,
-            'is_self': formula_contains_element(base, impurity),
+            'is_self': is_self,
         }
         prep.append([struct, defect_info])
         targets.append(df_descriptors[1][i])
+
+    if {'hetero', 'attention'} & representations:
+        _assign_imp2d_self_defect_indices(
+            prep,
+            _load_imp2d_self_defect_labels(),
+        )
 
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:
