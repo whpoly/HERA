@@ -494,22 +494,38 @@ def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
 #  OCH
 # ================================================================== #
 
+def get_och_adsorbate_index(structure, adsorbate_species):
+    """Return the adsorbed atom index used by the OCH dataset.
+
+    OCH CIFs preserve the dataset convention that the newly adsorbed atom is
+    the last site of its species.  This matters for hydrogen-containing hosts:
+    selecting every H atom would incorrectly classify host hydrogen as defect
+    atoms.
+    """
+    adsorbate_indices = [
+        idx for idx, site in enumerate(structure)
+        if site.species_string == adsorbate_species
+    ]
+    if not adsorbate_indices:
+        source_id = getattr(structure, "source_id", "<unknown>")
+        raise ValueError(
+            f"OCH structure {source_id} has no {adsorbate_species} adsorbate candidate"
+        )
+    return adsorbate_indices[-1]
+
+
 def get_sparse_och(structure, unit_cell, supercell_size):
-    impurity_sites = [*filter(lambda x: x.species_string == unit_cell, structure)]
-    return Structure.from_sites(impurity_sites)
+    adsorbate_idx = get_och_adsorbate_index(structure, unit_cell)
+    return Structure.from_sites([structure[adsorbate_idx]])
 
 
 def get_hetero_och(structure, unit_cell, supercell_size, state):
     structure = structure.copy()
     base_species = unit_cell
+    adsorbate_idx = get_och_adsorbate_index(structure, base_species)
     sites_raw = []
-    structure_dict = strucure_to_dict(structure)
-    for coords, reference_site in structure_dict.items():
-        cur_site = structure_dict[coords]
-        if cur_site.species_string == base_species:
-            cur_site.properties['type'] = True
-        else:
-            cur_site.properties['type'] = False
+    for idx, cur_site in enumerate(structure):
+        cur_site.properties['type'] = idx == adsorbate_idx
         sites_raw.append(cur_site)
     return Structure.from_sites(sites_raw)
 
@@ -518,10 +534,7 @@ def get_local_och(structure, unit_cell, supercell_size, local_cutoff=0):
     structure = structure.copy()
     sites_raw = []
     base_species = unit_cell
-    defect_idx = None
-    for idx in range(len(structure)):
-        if structure[idx].species_string == base_species:
-            defect_idx = idx
+    defect_idx = get_och_adsorbate_index(structure, base_species)
 
     structure_dict = strucure_to_dict(structure)
     for index, (coords, reference_site) in enumerate(structure_dict.items()):
