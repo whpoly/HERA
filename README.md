@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
+| Modes | `full`, `full_x`, `hetero`, `hetero_bidir`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
 | Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -72,7 +72,7 @@ Common arguments:
 - `--model`: `alignn`, `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the ALIGNN,
   MEGNet, and CGCNN suites in that order, with DeFiNet-style modes included for ALIGNN and CGCNN
 - For the default ALIGNN benchmark (`--mode all` or no explicit `--mode`),
-  `hetero` runs first and `definet` runs second, followed by their related
+  `hetero` runs first, `hetero_bidir` second, and `definet` third, followed by their related
   `hetero_fixed_pool`, `hetero_was`, and `definet_was` modes. Explicitly
   listed modes keep the order supplied on the command line.
 - Multi-seed ALIGNN benchmarks run in seed-major order: every requested mode
@@ -80,7 +80,7 @@ Common arguments:
   to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
   checkpoints, summaries, and `--resume` remain mode-specific.
 - `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `full`, `full_x`, `hetero`, `attention`, `was_x`,
+- `--mode`: one or more of `full`, `full_x`, `hetero`, `hetero_bidir`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
@@ -92,7 +92,7 @@ Common arguments:
   that contain no vacancy samples (`och`, `imp2d`, and `semi`).
 - `was_x` applies WAS atom features to the `full_x` representation. The old
   full-graph-only `was` mode is no longer exposed.
-- `hetero` and `hetero_was` use the `--r` values as the local/host boundary
+- `hetero`, `hetero_bidir`, and `hetero_was` use the `--r` values as the local/host boundary
   cutoff while keeping the full model graph and config graph cutoff.
 - CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was_x` and `hetero_was`,
   which concatenate current and previous/reference atom features.
@@ -115,6 +115,8 @@ Common arguments:
   `max_neighbors=12`.
 - `--alignn-embedding-size` / `--alignn-nblocks` / `--alignn-gcn-blocks` /
   `--alignn-angle-embed-size`: reduce ALIGNN model capacity for lower memory use.
+- `--alignn-relation-adapter-rank`: set the low-rank type/relation adapter size
+  used by `hetero_bidir` (default `4`).
 - `--alignn-grad-accum-steps`: keep an effective large batch while using a
   smaller memory-resident micro-batch, e.g. `--alignn-train-batch-size 4
   --alignn-grad-accum-steps 16` gives an effective ALIGNN training batch of 64.
@@ -255,7 +257,7 @@ HERA-compatible heterogeneous variant. Use it with:
 python -m HERA.main --model alignn --dataset native --mode hetero --r 0
 ```
 
-Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
+Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_bidir`, `hetero_fixed_pool`,
 `attention`, `was_x`, `hetero_was`, `attention_was`,
 `definet`, and `definet_was`. HeteroALIGNN uses the same
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
@@ -283,6 +285,21 @@ For a controlled comparison with DefiNetALIGNN, HeteroALIGNN has no learned
 global graph feature and does not pool edge embeddings into its prediction
 head. It concatenates only the separate atom and defect node pools, while
 DefiNetALIGNN uses its homogeneous node pool.
+
+`hetero_bidir` is a parameter-efficient defect-centric benchmark candidate.
+It shares node, distance, angle, and message trunks across all types; small
+zero-initialized low-rank adapters condition the shared trunk on node/relation
+type. Every block updates host-host edges first, aggregates the updated host
+environment into the defect state, and then broadcasts that updated defect
+state back to host atoms. Relation messages are normalized independently
+before fusion, and sparse typed node/edge updates use LayerNorm rather than
+relation-local BatchNorm. Its prediction head uses the same atom/defect node
+pools as `hetero`, with no edge or global pooling.
+
+```bash
+python -m HERA.main --model alignn --dataset native \
+  --mode hetero hetero_bidir definet --r 0 --seeds 42 123
+```
 
 ## Smoke Check
 

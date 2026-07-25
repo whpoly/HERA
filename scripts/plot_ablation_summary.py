@@ -35,6 +35,7 @@ MODE_DISPLAY = {
     "was_x": "Full + X + WAS",
     "was": "WAS",
     "hetero": "Hetero",
+    "hetero_bidir": "Hetero BiDir",
     "hetero_was": "Hetero + WAS",
     "hetero_local": "Hetero Local",
     "hetero_local_was": "Hetero Local + WAS",
@@ -59,18 +60,20 @@ PAIR_ORDER = {
     "full": 0,
     "full_x": 1,
     "hetero": 2,
-    "hetero_local": 3,
-    "local": 4,
-    "attention": 5,
-    "attention_local": 6,
-    "definet": 7,
-    "definet_local": 8,
+    "hetero_bidir": 3,
+    "hetero_local": 4,
+    "local": 5,
+    "attention": 6,
+    "attention_local": 7,
+    "definet": 8,
+    "definet_local": 9,
 }
 
 COLORS = {
     "no_was": "#5aa0c8",
     "was": "#e8896d",
     "hetero": "#5aa0c8",
+    "hetero_bidir": "#5f55a5",
     "hetero_was": "#e8896d",
     "hetero_local": "#72c4a8",
     "hetero_local_was": "#9b8bd6",
@@ -449,12 +452,13 @@ def plot_hetero_radius(
     ylim: tuple[float, float] | None,
 ) -> Path | None:
     radius_df = group[
-        group["pair_base"].eq("hetero") & group["radius"].notna()
+        group["pair_base"].isin(("hetero", "hetero_bidir"))
+        & group["radius"].notna()
     ].copy()
     if radius_df.empty:
         return None
     radius_df = radius_df.drop_duplicates(
-        subset=["uses_was", "radius"],
+        subset=["pair_base", "uses_was", "radius"],
         keep="last",
     ).copy()
 
@@ -467,11 +471,15 @@ def plot_hetero_radius(
     radii = sorted(radius_df["radius"].dropna().astype(int).unique())
     radius_positions = {radius: idx for idx, radius in enumerate(radii)}
     plotted = 0
-    for uses_was, label, color, marker in [
-        (False, "Hetero", COLORS["hetero"], "o"),
-        (True, "Hetero + WAS", COLORS["hetero_was"], "s"),
+    for pair_base, uses_was, label, color, marker in [
+        ("hetero", False, "Hetero", COLORS["hetero"], "o"),
+        ("hetero", True, "Hetero + WAS", COLORS["hetero_was"], "s"),
+        ("hetero_bidir", False, "Hetero BiDir", COLORS["hetero_bidir"], "^"),
     ]:
-        series = radius_df[radius_df["uses_was"].eq(uses_was)].copy()
+        series = radius_df[
+            radius_df["pair_base"].eq(pair_base)
+            & radius_df["uses_was"].eq(uses_was)
+        ].copy()
         if series.empty:
             continue
         series = series.sort_values("radius")

@@ -19,7 +19,7 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, full_x, hetero, hetero_fixed_pool, attention,
+  Modes   : full, full_x, hetero, hetero_bidir, hetero_fixed_pool, attention,
             was_x, hetero_was, attention_was, definet, definet_was, all
   Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
 """
@@ -59,14 +59,16 @@ CGCNN_DEFINET_MODES = (
 )
 LOCAL_GRAPH_SWEEP_MODES = ()
 LOCAL_CUTOFF_SWEEP_MODES = (
-    'hetero', 'hetero_fixed_pool', 'hetero_was'
+    'hetero', 'hetero_bidir', 'hetero_fixed_pool', 'hetero_was'
 )
 FIXED_POOL_MODES = ('hetero_fixed_pool',)
 DEFINET_MODES = ('attention', 'attention_was')
+BIDIRECTIONAL_HETERO_MODES = ('hetero_bidir',)
 ALIGNN_MODES = (
     'full',
     'full_x',
     'hetero',
+    'hetero_bidir',
     'hetero_fixed_pool',
     'attention',
     'was_x',
@@ -109,6 +111,7 @@ MEGNET_DEFAULT_MODES = [
 ]
 ALIGNN_DEFAULT_MODES = [
     'hetero',
+    'hetero_bidir',
     'definet',
     'hetero_fixed_pool',
     'hetero_was',
@@ -165,6 +168,8 @@ def apply_batch_size_overrides(config, args, model_name):
             config['model']['gcn_blocks'] = args.alignn_gcn_blocks
         if args.alignn_angle_embed_size is not None:
             config['model']['angle_embed_size'] = args.alignn_angle_embed_size
+        if args.alignn_relation_adapter_rank is not None:
+            config['model']['relation_adapter_rank'] = args.alignn_relation_adapter_rank
         if args.alignn_grad_accum_steps is not None:
             config['optim']['grad_accum_steps'] = args.alignn_grad_accum_steps
         if args.alignn_amp:
@@ -488,13 +493,18 @@ def default_modes_for_model(model_name):
 
 
 def validate_modes_for_model(model_name, modes, parser):
+    if (
+            model_name != 'alignn'
+            and any(mode in BIDIRECTIONAL_HETERO_MODES for mode in modes)
+    ):
+        parser.error('The hetero_bidir mode is only supported with --model alignn')
     if model_name not in DEFINET_HOST_MODELS and any(mode in CGCNN_DEFINET_MODES for mode in modes):
         parser.error('The definet modes are run under --model cgcnn or --model alignn')
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
         parser.error('The definet model only supports --mode attention attention_was')
     if model_name == 'alignn' and any(mode not in ALIGNN_MODES for mode in modes):
         parser.error(
-            'The alignn model supports --mode full full_x hetero '
+            'The alignn model supports --mode full full_x hetero hetero_bidir '
             'hetero_fixed_pool attention was_x hetero_was attention_was '
             'definet definet_was'
         )
@@ -601,6 +611,8 @@ def main():
                         help='Override number of post-ALIGNN graph-conv blocks only for ALIGNN runs')
     parser.add_argument('--alignn-angle-embed-size', type=int, default=None,
                         help='Override angle basis size only for ALIGNN runs')
+    parser.add_argument('--alignn-relation-adapter-rank', type=int, default=None,
+                        help='Override low-rank relation adapter size for ALIGNN hetero_bidir')
     parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
                         help='Accumulate ALIGNN gradients over this many micro-batches')
     parser.add_argument('--alignn-amp', action='store_true',
@@ -651,6 +663,7 @@ def main():
             'alignn_nblocks',
             'alignn_gcn_blocks',
             'alignn_angle_embed_size',
+            'alignn_relation_adapter_rank',
             'alignn_grad_accum_steps',
     ):
         arg_value = getattr(args, arg_name)
@@ -816,6 +829,7 @@ def main():
                     f'nblocks={config["model"]["nblocks"]}, '
                     f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
                     f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                    f'relation_adapter_rank={config["model"].get("relation_adapter_rank", "n/a")}, '
                     f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                     f'amp={config["optim"].get("amp", False)}'
                 )

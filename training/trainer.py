@@ -16,7 +16,13 @@ from ..data.converters import (
 )
 from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
 from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, DefiNet
-from ..models.alignn import ALIGNN, HeteroALIGNN, AttentionALIGNN, DefiNetALIGNN
+from ..models.alignn import (
+    ALIGNN,
+    HeteroALIGNN,
+    BidirectionalHeteroALIGNN,
+    AttentionALIGNN,
+    DefiNetALIGNN,
+)
 from ..utils.scaler import Scaler
 from .losses import MAELoss
 
@@ -59,6 +65,9 @@ ALIGNN_HETERO_TASKS = (
     'alignn_hetero_was',
     'alignn_hetero_local',
     'alignn_hetero_local_was',
+)
+ALIGNN_BIDIRECTIONAL_HETERO_TASKS = (
+    'alignn_hetero_bidir',
 )
 ALIGNN_ATTENTION_TASKS = (
     'alignn_attention',
@@ -292,6 +301,29 @@ class MEGNetTrainer:
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
+        elif task in ALIGNN_BIDIRECTIONAL_HETERO_TASKS:
+            self.model = BidirectionalHeteroALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                metadata=(['atom', 'defect'],
+                          [('atom', 'aa', 'atom'),
+                           ('defect', 'dd', 'defect'),
+                           ('atom', 'ad', 'defect'),
+                           ('defect', 'da', 'atom')]),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                relation_adapter_rank=self.config['model'].get(
+                    'relation_adapter_rank',
+                    4,
+                ),
+                vertex_aggregation=self.config["model"]["vertex_aggregation"],
+                cutoff=self.config["model"]["cutoff"],
+            ).to(self.device)
         elif task in ALIGNN_HETERO_TASKS:
             self.model = HeteroALIGNN(
                 node_input_shape=atom_converter.get_shape(),
@@ -498,7 +530,10 @@ class MEGNetTrainer:
                 batch_dict,
                 pool_type=_collect_hetero_attr(batch, 'pool_type'),
             ))
-        elif task in ALIGNN_HETERO_TASKS:
+        elif task in (
+                ALIGNN_HETERO_TASKS
+                + ALIGNN_BIDIRECTIONAL_HETERO_TASKS
+        ):
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
                 batch.x_dict,
                 batch.edge_index_dict,
