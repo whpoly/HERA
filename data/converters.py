@@ -228,7 +228,21 @@ class SimpleCrystalConverter:
         all_nbrs = structure.get_all_neighbors(self.cutoff, include_index=True)
         all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
         if self.max_neighbors is not None:
-            all_nbrs = [nbrs[:self.max_neighbors] for nbrs in all_nbrs]
+            capped_nbrs = []
+            for nbrs in all_nbrs:
+                type_counts = {}
+                selected = []
+                for nbr in nbrs:
+                    neighbor_type = int(
+                        structure[nbr[2]].properties.get('type', 0)
+                    )
+                    count = type_counts.get(neighbor_type, 0)
+                    if count >= self.max_neighbors:
+                        continue
+                    selected.append(nbr)
+                    type_counts[neighbor_type] = count + 1
+                capped_nbrs.append(selected)
+            all_nbrs = capped_nbrs
         return all_nbrs
 
     def convert(self, d):

@@ -3,7 +3,6 @@ from .cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, Defi
 from .alignn import (
     ALIGNN,
     HeteroALIGNN,
-    BidirectionalHeteroALIGNN,
     AttentionALIGNN,
     DefiNetALIGNN,
 )

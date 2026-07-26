@@ -35,7 +35,6 @@ MODE_DISPLAY = {
     "was_x": "Full + X + WAS",
     "was": "WAS",
     "hetero": "Hetero",
-    "hetero_bidir": "Hetero BiDir",
     "hetero_was": "Hetero + WAS",
     "hetero_local": "Hetero Local",
     "hetero_local_was": "Hetero Local + WAS",
@@ -60,7 +59,6 @@ PAIR_ORDER = {
     "full": 0,
     "full_x": 1,
     "hetero": 2,
-    "hetero_bidir": 3,
     "hetero_local": 4,
     "local": 5,
     "attention": 6,
@@ -73,7 +71,6 @@ COLORS = {
     "no_was": "#5aa0c8",
     "was": "#e8896d",
     "hetero": "#5aa0c8",
-    "hetero_bidir": "#5f55a5",
     "hetero_was": "#e8896d",
     "hetero_local": "#72c4a8",
     "hetero_local_was": "#9b8bd6",
@@ -452,7 +449,7 @@ def plot_hetero_radius(
     ylim: tuple[float, float] | None,
 ) -> Path | None:
     radius_df = group[
-        group["pair_base"].isin(("hetero", "hetero_bidir"))
+        group["pair_base"].eq("hetero")
         & group["radius"].notna()
     ].copy()
     if radius_df.empty:
@@ -474,7 +471,6 @@ def plot_hetero_radius(
     for pair_base, uses_was, label, color, marker in [
         ("hetero", False, "Hetero", COLORS["hetero"], "o"),
         ("hetero", True, "Hetero + WAS", COLORS["hetero_was"], "s"),
-        ("hetero_bidir", False, "Hetero BiDir", COLORS["hetero_bidir"], "^"),
     ]:
         series = radius_df[
             radius_df["pair_base"].eq(pair_base)

@@ -42,7 +42,6 @@ MODE_REPRESENTATION = {
     'full_x': 'full_x',
     'was_x': 'full_x',
     'hetero': 'hetero',
-    'hetero_bidir': 'hetero',
     'hetero_fixed_pool': 'hetero',
     'hetero_was': 'hetero',
     'attention': 'attention',

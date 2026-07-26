@@ -26,7 +26,6 @@ HETERO_TASKS = {
     "cgcnn_hetero_local",
     "cgcnn_hetero_local_was",
     "alignn_hetero",
-    "alignn_hetero_bidir",
     "alignn_hetero_was",
     "alignn_hetero_local",
     "alignn_hetero_local_was",
@@ -51,7 +50,6 @@ ALIGNN_HOMOGENEOUS_TASKS = {
 }
 ALIGNN_HETERO_TASKS = {
     "alignn_hetero",
-    "alignn_hetero_bidir",
     "alignn_hetero_was",
     "alignn_hetero_local",
     "alignn_hetero_local_was",

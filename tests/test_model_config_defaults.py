@@ -1,9 +1,14 @@
 import unittest
 
-from HERA.config.defaults import get_config
+from HERA.config.defaults import VALID_MODES, get_config
 
 
 class ModelConfigDefaultsTests(unittest.TestCase):
+    def test_removed_hetero_bidir_mode_is_not_configurable(self):
+        self.assertNotIn("hetero_bidir", VALID_MODES)
+        with self.assertRaisesRegex(ValueError, "Unknown mode 'hetero_bidir'"):
+            get_config("alignn", "och", "hetero_bidir")
+
     def test_cgcnn_uses_matched_train_batch_and_neighbor_cap(self):
         for mode in ("full", "hetero", "attention", "definet"):
             with self.subTest(mode=mode):
