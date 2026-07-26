@@ -53,16 +53,29 @@ class ModelConfigDefaultsTests(unittest.TestCase):
                 model = get_config(model_name, "vacancy", mode)["model"]
                 self.assertEqual(model["train_batch_size"], 8)
 
-    def test_non_vacancy_batch_defaults_are_preserved(self):
+    def test_memory_limited_datasets_use_batch_size_sixteen(self):
+        for dataset in ("2dmd_high", "native"):
+            for model_name, mode in (
+                ("cgcnn", "full"),
+                ("megnet", "hetero"),
+                ("alignn", "attention"),
+                ("definet", "attention"),
+            ):
+                with self.subTest(dataset=dataset, model=model_name, mode=mode):
+                    model = get_config(model_name, dataset, mode)["model"]
+                    self.assertEqual(model["train_batch_size"], 16)
+                    self.assertEqual(model["test_batch_size"], 1)
+
+    def test_other_batch_defaults_are_preserved(self):
         expectations = (
-            ("cgcnn", "full", 64, 1),
-            ("megnet", "full", 64, 1),
-            ("alignn", "full", 64, 1),
-            ("definet", "attention", 64, 1),
+            ("och", "cgcnn", "full", 64, 1),
+            ("och", "megnet", "full", 64, 1),
+            ("native", "alignn", "full", 16, 1),
+            ("och", "definet", "attention", 64, 1),
         )
-        for model_name, mode, train_batch, test_batch in expectations:
-            with self.subTest(model=model_name):
-                model = get_config(model_name, "och", mode)["model"]
+        for dataset, model_name, mode, train_batch, test_batch in expectations:
+            with self.subTest(dataset=dataset, model=model_name):
+                model = get_config(model_name, dataset, mode)["model"]
                 self.assertEqual(model["train_batch_size"], train_batch)
                 self.assertEqual(model["test_batch_size"], test_batch)
 

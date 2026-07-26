@@ -182,6 +182,7 @@ _CONFIG_REGISTRY = {
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet']
 VACANCY_TRAIN_BATCH_SIZE = 8
+MEMORY_LIMITED_TRAIN_BATCH_SIZE = 16
 DEFAULT_TRAIN_BATCH_SIZE = 64
 DEFAULT_TEST_BATCH_SIZE = 1
 CGCNN_MEGNET_MAX_NEIGHBORS = 12
@@ -267,6 +268,8 @@ def _finalize_config(config, model, dataset):
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
     if dataset == 'vacancy':
         config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
+    elif dataset in ('2dmd_high', 'native'):
+        config['model']['train_batch_size'] = MEMORY_LIMITED_TRAIN_BATCH_SIZE
     return config
 
 
