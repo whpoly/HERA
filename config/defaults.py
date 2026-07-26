@@ -181,6 +181,7 @@ _CONFIG_REGISTRY = {
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
 VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet']
+VACANCY_TRAIN_BATCH_SIZE = 8
 CGCNN_MEGNET_TRAIN_BATCH_SIZE = 64
 CGCNN_MEGNET_TEST_BATCH_SIZE = 1
 CGCNN_MEGNET_MAX_NEIGHBORS = 12
@@ -251,8 +252,8 @@ def _definet_attention_config(base_config, mode, model='cgcnn'):
     return config
 
 
-def _finalize_config(config, model):
-    """Apply model-specific defaults that differ from the shared base configs."""
+def _finalize_config(config, model, dataset):
+    """Apply model- and dataset-specific defaults."""
     config = copy.deepcopy(config)
     if model in ('cgcnn', 'megnet'):
         config['model']['train_batch_size'] = CGCNN_MEGNET_TRAIN_BATCH_SIZE
@@ -268,10 +269,10 @@ def _finalize_config(config, model):
         config['model']['nblocks'] = ALIGNN_BLOCKS
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
-        # Keep ALIGNN defaults close to the original training setup while using
-        # a single validation/test graph to limit line-graph memory.
         config['model']['train_batch_size'] = ALIGNN_TRAIN_BATCH_SIZE
         config['model']['test_batch_size'] = ALIGNN_TEST_BATCH_SIZE
+    if dataset == 'vacancy':
+        config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
     return config
 
 
@@ -324,25 +325,29 @@ def get_config(model: str, dataset: str, mode: str):
         config_attention_was,
     ) = _CONFIG_REGISTRY[dataset](model)
     if mode in CGCNN_DEFINET_MODES:
-        return _finalize_config(_definet_attention_config(config_attention, mode, model), model)
+        return _finalize_config(
+            _definet_attention_config(config_attention, mode, model),
+            model,
+            dataset,
+        )
     if mode == 'full_x':
         config = copy.deepcopy(config_full)
         config['task'] = f'{model}_full_x'
-        return _finalize_config(config, model)
+        return _finalize_config(config, model, dataset)
     if mode == 'hetero_fixed_pool':
         config = copy.deepcopy(config_hetero)
         config['task'] = f'{model}_hetero_fixed_pool'
         config['model']['fixed_pooling'] = True
-        return _finalize_config(config, model)
+        return _finalize_config(config, model, dataset)
     if mode == 'hetero_bidir':
         config = copy.deepcopy(config_hetero)
         config['task'] = 'alignn_hetero_bidir'
         config['model']['relation_adapter_rank'] = 4
-        return _finalize_config(config, model)
+        return _finalize_config(config, model, dataset)
     if mode == 'was_x':
         config = copy.deepcopy(config_was_x)
         config['task'] = f'{model}_was_x'
-        return _finalize_config(config, model)
+        return _finalize_config(config, model, dataset)
 
     config = {'full': config_full,
               'hetero': config_hetero,
@@ -355,4 +360,4 @@ def get_config(model: str, dataset: str, mode: str):
         config['model']['nblocks'] = 4
         config['model']['n_marker_types'] = 2
         config['model'].pop('n_heads', None)
-    return _finalize_config(config, model)
+    return _finalize_config(config, model, dataset)

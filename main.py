@@ -674,7 +674,8 @@ def main():
                         help='Torch device (default: cuda:0)')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Number of training epochs per seed or CV fold (default: 500)')
-    parser.add_argument('--train-batch-size', type=int, default=None,
+    parser.add_argument('--batch-size', '--train-batch-size',
+                        dest='train_batch_size', type=int, default=None,
                         help='Override training batch size for every selected run')
     parser.add_argument('--test-batch-size', type=int, default=None,
                         help='Override validation/test batch size for every selected run')

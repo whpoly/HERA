@@ -101,11 +101,13 @@ Common arguments:
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed or CV fold
 - All training protocols use AdamW with a default weight decay of `1e-4`.
-- `--train-batch-size` / `--test-batch-size`: override batch size for all runs
+- The `vacancy` dataset defaults to a training batch size of `8` for every
+  model; other datasets keep their model-specific defaults.
+- `--batch-size` / `--train-batch-size`: override training batch size for every
+  selected run. `--test-batch-size` overrides validation/test batch size.
 - `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size
-  only for ALIGNN runs. ALIGNN defaults to `64` for training and `1` for
-  validation/test because its bond-angle line graph is much more memory
-  intensive.
+  only for ALIGNN runs. ALIGNN otherwise defaults to `64` for training and `1`
+  for validation/test.
 - `--alignn-max-neighbors` / `--alignn-cutoff`: reduce ALIGNN graph size when
   memory is still too high. `--alignn-max-neighbors 12` is usually the first
   knob to try because ALIGNN angle edges grow roughly with neighbor count

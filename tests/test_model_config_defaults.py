@@ -37,6 +37,30 @@ class ModelConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(model["test_batch_size"], 1)
         self.assertEqual(model["max_neighbors"], 12)
 
+    def test_only_vacancy_uses_batch_size_eight_for_all_models(self):
+        for model_name, mode in (
+            ("cgcnn", "full"),
+            ("megnet", "full"),
+            ("alignn", "full"),
+            ("definet", "attention"),
+        ):
+            with self.subTest(model=model_name):
+                model = get_config(model_name, "vacancy", mode)["model"]
+                self.assertEqual(model["train_batch_size"], 8)
+
+    def test_non_vacancy_batch_defaults_are_preserved(self):
+        expectations = (
+            ("cgcnn", "full", 64, 1),
+            ("megnet", "full", 64, 1),
+            ("alignn", "full", 64, 1),
+            ("definet", "attention", 50, 100),
+        )
+        for model_name, mode, train_batch, test_batch in expectations:
+            with self.subTest(model=model_name):
+                model = get_config(model_name, "och", mode)["model"]
+                self.assertEqual(model["train_batch_size"], train_batch)
+                self.assertEqual(model["test_batch_size"], test_batch)
+
     def test_primary_models_share_optimizer_scheduler_and_early_stopping(self):
         fields = (
             "optimizer",
