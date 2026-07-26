@@ -102,7 +102,8 @@ Common arguments:
 - `--epochs`: number of epochs per seed or CV fold
 - All training protocols use AdamW with a default weight decay of `1e-4`.
 - The `vacancy` dataset defaults to a training batch size of `8` for every
-  model; other datasets keep their model-specific defaults.
+  model. All other datasets default to `64` for training, and every model uses
+  `1` for validation/test.
 - `--batch-size` / `--train-batch-size`: override training batch size for every
   selected run. `--test-batch-size` overrides validation/test batch size.
 - `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size

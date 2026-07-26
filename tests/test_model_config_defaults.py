@@ -53,7 +53,7 @@ class ModelConfigDefaultsTests(unittest.TestCase):
             ("cgcnn", "full", 64, 1),
             ("megnet", "full", 64, 1),
             ("alignn", "full", 64, 1),
-            ("definet", "attention", 50, 100),
+            ("definet", "attention", 64, 1),
         )
         for model_name, mode, train_batch, test_batch in expectations:
             with self.subTest(model=model_name):
