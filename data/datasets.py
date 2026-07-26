@@ -406,7 +406,7 @@ def load_data_semi(task_prefix, local_cutoff=None, representations=None):
             source_path = 'dataset/Dataset_1/Dataset_1/Neutral/Neutral/' + j
             struct = Structure.from_file(source_path)
             tag_structure_source(struct, source_path, j)
-            base_structure = Structure.from_file('Dataset_1/host_configurations/' + base + '.vasp')
+            base_structure = Structure.from_file('dataset/Dataset_1/host_configurations/' + base + '.vasp')
             base_species = {site.species_string for site in base_structure}
             defect_species = {site.species_string for site in struct}
             if len(defect_species - base_species) > 0:
