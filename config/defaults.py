@@ -9,6 +9,8 @@ EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
 
 def _base_optim():
     return {
+        'optimizer': 'AdamW',
+        'weight_decay': 1e-4,
         'factor': 0.9,
         'patience': 10,
         'threshold': 0.0005,

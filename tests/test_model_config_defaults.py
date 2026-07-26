@@ -39,6 +39,8 @@ class ModelConfigDefaultsTests(unittest.TestCase):
 
     def test_primary_models_share_optimizer_scheduler_and_early_stopping(self):
         fields = (
+            "optimizer",
+            "weight_decay",
             "lr_initial",
             "scheduler",
             "factor",
@@ -56,6 +58,8 @@ class ModelConfigDefaultsTests(unittest.TestCase):
             with self.subTest(field=field):
                 values = {optim[field] for optim in optimizers.values()}
                 self.assertEqual(values, {optimizers["alignn"][field]})
+        self.assertEqual(optimizers["cgcnn"]["optimizer"], "AdamW")
+        self.assertEqual(optimizers["cgcnn"]["weight_decay"], 1e-4)
         self.assertEqual(optimizers["cgcnn"]["early_stopping_patience"], 50)
         self.assertEqual(
             optimizers["megnet"]["early_stopping_min_delta_percent"],

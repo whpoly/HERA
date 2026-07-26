@@ -73,7 +73,11 @@ def load_checkpoint(path, config, device, seed):
 
 def reset_optimizer(trainer, lr):
     optim_config = trainer.config["optim"]
-    trainer.optimizer = torch.optim.Adam(trainer.model.parameters(), lr=lr)
+    trainer.optimizer = torch.optim.AdamW(
+        trainer.model.parameters(),
+        lr=lr,
+        weight_decay=optim_config.get("weight_decay", 1e-4),
+    )
     trainer.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         trainer.optimizer,
         factor=optim_config["factor"],

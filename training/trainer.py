@@ -411,9 +411,10 @@ class MEGNetTrainer:
                 n_h=3,
             ).to(self.device)
 
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.config["optim"]["lr_initial"],
+            weight_decay=self.config["optim"].get("weight_decay", 1e-4),
         )
 
         if self.config["optim"]["scheduler"].lower() == "reducelronplateau":

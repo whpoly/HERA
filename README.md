@@ -100,6 +100,7 @@ Common arguments:
   are `definet` and `definet_was` for CGCNN and ALIGNN.
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed or CV fold
+- All training protocols use AdamW with a default weight decay of `1e-4`.
 - `--train-batch-size` / `--test-batch-size`: override batch size for all runs
 - `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size
   only for ALIGNN runs. ALIGNN defaults to `64` for training and `1` for
