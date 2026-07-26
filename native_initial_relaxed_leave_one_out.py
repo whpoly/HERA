@@ -31,7 +31,12 @@ from sklearn.model_selection import train_test_split
 
 from .config.defaults import VALID_MODES
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
-from .main import parse_radius_values, parse_seed_values, set_seed
+from .main import (
+    is_meaningful_relative_improvement,
+    parse_radius_values,
+    parse_seed_values,
+    set_seed,
+)
 from .native_ood_case_study import (
     DEFAULT_NATIVE_CSV,
     color_for_label,
@@ -190,6 +195,12 @@ def train_with_validation(
 
     best_val = float("inf")
     best_state = copy.deepcopy(trainer.model.state_dict())
+    early_stopping_patience = int(config["optim"].get("early_stopping_patience", 0))
+    early_stopping_min_delta_percent = float(
+        config["optim"].get("early_stopping_min_delta_percent", 0.0)
+    )
+    early_stopping_best = float("inf")
+    epochs_without_improvement = 0
     rows = []
     for epoch in range(epochs):
         train_mae, train_mse = trainer.train_one_epoch()
@@ -199,6 +210,15 @@ def train_with_validation(
         if val_mae < best_val:
             best_val = float(val_mae)
             best_state = copy.deepcopy(trainer.model.state_dict())
+        if is_meaningful_relative_improvement(
+            val_mae,
+            early_stopping_best,
+            early_stopping_min_delta_percent,
+        ):
+            early_stopping_best = val_mae
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
         rows.append(
             {
                 "epoch": epoch + 1,
@@ -213,6 +233,16 @@ def train_with_validation(
             f"  epoch {epoch + 1}/{epochs} "
             f"train_mae={train_mae:.4f} val_mae={val_mae:.4f}"
         )
+        if (
+            early_stopping_patience > 0
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            print(
+                f"  Early stopping at epoch {epoch + 1}/{epochs}: no validation "
+                f"MAE improvement > {early_stopping_min_delta_percent:g}% for "
+                f"{early_stopping_patience} epochs."
+            )
+            break
 
     save_history(history_path, rows)
     return trainer, best_state, best_val

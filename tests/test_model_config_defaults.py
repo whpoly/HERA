@@ -37,6 +37,31 @@ class ModelConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(model["test_batch_size"], 1)
         self.assertEqual(model["max_neighbors"], 12)
 
+    def test_primary_models_share_optimizer_scheduler_and_early_stopping(self):
+        fields = (
+            "lr_initial",
+            "scheduler",
+            "factor",
+            "patience",
+            "threshold",
+            "min_lr",
+            "early_stopping_patience",
+            "early_stopping_min_delta_percent",
+        )
+        optimizers = {
+            model: get_config(model, "och", "full")["optim"]
+            for model in ("cgcnn", "megnet", "alignn")
+        }
+        for field in fields:
+            with self.subTest(field=field):
+                values = {optim[field] for optim in optimizers.values()}
+                self.assertEqual(values, {optimizers["alignn"][field]})
+        self.assertEqual(optimizers["cgcnn"]["early_stopping_patience"], 50)
+        self.assertEqual(
+            optimizers["megnet"]["early_stopping_min_delta_percent"],
+            0.5,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

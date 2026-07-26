@@ -170,12 +170,18 @@ def with_radius(config, radius):
     return config
 
 
-def apply_batch_size_overrides(config, args, model_name):
+def apply_training_overrides(config, args, model_name):
     config = copy.deepcopy(config)
     if args.train_batch_size is not None:
         config['model']['train_batch_size'] = args.train_batch_size
     if args.test_batch_size is not None:
         config['model']['test_batch_size'] = args.test_batch_size
+    if args.early_stopping_patience is not None:
+        config['optim']['early_stopping_patience'] = args.early_stopping_patience
+    if args.early_stopping_min_delta_percent is not None:
+        config['optim']['early_stopping_min_delta_percent'] = (
+            args.early_stopping_min_delta_percent
+        )
     if model_name == 'alignn':
         if args.alignn_train_batch_size is not None:
             config['model']['train_batch_size'] = args.alignn_train_batch_size
@@ -197,10 +203,6 @@ def apply_batch_size_overrides(config, args, model_name):
             config['model']['relation_adapter_rank'] = args.alignn_relation_adapter_rank
         if args.alignn_grad_accum_steps is not None:
             config['optim']['grad_accum_steps'] = args.alignn_grad_accum_steps
-        if args.alignn_early_stopping_patience is not None:
-            config['optim']['early_stopping_patience'] = args.alignn_early_stopping_patience
-        if args.alignn_early_stopping_min_delta_percent is not None:
-            config['optim']['early_stopping_min_delta_percent'] = args.alignn_early_stopping_min_delta_percent
         if args.alignn_amp:
             config['optim']['amp'] = True
     return config
@@ -696,11 +698,11 @@ def main():
                         help='Override low-rank relation adapter size for ALIGNN hetero_bidir')
     parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
                         help='Accumulate ALIGNN gradients over this many micro-batches')
-    parser.add_argument('--alignn-early-stopping-patience', type=int, default=None,
-                        help=('Stop ALIGNN after this many epochs without meaningful '
+    parser.add_argument('--early-stopping-patience', type=int, default=None,
+                        help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
-    parser.add_argument('--alignn-early-stopping-min-delta-percent', type=float, default=None,
-                        help=('Minimum relative validation MAE decrease that resets ALIGNN '
+    parser.add_argument('--early-stopping-min-delta-percent', type=float, default=None,
+                        help=('Minimum relative validation MAE decrease that resets '
                               'early stopping patience, in percent (default: 0.5)'))
     parser.add_argument('--alignn-amp', action='store_true',
                         help='Use CUDA automatic mixed precision only for ALIGNN runs')
@@ -765,15 +767,15 @@ def main():
         if arg_value is not None and arg_value < 1:
             parser.error(f'--{arg_name.replace("_", "-")} must be >= 1')
     if (
-            args.alignn_early_stopping_patience is not None
-            and args.alignn_early_stopping_patience < 0
+            args.early_stopping_patience is not None
+            and args.early_stopping_patience < 0
     ):
-        parser.error('--alignn-early-stopping-patience must be >= 0')
+        parser.error('--early-stopping-patience must be >= 0')
     if (
-            args.alignn_early_stopping_min_delta_percent is not None
-            and not 0 <= args.alignn_early_stopping_min_delta_percent < 100
+            args.early_stopping_min_delta_percent is not None
+            and not 0 <= args.early_stopping_min_delta_percent < 100
     ):
-        parser.error('--alignn-early-stopping-min-delta-percent must be in [0, 100)')
+        parser.error('--early-stopping-min-delta-percent must be in [0, 100)')
     if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
         parser.error('--alignn-cutoff must be > 0')
     args.seeds = parse_seed_values(args.seeds, parser)
@@ -846,7 +848,7 @@ def main():
                 return dataset_cache[cache_key]
 
             def config_for_mode(mode_name):
-                return apply_batch_size_overrides(
+                return apply_training_overrides(
                     get_config(model_name, dataset_name, mode_name),
                     args,
                     model_name,

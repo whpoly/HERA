@@ -3,6 +3,10 @@
 import copy
 
 
+EARLY_STOPPING_PATIENCE = 50
+EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
+
+
 def _base_optim():
     return {
         'factor': 0.9,
@@ -11,6 +15,8 @@ def _base_optim():
         'min_lr': 1e-5,
         'lr_initial': 1e-3,
         'scheduler': 'ReduceLROnPlateau',
+        'early_stopping_patience': EARLY_STOPPING_PATIENCE,
+        'early_stopping_min_delta_percent': EARLY_STOPPING_MIN_DELTA_PERCENT,
     }
 
 
@@ -183,8 +189,6 @@ ALIGNN_TEST_BATCH_SIZE = 1
 ALIGNN_BLOCKS = 3
 ALIGNN_GCN_BLOCKS = 3
 ALIGNN_MAX_NEIGHBORS = 12
-ALIGNN_EARLY_STOPPING_PATIENCE = 50
-ALIGNN_EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
@@ -266,8 +270,6 @@ def _finalize_config(config, model):
         # a single validation/test graph to limit line-graph memory.
         config['model']['train_batch_size'] = ALIGNN_TRAIN_BATCH_SIZE
         config['model']['test_batch_size'] = ALIGNN_TEST_BATCH_SIZE
-        config['optim']['early_stopping_patience'] = ALIGNN_EARLY_STOPPING_PATIENCE
-        config['optim']['early_stopping_min_delta_percent'] = ALIGNN_EARLY_STOPPING_MIN_DELTA_PERCENT
     return config
 
 

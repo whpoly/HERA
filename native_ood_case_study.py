@@ -39,6 +39,7 @@ from .main import (
     LOCAL_CUTOFF_CHOICES,
     LOCAL_CUTOFF_SWEEP_MODES,
     LOCAL_GRAPH_SWEEP_MODES,
+    is_meaningful_relative_improvement,
     parse_radius_values,
     parse_seed_values,
     set_seed,
@@ -463,6 +464,12 @@ def train_one_seed(
 
     min_val = float("inf")
     best_state = None
+    early_stopping_patience = int(config["optim"].get("early_stopping_patience", 0))
+    early_stopping_min_delta_percent = float(
+        config["optim"].get("early_stopping_min_delta_percent", 0.0)
+    )
+    early_stopping_best = float("inf")
+    epochs_without_improvement = 0
     history_rows = []
     for epoch in range(epochs):
         train_mae, train_mse = trainer.train_one_epoch()
@@ -472,6 +479,15 @@ def train_one_seed(
         if val_mae < min_val:
             min_val = val_mae
             best_state = copy.deepcopy(trainer.model.state_dict())
+        if is_meaningful_relative_improvement(
+            val_mae,
+            early_stopping_best,
+            early_stopping_min_delta_percent,
+        ):
+            early_stopping_best = val_mae
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
         history_rows.append(
             {
                 "epoch": epoch + 1,
@@ -486,6 +502,17 @@ def train_one_seed(
             f"  seed={seed} epoch {epoch + 1}/{epochs} "
             f"train_mae={train_mae:.4f} val_mae={val_mae:.4f}"
         )
+        if (
+            early_stopping_patience > 0
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            print(
+                f"  seed={seed} early stopping at epoch {epoch + 1}/{epochs}: "
+                f"no validation MAE improvement > "
+                f"{early_stopping_min_delta_percent:g}% for "
+                f"{early_stopping_patience} epochs."
+            )
+            break
 
     save_history(history_path, history_rows)
     test_mae, predictions = trainer.predict_structures(
