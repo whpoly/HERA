@@ -504,10 +504,7 @@ class MEGNetTrainer:
                 batch_dict,
                 pool_type=_collect_hetero_attr(batch, 'pool_type'),
             ))
-        elif task in (
-                ALIGNN_HETERO_TASKS
-                + ALIGNN_BIDIRECTIONAL_HETERO_TASKS
-        ):
+        elif task in ALIGNN_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, _ = _complete_hetero_inputs(
                 batch.x_dict,
                 batch.edge_index_dict,
