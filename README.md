@@ -7,8 +7,8 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
-| Datasets | `vacancy`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
+| Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
+| Datasets | `vacancy`, `2dmd_low`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
 
@@ -51,10 +51,13 @@ This repository does not include the raw datasets or `atom_init.json`.
 Before training, make sure the following resources are available in the paths expected by the code:
 
 - `atom_init.json`
-- `2d-materials-point-defects-all/...` for `vacancy` and `2dmd_high`
+- `2d-materials-point-defects-all/...` for `vacancy`, `2dmd_low`, and `2dmd_high`
 - `Dataset_1/...` for `native` and `semi`
 - `../autodl-tmp/rs2re_h_ads/...` for `och`
 - `imp2d/imp2d/...` for `imp2d`
+
+`2dmd_low` is the standalone low-density 2DMD benchmark and loads only the
+`low_density_defects/MoS2` and `low_density_defects/WSe2` subsets.
 
 If `atom_init.json` is stored elsewhere, pass it with `--atom-init`.
 
@@ -79,17 +82,24 @@ Common arguments:
   is completed for one seed before the next seed starts. Each mode still writes
   to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
   checkpoints, summaries, and `--resume` remain mode-specific.
-- `--dataset`: dataset name, or `all` to run every dataset
-- `--mode`: one or more of `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
+- `--dataset`: one or more dataset names, or `all` to run every dataset
+- `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
   currently `6`; no reduced/cropped graph modes are exposed.
 - `full_x` is the old full-graph-with-X comparison: vacancy-style datasets
-  such as `vacancy` and `2dmd_high` add DummySpecies/X vacancy sites to the
+  such as `vacancy`, `2dmd_low`, and `2dmd_high` add DummySpecies/X vacancy sites to the
   full graph; datasets without an X site use the same graph as `full`. When a
   benchmark requests both modes, `full_x` is therefore skipped for datasets
   that contain no vacancy samples (`och`, `imp2d`, and `semi`).
+- `sparse` reproduces the legacy `MEGNET_SPARSE` representation/model and is only
+  available for `--model megnet` on `vacancy`, `2dmd_low`, and `2dmd_high`. It retains only
+  defect sites and restores the original two-value current/reference species
+  features, 12 Å cutoff, max/max aggregation, hidden size 64, and 3 MEGNet
+  blocks. Its training follows the current common benchmark protocol: AdamW,
+  validation-MAE scheduling, standard early stopping, and the current
+  dataset-specific batch sizes.
 - `was_x` applies WAS atom features to the `full_x` representation. The old
   full-graph-only `was` mode is no longer exposed.
 - `hetero`, `hetero_fixed_pool`, and `hetero_was` use the `--r` values as the local/host boundary
@@ -150,6 +160,8 @@ Example training commands:
 
 ```bash
 python -m HERA.main --model megnet --dataset vacancy
+python -m HERA.main --model all --dataset 2dmd_low --mode all --r 0
+python -m HERA.main --model megnet --dataset vacancy 2dmd_high --mode sparse --epochs 500 --seed 123 --run-dir HERA/logs/megnet_sparse_reproduction --resume
 python -m HERA.main --model megnet --dataset semi --mode hetero --r 0
 python -m HERA.main --model all --dataset vacancy --mode all --r 0
 python -m HERA.main --model all --dataset all --mode all --r all
@@ -161,6 +173,21 @@ python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 4 --alignn-grad-accum-steps 16 --alignn-amp
 ```
+
+On Windows, the complete MEGNET_SPARSE benchmark is also packaged as:
+
+```powershell
+HERA\scripts\run_megnet_sparse_benchmark.ps1
+```
+
+It runs `2dmd_high` and `vacancy` for seed 123, writes resumable
+outputs to `HERA/logs/megnet_sparse_reproduction/`, and records launcher status,
+combined console output, and the final exit code in that directory.
+
+To insert this benchmark after an already-running 2dmd `full_x` mode and then
+resume that run, use `scripts/run_sparse_between_2dmd_modes.ps1`. The watcher
+waits for both the `TEST` row and best checkpoint before stopping the original
+process.
 
 ### Native OOD case studies
 
@@ -279,10 +306,11 @@ HeteroALIGNN uses one shared geometric-angle update for every line-graph edge.
 The angle convolution does not distinguish `aa`/`dd`/`ad`/`da` relation
 combinations.
 
-HeteroALIGNN uses only physical periodic-neighbor edges. It does not add
-synthetic zero-distance self-loops because its gated convolutions already have
-root/residual updates. Consequently, a single-defect graph with no physical
-defect-defect bond keeps the `dd` edge store empty and skips that relation branch.
+All CGCNN, MEGNet, and ALIGNN heterogeneous graph conversions use only physical
+periodic-neighbor edges. They do not add synthetic zero-distance self-loops
+because the backbones already preserve root/node features internally.
+Consequently, a single-defect graph with no physical defect-defect bond keeps
+the `dd` edge store empty for every backbone.
 The directed `ad` and `da` edge stores are both retained for message routing,
 but they share one reciprocal host-defect edge embedding and one convolutional
 network at every HeteroALIGNN/GCN layer.

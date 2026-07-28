@@ -1,6 +1,7 @@
 """Dataset loading functions.
 
-Each function returns (dataset_full, dataset_hetero, dataset_attn, targets).
+Each function returns
+``(dataset_full, dataset_hetero, dataset_attn, dataset_sparse, targets)``.
 Pass ``representations`` or ``modes`` to build only the graph variants needed
 for a training run.
 """
@@ -26,7 +27,7 @@ from .structure_utils import (
 # Global atom embeddings (loaded once from atom_init.json)
 elem_embedding = {}
 
-DATASET_REPRESENTATIONS = ('full', 'full_x', 'hetero', 'attention')
+DATASET_REPRESENTATIONS = ('full', 'full_x', 'hetero', 'attention', 'sparse')
 DEFAULT_DATASET_REPRESENTATIONS = ('full', 'hetero', 'attention')
 IMP2D_SELF_DEFECT_LOOKUP_PATH = Path(__file__).with_name(
     'imp2d_self_defect_sites.json'
@@ -36,8 +37,10 @@ REPRESENTATION_INDEX = {
     'full_x': 0,
     'hetero': 1,
     'attention': 2,
+    'sparse': 3,
 }
 MODE_REPRESENTATION = {
+    'sparse': 'sparse',
     'full': 'full',
     'full_x': 'full_x',
     'was_x': 'full_x',
@@ -179,7 +182,7 @@ def init_elem_embedding(path='atom_init.json'):
 
 
 # ------------------------------------------------------------------ #
-#  Helper used by vacancy / 2dmd_high
+#  Helper used by vacancy / 2dmd_low / 2dmd_high
 # ------------------------------------------------------------------ #
 
 def get_prepared(path, prepared, is_high=False):
@@ -253,9 +256,23 @@ def load_data_vacancy(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_vacancy(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_sparse = None
+    if 'sparse' in representations:
+        dataset_sparse = [
+            convert_to_sparse_vacancy(
+                p[0],
+                unit_cells[p[1]],
+                p[2],
+                f'{task_prefix}_sparse',
+                [1],
+                False,
+                False,
+            )
+            for p in tqdm(prep)
+        ]
 
     return _filter_invalid_datasets(
-        (dataset_full, dataset_hetero, dataset_attn),
+        (dataset_full, dataset_hetero, dataset_attn, dataset_sparse),
         df['target'].values,
     )
 
@@ -295,9 +312,70 @@ def load_data_2dmd_high(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_sparse = None
+    if 'sparse' in representations:
+        dataset_sparse = [
+            convert_to_sparse_2dmd_high(
+                p[0],
+                unit_cells[p[1]],
+                p[2],
+                f'{task_prefix}_sparse',
+                [1],
+                False,
+                False,
+            )
+            for p in tqdm(prep)
+        ]
 
     return _filter_invalid_datasets(
-        (dataset_full, dataset_hetero, dataset_attn),
+        (dataset_full, dataset_hetero, dataset_attn, dataset_sparse),
+        df['target'].values,
+    )
+
+
+def load_data_2dmd_low(task_prefix, local_cutoff=None, representations=None):
+    """Load only the low-density subset of the 2DMD benchmark."""
+    representations = _normalize_representations(representations)
+    prepared = {'id': [], 'structure': [], 'base': [], 'cell': [], 'target': [], 'weight': []}
+    get_prepared('dataset/2d-materials-point-defects-all/low_density_defects/MoS2', prepared)
+    get_prepared('dataset/2d-materials-point-defects-all/low_density_defects/WSe2', prepared)
+    df = pd.DataFrame(prepared)
+    df.set_index(["id"], inplace=True)
+    unit_cells = {
+        'MoS2': CifParser("dataset/2d-materials-point-defects-all/low_density_defects/MoS2/unit_cells/MoS2.cif").get_structures(primitive=False)[0],
+        'WSe2': CifParser("dataset/2d-materials-point-defects-all/low_density_defects/WSe2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
+    }
+    prep = df.values.tolist()
+    prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
+
+    dataset_full = None
+    if 'full' in representations or 'full_x' in representations:
+        full_task = f'{task_prefix}_full_x' if 'full_x' in representations else f'{task_prefix}_full'
+        dataset_full = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], full_task, None, skip_full_was, False) for p in tqdm(prep)]
+    dataset_hetero = None
+    if 'hetero' in representations:
+        dataset_hetero = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_attn = None
+    if 'attention' in representations:
+        dataset_attn = [convert_to_sparse_2dmd_high(p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention', None, skip_full_was, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+    dataset_sparse = None
+    if 'sparse' in representations:
+        dataset_sparse = [
+            convert_to_sparse_2dmd_high(
+                p[0],
+                unit_cells[p[1]],
+                p[2],
+                f'{task_prefix}_sparse',
+                [1],
+                False,
+                False,
+            )
+            for p in tqdm(prep)
+        ]
+
+    return _filter_invalid_datasets(
+        (dataset_full, dataset_hetero, dataset_attn, dataset_sparse),
         df['target'].values,
     )
 
@@ -325,7 +403,7 @@ def load_data_native(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
-    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn), targets)
+    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
 def load_data_och(task_prefix, local_cutoff=None, representations=None):
@@ -351,7 +429,7 @@ def load_data_och(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_och(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
-    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn), targets)
+    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
 def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
@@ -392,7 +470,7 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
-    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn), targets)
+    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
 def load_data_semi(task_prefix, local_cutoff=None, representations=None):
@@ -425,7 +503,7 @@ def load_data_semi(task_prefix, local_cutoff=None, representations=None):
     dataset_attn = None
     if 'attention' in representations:
         dataset_attn = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
-    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn), targets)
+    return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
 # ------------------------------------------------------------------ #
@@ -434,6 +512,7 @@ def load_data_semi(task_prefix, local_cutoff=None, representations=None):
 
 _LOADER_REGISTRY = {
     'vacancy': load_data_vacancy,
+    '2dmd_low': load_data_2dmd_low,
     '2dmd_high': load_data_2dmd_high,
     'native': load_data_native,
     'och': load_data_och,
@@ -449,17 +528,19 @@ def load_dataset(
         representations=None,
         modes=None,
 ):
-    """Load and return all four graph representations for a dataset.
+    """Load and return the graph representations for a dataset.
 
     Args:
-        dataset_name: one of vacancy, 2dmd_high, native, och, imp2d, semi
+        dataset_name: one of vacancy, 2dmd_low, 2dmd_high, native, och, imp2d,
+            semi
         model_name: 'megnet', 'cgcnn', or 'definet' (used as task prefix)
         local_cutoff: optional local/host boundary radius for hetero and attention structures
-        representations: optional subset of full, hetero, attention to build
+        representations: optional subset of full, hetero, attention, sparse to build
         modes: optional training modes; converted to the needed representation subset
 
     Returns:
-        (dataset_full, dataset_hetero, dataset_attn, targets). Unrequested
+        (dataset_full, dataset_hetero, dataset_attn, dataset_sparse, targets).
+        Unrequested
         representations are returned as None.
     """
     if dataset_name not in _LOADER_REGISTRY:

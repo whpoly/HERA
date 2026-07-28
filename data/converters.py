@@ -170,7 +170,6 @@ class SimpleCrystalConverter:
             raise ValueError("max_neighbors must be >= 1")
         self.atom_converter = atom_converter if atom_converter else DummyConverter()
         self.bond_converter = bond_converter if bond_converter else DummyConverter()
-        self.model_family = getattr(self.atom_converter, 'task', None)
         self.add_z_bond_coord = add_z_bond_coord
         self.add_eos_features = add_eos_features
         self.ignore_state = ignore_state
@@ -246,13 +245,10 @@ class SimpleCrystalConverter:
         return all_nbrs
 
     def convert(self, d):
-        if self.task == 'sparse':
-            raise ValueError("Sparse mode has been removed; use local mode with --r 0 instead.")
-
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task in ('full', 'full_x', 'was_x', 'local'):
+        if self.task in ('sparse', 'full', 'full_x', 'was_x', 'local'):
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []
@@ -372,20 +368,11 @@ class SimpleCrystalConverter:
                 for site in d
             ])
             all_nbrs = self._neighbor_lists(d)
-            # HeteroALIGNN's gated convolutions already contain an explicit
-            # root/residual update, so zero-distance self-loops are not needed
-            # to preserve a node's own features.  Keeping those synthetic
-            # edges would also manufacture a ``dd`` relation in single-defect
-            # graphs and make the otherwise empty relation participate in the
-            # relation-wise mean aggregation.  CGCNN keeps its legacy loops;
-            # MEGNet and ALIGNN use only physical periodic-neighbor edges.
-            add_synthetic_self_loops = self.model_family == 'cgcnn'
+            # All heterogeneous backbones already preserve root/node features
+            # internally. Use only physical periodic-neighbor edges so an
+            # otherwise empty relation (especially single-defect ``dd``) stays
+            # empty for CGCNN, MEGNet, and ALIGNN alike.
             for i, nbrs in enumerate(all_nbrs):
-                if add_synthetic_self_loops:
-                    bond_index[0] += [i]
-                    bond_index[1].extend([i])
-                    bond_attr.extend([0.0])
-                    bond_vec.append(np.zeros(3))
                 center = np.asarray(d[i].coords)
                 for j in nbrs:
                     bond_index[0] += [i]

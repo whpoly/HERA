@@ -36,7 +36,24 @@ def _hetero_was_task(task_prefix):
 
 
 def get_configs_2dmd(task_prefix):
-    """Configs for vacancy and 2dmd_high datasets."""
+    """Configs for vacancy, 2dmd_low, and 2dmd_high datasets."""
+    config_sparse = {
+        'task': f'{task_prefix}_sparse',
+        'model': {
+            'train_batch_size': 50,
+            'test_batch_size': 100,
+            'add_z_bond_coord': False,
+            'atom_features': 'werespecies',
+            'state_input_shape': 2,
+            'cutoff': 12,
+            'edge_embed_size': 40,
+            'vertex_aggregation': 'max',
+            'global_aggregation': 'max',
+            'embedding_size': 64,
+            'nblocks': 3,
+        },
+        'optim': _base_optim(),
+    }
     config_full = {
         'task': f'{task_prefix}_full',
         'model': {
@@ -93,6 +110,7 @@ def get_configs_2dmd(task_prefix):
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     return (
+        config_sparse,
         config_full,
         config_hetero,
         config_attention,
@@ -160,6 +178,7 @@ def get_configs_default(task_prefix):
     config_hetero_was = _was_config(config_hetero, _hetero_was_task(task_prefix))
     config_attention_was = _was_config(config_attention, f'{task_prefix}_attention_was')
     return (
+        None,
         config_full,
         config_hetero,
         config_attention,
@@ -172,6 +191,7 @@ def get_configs_default(task_prefix):
 # Maps dataset name -> config generator
 _CONFIG_REGISTRY = {
     'vacancy': get_configs_2dmd,
+    '2dmd_low': get_configs_2dmd,
     '2dmd_high': get_configs_2dmd,
     'native': get_configs_default,
     'och': get_configs_default,
@@ -222,6 +242,7 @@ ALIGNN_DEFINET_TASKS = {
 WAS_MODELS = ('cgcnn', 'megnet', 'alignn')
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 VALID_MODES = [
+    'sparse',
     'full',
     'full_x',
     'hetero',
@@ -266,9 +287,20 @@ def _finalize_config(config, model, dataset):
         config['model']['nblocks'] = ALIGNN_BLOCKS
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
-    if dataset == 'vacancy':
+    if dataset in ('vacancy', '2dmd_low'):
         config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
     elif dataset in ('2dmd_high', 'native'):
+        config['model']['train_batch_size'] = MEMORY_LIMITED_TRAIN_BATCH_SIZE
+    return config
+
+
+def _finalize_sparse_config(config, dataset):
+    """Apply the current training protocol without changing sparse architecture."""
+    config = copy.deepcopy(config)
+    config['model']['test_batch_size'] = DEFAULT_TEST_BATCH_SIZE
+    if dataset in ('vacancy', '2dmd_low'):
+        config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
+    else:
         config['model']['train_batch_size'] = MEMORY_LIMITED_TRAIN_BATCH_SIZE
     return config
 
@@ -279,7 +311,7 @@ def get_config(model: str, dataset: str, mode: str):
     Args:
         model: 'megnet', 'cgcnn', 'definet', or 'alignn'
         dataset: one of VALID_DATASETS
-        mode: one of 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
+        mode: one of 'sparse', 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
             'attention', 'was_x', 'hetero_was', 'attention_was',
             'definet', 'definet_was'
 
@@ -292,6 +324,14 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"Unknown model '{model}'. Choose from {VALID_MODELS}")
     if mode not in VALID_MODES:
         raise ValueError(f"Unknown mode '{mode}'. Choose from {VALID_MODES}")
+    if mode == 'sparse' and (
+            model != 'megnet'
+            or dataset not in ('vacancy', '2dmd_low', '2dmd_high')
+    ):
+        raise ValueError(
+            "The sparse mode is the MEGNET_SPARSE reproduction and is only "
+            "supported for --model megnet on vacancy, 2dmd_low, or 2dmd_high"
+        )
     if mode in CGCNN_DEFINET_MODES and model not in ('cgcnn', 'alignn'):
         raise ValueError("The definet modes are run under --model cgcnn or --model alignn")
     if model == 'definet' and mode not in DEFINET_MODES:
@@ -311,6 +351,7 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError("The attention ablation modes are only supported for cgcnn, megnet, definet, and alignn")
 
     (
+        config_sparse,
         config_full,
         config_hetero,
         config_attention,
@@ -318,6 +359,8 @@ def get_config(model: str, dataset: str, mode: str):
         config_hetero_was,
         config_attention_was,
     ) = _CONFIG_REGISTRY[dataset](model)
+    if mode == 'sparse':
+        return _finalize_sparse_config(config_sparse, dataset)
     if mode in CGCNN_DEFINET_MODES:
         return _finalize_config(
             _definet_attention_config(config_attention, mode, model),

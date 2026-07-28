@@ -239,7 +239,13 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task in ('megnet_full', 'megnet_full_x', 'megnet_local', 'megnet_was_x'):
+        if task in (
+                'megnet_sparse',
+                'megnet_full',
+                'megnet_full_x',
+                'megnet_local',
+                'megnet_was_x',
+        ):
             self.model = MEGNet(
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),

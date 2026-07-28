@@ -42,16 +42,17 @@ class ModelConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(model["test_batch_size"], 1)
         self.assertEqual(model["max_neighbors"], 12)
 
-    def test_only_vacancy_uses_batch_size_eight_for_all_models(self):
-        for model_name, mode in (
-            ("cgcnn", "full"),
-            ("megnet", "full"),
-            ("alignn", "full"),
-            ("definet", "attention"),
-        ):
-            with self.subTest(model=model_name):
-                model = get_config(model_name, "vacancy", mode)["model"]
-                self.assertEqual(model["train_batch_size"], 8)
+    def test_low_density_vacancy_datasets_use_batch_size_eight(self):
+        for dataset in ("vacancy", "2dmd_low"):
+            for model_name, mode in (
+                ("cgcnn", "full"),
+                ("megnet", "full"),
+                ("alignn", "full"),
+                ("definet", "attention"),
+            ):
+                with self.subTest(dataset=dataset, model=model_name):
+                    model = get_config(model_name, dataset, mode)["model"]
+                    self.assertEqual(model["train_batch_size"], 8)
 
     def test_memory_limited_datasets_use_batch_size_sixteen(self):
         for dataset in ("2dmd_high", "native"):

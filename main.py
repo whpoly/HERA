@@ -8,6 +8,9 @@ Usage examples:
   # Train MEGNet on vacancy dataset with the default modes
   python -m HERA.main --model megnet --dataset vacancy
 
+  # Reproduce MEGNET_SPARSE with the current training protocol on both datasets
+  python -m HERA.main --model megnet --dataset vacancy 2dmd_high --mode sparse --seed 123
+
   # Run every configured dataset/mode/radius for MEGNet, CGCNN, and ALIGNN
   python -m HERA.main --model all --dataset all --mode all --r all
 
@@ -22,9 +25,9 @@ Usage examples:
 
 Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, all
-  Modes   : full, full_x, hetero, hetero_fixed_pool, attention,
+  Modes   : sparse, full, full_x, hetero, hetero_fixed_pool, attention,
             was_x, hetero_was, attention_was, definet, definet_was, all
-  Datasets: vacancy, 2dmd_high, native, och, imp2d, semi, all
+  Datasets: vacancy, 2dmd_low, 2dmd_high, native, och, imp2d, semi, all
 """
 
 import argparse
@@ -89,7 +92,12 @@ ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 ATTENTION_ABLATION_MODES = (
     'attention_was',
 )
-FULL_X_DISTINCT_DATASETS = frozenset(('vacancy', '2dmd_high', 'native'))
+FULL_X_DISTINCT_DATASETS = frozenset(
+    ('vacancy', '2dmd_low', '2dmd_high', 'native')
+)
+MEGNET_SPARSE_DATASETS = frozenset(
+    ('vacancy', '2dmd_low', '2dmd_high')
+)
 CGCNN_DEFAULT_MODES = [
     'full',
     'full_x',
@@ -571,6 +579,11 @@ def default_modes_for_model(model_name):
 
 
 def validate_modes_for_model(model_name, modes, parser):
+    if model_name != 'megnet' and 'sparse' in modes:
+        parser.error(
+            'The sparse mode is the MEGNET_SPARSE reproduction and only '
+            'supports --model megnet'
+        )
     if model_name not in DEFINET_HOST_MODELS and any(mode in CGCNN_DEFINET_MODES for mode in modes):
         parser.error('The definet modes are run under --model cgcnn or --model alignn')
     if model_name == 'definet' and any(mode not in DEFINET_MODES for mode in modes):
@@ -597,10 +610,16 @@ def resolve_modes(requested_modes, model_name, parser):
 
 
 def modes_for_dataset(modes, dataset_name):
-    """Avoid duplicate full/full_x benchmarks when a dataset has no vacancies."""
-    if dataset_name in FULL_X_DISTINCT_DATASETS or not {'full', 'full_x'} <= set(modes):
-        return list(modes)
-    return [mode for mode in modes if mode != 'full_x']
+    """Drop model modes that are not meaningful for a selected dataset."""
+    dataset_modes = list(modes)
+    if dataset_name not in MEGNET_SPARSE_DATASETS:
+        dataset_modes = [mode for mode in dataset_modes if mode != 'sparse']
+    if (
+            dataset_name not in FULL_X_DISTINCT_DATASETS
+            and {'full', 'full_x'} <= set(dataset_modes)
+    ):
+        dataset_modes = [mode for mode in dataset_modes if mode != 'full_x']
+    return dataset_modes
 
 
 def parse_radius_values(raw_values, parser):
@@ -656,8 +675,13 @@ def main():
     )
     parser.add_argument('--model', required=True, choices=VALID_MODELS + ['all'],
                         help='Model architecture: megnet, cgcnn, definet, alignn, or all')
-    parser.add_argument('--dataset', required=True, choices=VALID_DATASETS + ['all'],
-                        help='Dataset to use, or all for every dataset')
+    parser.add_argument(
+        '--dataset',
+        required=True,
+        nargs='+',
+        choices=VALID_DATASETS + ['all'],
+        help='One or more datasets to use, or all for every dataset',
+    )
     parser.add_argument('--mode', nargs='+', default=None, choices=VALID_MODES + ['all'],
                         help='Graph mode(s) to train. Use all for all modes supported by each model')
     parser.add_argument('--device', default='cuda:0',
@@ -773,13 +797,33 @@ def main():
     set_seed(args.seeds[0])
 
     model_names = list(ALL_MODEL_SUITES) if args.model == 'all' else [args.model]
-    dataset_names = VALID_DATASETS if args.dataset == 'all' else [args.dataset]
+    if 'all' in args.dataset:
+        if len(args.dataset) != 1:
+            parser.error('--dataset all cannot be combined with specific datasets')
+        dataset_names = list(VALID_DATASETS)
+    else:
+        dataset_names = list(dict.fromkeys(args.dataset))
     requested_modes = args.mode
+    if (
+            requested_modes is not None
+            and 'sparse' in requested_modes
+            and any(
+                dataset_name not in MEGNET_SPARSE_DATASETS
+                for dataset_name in dataset_names
+            )
+    ):
+        parser.error(
+            'The sparse mode is only defined for vacancy, 2dmd_low, and '
+            '2dmd_high'
+        )
 
     init_elem_embedding(args.atom_init)
 
     mode_label = 'all' if requested_modes is None or requested_modes == ['all'] else requested_modes
-    print(f'=== Model: {args.model} | Dataset: {args.dataset} | Modes: {mode_label} ===')
+    print(
+        f'=== Model: {args.model} | Datasets: {dataset_names} | '
+        f'Modes: {mode_label} ==='
+    )
     print(f'    Device: {args.device} | Epochs: {args.epochs} | {split_run_summary(args.seeds, args.cv5)}')
     print()
 
@@ -819,7 +863,18 @@ def main():
             print(f'  Dataset: {dataset_name}')
             print(f'{"#" * 60}')
             if dataset_modes != modes:
-                print('  Skipping FULL_X: this dataset has no vacancies, so it is identical to FULL.')
+                skipped_modes = set(modes) - set(dataset_modes)
+                if 'sparse' in skipped_modes:
+                    print(
+                        '  Skipping SPARSE: the MEGNET_SPARSE '
+                        'representation is only defined for vacancy, '
+                        '2dmd_low, and 2dmd_high.'
+                    )
+                if 'full_x' in skipped_modes:
+                    print(
+                        '  Skipping FULL_X: this dataset has no vacancies, '
+                        'so it is identical to FULL.'
+                    )
 
             dataset_cache = {}
 
@@ -960,8 +1015,8 @@ def main():
                 return train_single_mode(
                     train_mode,
                     config,
-                    run_dataset[:3],
-                    run_dataset[3],
+                    run_dataset[:-1],
+                    run_dataset[-1],
                     selected_seeds,
                     args.epochs,
                     args.device,
