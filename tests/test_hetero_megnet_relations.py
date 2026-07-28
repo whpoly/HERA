@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from HERA.models.modules import HeteroMegnetLayer
+from HERA.models.modules import HeteroMegnetLayer, RelationFusionUpdate
 
 
 METADATA = (
@@ -29,14 +29,47 @@ class HeteroMegnetRelationTests(unittest.TestCase):
             inner_skip=True,
         )
 
-    def test_ad_and_da_share_one_megnet_module(self):
+    def test_ad_and_da_use_distinct_megnet_modules(self):
         layer = self.make_layer()
         ad_key = layer.relation_module_keys[("atom", "ad", "defect")]
         da_key = layer.relation_module_keys[("defect", "da", "atom")]
 
-        self.assertEqual(ad_key, da_key)
-        self.assertIs(layer.megnets[ad_key], layer.megnets[da_key])
-        self.assertEqual(len(layer.megnets), 3)
+        self.assertNotEqual(ad_key, da_key)
+        self.assertIsNot(layer.megnets[ad_key], layer.megnets[da_key])
+        self.assertEqual(len(layer.megnets), 4)
+        self.assertEqual(
+            layer.incoming_edge_types["atom"],
+            [
+                ("atom", "aa", "atom"),
+                ("defect", "da", "atom"),
+            ],
+        )
+        self.assertEqual(
+            layer.incoming_edge_types["defect"],
+            [
+                ("atom", "ad", "defect"),
+                ("defect", "dd", "defect"),
+            ],
+        )
+
+    def test_relation_fusion_preserves_ordered_slots(self):
+        fusion = RelationFusionUpdate(channels=2, num_relations=2)
+        captured = []
+        handle = fusion.ffn[0].register_forward_pre_hook(
+            lambda _module, inputs: captured.append(inputs[0].detach().clone())
+        )
+        root = torch.tensor([[1.0, 2.0]])
+        first_relation = torch.tensor([[3.0, 4.0]])
+        second_relation = torch.tensor([[5.0, 6.0]])
+
+        fusion(root, [first_relation, second_relation])
+        handle.remove()
+
+        self.assertEqual(len(captured), 1)
+        self.assertTrue(torch.equal(
+            captured[0],
+            torch.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]),
+        ))
 
     def test_empty_dd_relation_does_not_train_its_module(self):
         layer = self.make_layer()

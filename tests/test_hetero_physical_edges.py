@@ -63,32 +63,74 @@ class HeteroPhysicalEdgeTests(unittest.TestCase):
         self.assertEqual(edge_counts["cgcnn"], edge_counts["megnet"])
         self.assertEqual(edge_counts["cgcnn"], edge_counts["alignn"])
 
-    def test_cgcnn_forward_handles_an_empty_dd_relation(self):
+    def test_cgcnn_ad_and_da_use_distinct_convolutions(self):
+        trainer = MEGNetTrainer(
+            get_config("cgcnn", "imp2d", "hetero"),
+            "cpu",
+            seed=123,
+        )
+        conv = trainer.model.base_model.convs[0]
+        ad_conv = conv["atom__ad__defect"]
+        da_conv = conv["defect__da__atom"]
+
+        self.assertEqual(
+            trainer.model.base_model.incoming_edge_types["atom"],
+            [
+                ("atom", "aa", "atom"),
+                ("defect", "da", "atom"),
+            ],
+        )
+        self.assertEqual(
+            trainer.model.base_model.incoming_edge_types["defect"],
+            [
+                ("atom", "ad", "defect"),
+                ("defect", "dd", "defect"),
+            ],
+        )
+        self.assertIsNot(ad_conv, da_conv)
+        self.assertIsNot(
+            next(ad_conv.parameters()),
+            next(da_conv.parameters()),
+        )
+
+    def test_all_backbones_forward_with_an_empty_dd_relation(self):
         original_embedding = datasets.elem_embedding
         datasets.elem_embedding = {
             1: [0.0] * 92,
             14: [0.0] * 92,
         }
         try:
-            trainer = MEGNetTrainer(
-                get_config("cgcnn", "imp2d", "hetero"),
-                "cpu",
-                seed=123,
-            )
-            graph = trainer.converter.convert(
-                self.make_single_defect_structure()
-            )
-            self.assertEqual(
-                graph[("defect", "dd", "defect")].edge_index.size(1),
-                0,
-            )
+            for model_name in ("cgcnn", "megnet", "alignn"):
+                with self.subTest(model=model_name):
+                    trainer = MEGNetTrainer(
+                        get_config(model_name, "imp2d", "hetero"),
+                        "cpu",
+                        seed=123,
+                    )
+                    graph = trainer.converter.convert(
+                        self.make_single_defect_structure()
+                    )
+                    self.assertEqual(
+                        graph[("defect", "dd", "defect")].edge_index.size(1),
+                        0,
+                    )
 
-            batch = next(iter(DataLoader([graph], batch_size=1)))
-            trainer.model.eval()
-            with torch.no_grad():
-                prediction = trainer._forward(batch)
-            self.assertEqual(tuple(prediction.shape), (1,))
-            self.assertTrue(torch.isfinite(prediction).all())
+                    batch = next(iter(DataLoader([graph], batch_size=1)))
+                    trainer.model.train()
+                    prediction = trainer._forward(batch)
+                    self.assertEqual(tuple(prediction.shape), (1,))
+                    self.assertTrue(torch.isfinite(prediction).all())
+                    prediction.sum().backward()
+                    gradients = [
+                        parameter.grad
+                        for parameter in trainer.model.parameters()
+                        if parameter.grad is not None
+                    ]
+                    self.assertTrue(gradients)
+                    self.assertTrue(all(
+                        torch.isfinite(gradient).all()
+                        for gradient in gradients
+                    ))
         finally:
             datasets.elem_embedding = original_embedding
 

@@ -315,13 +315,21 @@ because the backbones already preserve root/node features internally.
 Consequently, a single-defect graph with no physical defect-defect bond keeps
 the `dd` edge store empty for every backbone.
 The directed `ad` and `da` edge stores are both retained for message routing,
-but they share one reciprocal host-defect edge embedding and one convolutional
-network at every HeteroALIGNN/GCN layer.
-Relation messages are combined per destination node using their accumulated
-ALIGNN gate weights. A relation contributes only to nodes with real incoming
-edges of that type, and atom/defect nodes each receive one self/root update
-after all of their incoming relation messages have been combined. This avoids
-cross-graph leakage from relation types that occur elsewhere in a mixed batch.
+and use separate learnable edge embeddings and convolutional networks at every
+HeteroALIGNN graph-convolution layer. HeteroMEGNet likewise uses a separate
+MEGNet module for each direction. HeteroCGCNN also uses separate modules for
+all four directed relation types.
+Each heterogeneous backbone aggregates neighbors within each relation first
+and preserves those relation-wise aggregates in separate slots. A
+node-type-specific FFN then fuses the root state with its incoming slots; no
+cross-relation sum or mean is applied before this update. Missing relation
+slots are represented by zeros. The host FFN receives `[root, HH, HD]`
+(`aa`, `da` in source-to-destination edge naming), while the defect FFN
+receives `[root, DH, DD]` (`ad`, `dd`).
+Within each ALIGNN relation, gated messages are normalized only by that
+relation's accumulated gate weights. This preserves relation identity and
+avoids cross-graph leakage from relation types that occur elsewhere in a mixed
+batch.
 
 For a controlled comparison with DefiNetALIGNN, HeteroALIGNN has no learned
 global graph feature and does not pool edge embeddings into its prediction

@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from torch.utils.data import WeightedRandomSampler
-from torch_geometric.nn import to_hetero
 
 from ..data.converters import (
     SimpleCrystalConverter,
@@ -15,7 +14,13 @@ from ..data.converters import (
     AtomFeaturesExtractor,
 )
 from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
-from ..models.cgcnn import CGCNN, CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN, DefiNet
+from ..models.cgcnn import (
+    CGCNN,
+    HeteroCrystalGraphConvNet,
+    Heterocgcnn,
+    AttentionCGCNN,
+    DefiNet,
+)
 from ..models.alignn import (
     ALIGNN,
     HeteroALIGNN,
@@ -272,16 +277,16 @@ class MEGNetTrainer:
                 fixed_pooling=self.config["model"].get("fixed_pooling", False),
             ).to(self.device)
         elif task in CGCNN_HETERO_TASKS:
-            model = CrystalGraphConvNet(
+            model = HeteroCrystalGraphConvNet(
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
+                metadata=(['atom', 'defect'],
+                          [('atom', 'aa', 'atom'),
+                           ('defect', 'dd', 'defect'),
+                           ('atom', 'ad', 'defect'),
+                           ('defect', 'da', 'atom')]),
                 n_conv=self.config['model']['nblocks'],
             )
-            model = to_hetero(model, metadata=(['atom', 'defect'],
-                                                [('atom', 'aa', 'atom'),
-                                                 ('defect', 'dd', 'defect'),
-                                                 ('atom', 'ad', 'defect'),
-                                                 ('defect', 'da', 'atom')]), aggr='mean')
             self.model = Heterocgcnn(
                 model,
                 orig_atom_fea_len=atom_converter.get_shape(),

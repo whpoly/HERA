@@ -146,6 +146,30 @@ class MegnetModule(MessagePassing):
 #  Heterogeneous MEGNet layer
 # ------------------------------------------------------------------ #
 
+class RelationFusionUpdate(nn.Module):
+    """Fuse relation-wise aggregates without summing relation channels."""
+
+    def __init__(self, channels, num_relations):
+        super().__init__()
+        self.channels = channels
+        self.num_relations = num_relations
+        self.ffn = nn.Sequential(
+            nn.Linear((num_relations + 1) * channels, 2 * channels),
+            nn.SiLU(),
+            nn.Linear(2 * channels, channels),
+        )
+
+    def forward(self, x, relation_inputs):
+        if len(relation_inputs) != self.num_relations:
+            raise ValueError(
+                f"Expected {self.num_relations} relation inputs, "
+                f"got {len(relation_inputs)}"
+            )
+        if x.size(0) == 0:
+            return x
+        return x + self.ffn(torch.cat([x, *relation_inputs], dim=-1))
+
+
 class HeteroMegnetLayer(nn.Module):
     def __init__(self,
                  edge_input_shape,
@@ -165,28 +189,43 @@ class HeteroMegnetLayer(nn.Module):
         self.megnets = nn.ModuleDict()
         self.relation_module_keys = {}
         for etype in self.edge_types:
-            src, relation, dst = etype
-            if relation in ('ad', 'da') and src != dst:
-                endpoint_pair = '__'.join(sorted((src, dst)))
-                module_key = f'{endpoint_pair}__ad_da_shared'
-            else:
-                module_key = '__'.join(etype)
+            module_key = '__'.join(etype)
             self.relation_module_keys[etype] = module_key
-            if module_key not in self.megnets:
-                self.megnets[module_key] = MegnetModule(
-                    edge_input_shape=edge_input_shape,
-                    node_input_shape=node_input_shape,
-                    state_input_shape=state_input_shape,
-                    embed_size=embedding_size,
-                    vertex_aggregation=vertex_aggregation,
-                    global_aggregation=global_aggregation,
-                    inner_skip=inner_skip,
-                )
+            self.megnets[module_key] = MegnetModule(
+                edge_input_shape=edge_input_shape,
+                node_input_shape=node_input_shape,
+                state_input_shape=state_input_shape,
+                embed_size=embedding_size,
+                vertex_aggregation=vertex_aggregation,
+                global_aggregation=global_aggregation,
+                inner_skip=inner_skip,
+            )
         self.node_fallbacks = nn.ModuleDict({
             ntype: self._make_fallback(node_input_shape, embedding_size)
             for ntype in self.node_types
         })
         self.state_fallback = self._make_fallback(state_input_shape, embedding_size)
+        node_type_order = {
+            ntype: index for index, ntype in enumerate(self.node_types)
+        }
+        self.incoming_edge_types = {
+            ntype: sorted(
+                (etype for etype in self.edge_types if etype[2] == ntype),
+                key=lambda etype: node_type_order[etype[0]],
+            )
+            for ntype in self.node_types
+        }
+        self.node_updates = nn.ModuleDict({
+            ntype: RelationFusionUpdate(
+                embedding_size,
+                len(self.incoming_edge_types[ntype]),
+            )
+            for ntype in self.node_types
+        })
+        self.state_update = RelationFusionUpdate(
+            embedding_size,
+            len(self.edge_types),
+        )
 
     @staticmethod
     def _make_fallback(input_shape, embedding_size):
@@ -198,9 +237,8 @@ class HeteroMegnetLayer(nn.Module):
         )
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, state, batch_dict, bond_batch_dict):
-        out_dict = {ntype: [] for ntype in x_dict}
-        state_sum = None
-        state_count = state.new_zeros((state.size(0), 1))
+        relation_outs = {}
+        state_relation_outs = []
         fallback_state = self.state_fallback(state)
         edge_out_dict = {}
         for etype in self.edge_types:
@@ -212,6 +250,12 @@ class HeteroMegnetLayer(nn.Module):
                     or edge_index_dict[etype].size(1) == 0
             ):
                 edge_out_dict[etype] = edge_attr_dict[etype].new_empty((0, self.embedding_size))
+                relation_outs[etype] = x_dict[dst].new_zeros(
+                    (x_dict[dst].size(0), self.embedding_size)
+                )
+                state_relation_outs.append(
+                    state.new_zeros((state.size(0), self.embedding_size))
+                )
                 continue
             if src != dst:
                 src_count = x_dict[src].size(0)
@@ -229,39 +273,41 @@ class HeteroMegnetLayer(nn.Module):
 
             edge_attr = edge_attr_dict[etype]
             bond_batch = bond_batch_dict[etype]
-            x_out, edge_attr_out, state_out = self.megnets[module_key](
+            relation_module = self.megnets[module_key]
+            x_out, edge_attr_out, state_out = relation_module(
                 x_input, edge_index, edge_attr, state, batch, bond_batch
             )
-            x_dst = x_out[dst_slice, :]
-            out_dict[dst].append(x_dst)
+            if relation_module.inner_skip:
+                node_root = relation_module.preprocess_v(x_input)[dst_slice, :]
+                state_root = relation_module.preprocess_u(state)
+            else:
+                node_root = x_input[dst_slice, :]
+                state_root = state
+            relation_outs[etype] = x_out[dst_slice, :] - node_root
             edge_out_dict[etype] = edge_attr_out
-            if state_sum is None:
-                state_sum = state_out.new_zeros(state_out.shape)
+
+            state_relation = state_out.new_zeros(state_out.shape)
             present_graphs = bond_batch.unique()
             present_graphs = present_graphs[
                 (present_graphs >= 0) & (present_graphs < state.size(0))
             ]
             if present_graphs.numel() > 0:
-                state_sum[present_graphs] += state_out[present_graphs]
-                state_count[present_graphs] += 1
+                state_relation[present_graphs] = (
+                    state_out[present_graphs] - state_root[present_graphs]
+                )
+            state_relation_outs.append(state_relation)
 
         agg_dict = {}
-        for ntype, outs in out_dict.items():
-            if len(outs) == 0:
-                agg_dict[ntype] = self.node_fallbacks[ntype](x_dict[ntype])
-            elif len(outs) == 1:
-                agg_dict[ntype] = outs[0]
-            else:
-                agg_dict[ntype] = torch.stack(outs, dim=0).mean(dim=0)
-
-        if state_sum is None or torch.count_nonzero(state_count) == 0:
-            state_new = fallback_state
-        else:
-            state_new = torch.where(
-                state_count > 0,
-                state_sum / state_count.clamp_min(1),
-                fallback_state,
+        for ntype in self.node_types:
+            root = self.node_fallbacks[ntype](x_dict[ntype])
+            agg_dict[ntype] = self.node_updates[ntype](
+                root,
+                [
+                    relation_outs[etype]
+                    for etype in self.incoming_edge_types[ntype]
+                ],
             )
+        state_new = self.state_update(fallback_state, state_relation_outs)
         return agg_dict, edge_out_dict, state_new
 
 

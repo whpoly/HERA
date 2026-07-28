@@ -11,6 +11,7 @@ from torch_geometric.nn import MessagePassing
 from .modules import (
     AtomTypeGlobalAttentionReadout,
     DefectAwareGateConv,
+    RelationFusionUpdate,
 )
 
 
@@ -19,14 +20,7 @@ def _edge_type_key(edge_type):
 
 
 def _edge_parameter_key(edge_type):
-    """Return the parameter-sharing key for a heterogeneous edge type.
-
-    Atom-to-defect and defect-to-atom edges keep separate directed topology,
-    but use the same learnable interaction because they describe reciprocal
-    directions of the same host-defect bond.
-    """
-    if edge_type[1] in {"ad", "da"}:
-        return "atom__ad_da__defect"
+    """Return a distinct parameter key for each directed edge type."""
     return _edge_type_key(edge_type)
 
 
@@ -314,9 +308,8 @@ class HeteroRelationConv(nn.Module):
     """Relation-specific gated messages without a relation-local root update.
 
     Each relation returns the numerator and gate normalization required by the
-    ALIGNN update.  Callers combine those tensors per destination node across
-    only the relations that actually have incoming edges, then apply one
-    node-type self/root update.
+    ALIGNN update. Callers normalize each relation independently and preserve
+    the result in a separate slot for the node-type-specific fusion FFN.
     """
 
     def __init__(self, channels, edge_dim):
@@ -359,18 +352,14 @@ class HeteroRelationConv(nn.Module):
 
 
 class HeteroNodeUpdate(nn.Module):
-    """Apply one self/root update after all incoming relations are combined."""
+    """Fuse incoming relation slots with a node-type-specific FFN."""
 
-    def __init__(self, channels):
+    def __init__(self, channels, num_relations):
         super().__init__()
-        self.self_update = nn.Linear(channels, channels)
-        self.bn = SafeBatchNorm1d(channels)
+        self.fusion = RelationFusionUpdate(channels, num_relations)
 
-    def forward(self, x, incoming):
-        if x.size(0) == 0:
-            return x
-        update = self.self_update(x) + incoming
-        return x + F.silu(self.bn(update))
+    def forward(self, x, incoming_by_relation):
+        return self.fusion(x, incoming_by_relation)
 
 
 def _hetero_relation_update(
@@ -382,15 +371,8 @@ def _hetero_relation_update(
         relation_convs,
         node_updates,
 ):
-    """Combine all incoming relation gates before updating each node type."""
-    message_sums = {
-        node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
-        for node_type in node_types
-    }
-    gate_sums = {
-        node_type: x_dict[node_type].new_zeros(x_dict[node_type].shape)
-        for node_type in node_types
-    }
+    """Aggregate each relation independently, then fuse fixed relation slots."""
+    incoming_by_edge_type = {}
     out_edge_attr = {}
 
     for edge_type in edge_types:
@@ -402,14 +384,31 @@ def _hetero_relation_update(
             edge_index_dict[edge_type],
             edge_attr_dict[edge_type],
         )
-        message_sums[dst_type] = message_sums[dst_type] + message_sum
-        gate_sums[dst_type] = gate_sums[dst_type] + gate_sum
+        incoming_by_edge_type[edge_type] = (
+            message_sum / (gate_sum + 1e-6)
+        )
         out_edge_attr[edge_type] = edge_update
 
     out_dict = {}
+    node_type_order = {
+        node_type: index for index, node_type in enumerate(node_types)
+    }
     for node_type in node_types:
-        incoming = message_sums[node_type] / (gate_sums[node_type] + 1e-6)
-        out_dict[node_type] = node_updates[node_type](x_dict[node_type], incoming)
+        incoming_edge_types = sorted(
+            (
+                edge_type
+                for edge_type in edge_types
+                if edge_type[2] == node_type
+            ),
+            key=lambda edge_type: node_type_order[edge_type[0]],
+        )
+        out_dict[node_type] = node_updates[node_type](
+            x_dict[node_type],
+            [
+                incoming_by_edge_type[edge_type]
+                for edge_type in incoming_edge_types
+            ],
+        )
     return out_dict, out_edge_attr
 
 
@@ -587,7 +586,10 @@ class HeteroALIGNNLayer(nn.Module):
             )
         })
         self.node_updates = nn.ModuleDict({
-            node_type: HeteroNodeUpdate(hidden_dim)
+            node_type: HeteroNodeUpdate(
+                hidden_dim,
+                sum(edge_type[2] == node_type for edge_type in self.edge_types),
+            )
             for node_type in self.node_types
         })
 
@@ -636,7 +638,10 @@ class HeteroGraphConvLayer(nn.Module):
             )
         })
         self.node_updates = nn.ModuleDict({
-            node_type: HeteroNodeUpdate(hidden_dim)
+            node_type: HeteroNodeUpdate(
+                hidden_dim,
+                sum(edge_type[2] == node_type for edge_type in self.edge_types),
+            )
             for node_type in self.node_types
         })
 

@@ -9,6 +9,7 @@ from .modules import (
     AttentionCGConv,
     AtomTypeGlobalAttentionReadout,
     DefectAwareGateConv,
+    RelationFusionUpdate,
     ShiftedSoftplus,
 )
 
@@ -77,6 +78,122 @@ class CrystalGraphConvNet(nn.Module):
         for conv_func in self.convs:
             atom_fea = conv_func(x=atom_fea, edge_index=edge_index, edge_attr=edge_attr)
         return atom_fea
+
+
+class CGCNNRelationConv(nn.Module):
+    """CGCNN message function with mean aggregation inside one relation."""
+
+    def __init__(self, channels, edge_dim):
+        super().__init__()
+        message_input_dim = 2 * channels + edge_dim
+        self.channels = channels
+        self.lin_filter = nn.Linear(message_input_dim, channels)
+        self.lin_core = nn.Linear(message_input_dim, channels)
+
+    def forward(self, x, edge_index, edge_attr):
+        x_src, x_dst = x
+        out = x_dst.new_zeros((x_dst.size(0), self.channels))
+        if x_src.size(0) == 0 or x_dst.size(0) == 0 or edge_index.size(1) == 0:
+            return out
+
+        src, dst = edge_index
+        z = torch.cat((x_dst[dst], x_src[src], edge_attr), dim=-1)
+        messages = torch.sigmoid(self.lin_filter(z)) * F.softplus(self.lin_core(z))
+        out.index_add_(0, dst, messages)
+
+        counts = out.new_zeros((x_dst.size(0), 1))
+        counts.index_add_(
+            0,
+            dst,
+            out.new_ones((dst.size(0), 1)),
+        )
+        return out / counts.clamp_min(1)
+
+
+class HeteroCrystalGraphConvNet(nn.Module):
+    """Relation-preserving heterogeneous CGCNN backbone.
+
+    Incoming relations are mean-aggregated independently. A node-type-specific
+    FFN then fuses the root state and the fixed relation slots.
+    """
+
+    def __init__(
+            self,
+            orig_atom_fea_len,
+            nbr_fea_len,
+            metadata,
+            atom_fea_len=64,
+            n_conv=3,
+    ):
+        super().__init__()
+        self.node_types = tuple(metadata[0])
+        self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
+        node_type_order = {
+            node_type: index for index, node_type in enumerate(self.node_types)
+        }
+        self.incoming_edge_types = {
+            node_type: sorted(
+                (
+                    edge_type
+                    for edge_type in self.edge_types
+                    if edge_type[2] == node_type
+                ),
+                key=lambda edge_type: node_type_order[edge_type[0]],
+            )
+            for node_type in self.node_types
+        }
+        self.embedding = nn.ModuleDict({
+            node_type: nn.Linear(orig_atom_fea_len, atom_fea_len)
+            for node_type in self.node_types
+        })
+        self.convs = nn.ModuleList([
+            nn.ModuleDict({
+                "__".join(edge_type): CGCNNRelationConv(
+                    atom_fea_len,
+                    nbr_fea_len,
+                )
+                for edge_type in self.edge_types
+            })
+            for _ in range(n_conv)
+        ])
+        self.node_updates = nn.ModuleList([
+            nn.ModuleDict({
+                node_type: RelationFusionUpdate(
+                    atom_fea_len,
+                    len(self.incoming_edge_types[node_type]),
+                )
+                for node_type in self.node_types
+            })
+            for _ in range(n_conv)
+        ])
+
+    def forward(self, x, edge_index, edge_attr, batch=None):
+        x = {
+            node_type: self.embedding[node_type](x[node_type].float())
+            for node_type in self.node_types
+        }
+        for relation_convs, node_updates in zip(self.convs, self.node_updates):
+            incoming_by_edge_type = {}
+            for edge_type in self.edge_types:
+                src_type, _, dst_type = edge_type
+                incoming_by_edge_type[edge_type] = (
+                    relation_convs["__".join(edge_type)](
+                        (x[src_type], x[dst_type]),
+                        edge_index[edge_type],
+                        edge_attr[edge_type],
+                    )
+                )
+            x = {
+                node_type: node_updates[node_type](
+                    x[node_type],
+                    [
+                        incoming_by_edge_type[edge_type]
+                        for edge_type in self.incoming_edge_types[node_type]
+                    ],
+                )
+                for node_type in self.node_types
+            }
+        return x
 
 
 class Heterocgcnn(nn.Module):
