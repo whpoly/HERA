@@ -3,9 +3,30 @@ from unittest.mock import ANY, call, patch
 
 from HERA.config.defaults import VALID_DATASETS, get_config
 from HERA.data.datasets import load_data_2dmd_low
+from HERA.main import default_modes_for_model, modes_for_dataset
 
 
 class TwoDMDLowDatasetTests(unittest.TestCase):
+    def test_megnet_sparse_runs_first_for_all_2dmd_datasets(self):
+        default_modes = default_modes_for_model("megnet")
+        self.assertEqual(default_modes[0], "sparse")
+
+        for dataset in ("vacancy", "2dmd_low", "2dmd_high"):
+            with self.subTest(dataset=dataset):
+                self.assertEqual(
+                    modes_for_dataset(default_modes, dataset)[0],
+                    "sparse",
+                )
+                self.assertEqual(
+                    modes_for_dataset(
+                        ["full", "attention", "sparse"],
+                        dataset,
+                    ),
+                    ["sparse", "full", "attention"],
+                )
+
+        self.assertNotIn("sparse", modes_for_dataset(default_modes, "och"))
+
     def test_dataset_is_registered_with_low_density_batch_defaults(self):
         self.assertIn("2dmd_low", VALID_DATASETS)
         self.assertEqual(

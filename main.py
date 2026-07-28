@@ -111,6 +111,7 @@ CGCNN_DEFAULT_MODES = [
     'definet_was',
 ]
 MEGNET_DEFAULT_MODES = [
+    'sparse',
     'full',
     'full_x',
     'hetero',
@@ -614,6 +615,11 @@ def modes_for_dataset(modes, dataset_name):
     dataset_modes = list(modes)
     if dataset_name not in MEGNET_SPARSE_DATASETS:
         dataset_modes = [mode for mode in dataset_modes if mode != 'sparse']
+    elif 'sparse' in dataset_modes:
+        dataset_modes = [
+            'sparse',
+            *(mode for mode in dataset_modes if mode != 'sparse'),
+        ]
     if (
             dataset_name not in FULL_X_DISTINCT_DATASETS
             and {'full', 'full_x'} <= set(dataset_modes)

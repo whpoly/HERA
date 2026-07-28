@@ -82,6 +82,9 @@ Common arguments:
   is completed for one seed before the next seed starts. Each mode still writes
   to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
   checkpoints, summaries, and `--resume` remain mode-specific.
+- MEGNet runs `sparse` first for the `vacancy`, `2dmd_low`, and `2dmd_high`
+  benchmarks, including when `sparse` appears later in an explicit `--mode`
+  list. Other datasets do not run the sparse representation.
 - `--dataset`: one or more dataset names, or `all` to run every dataset
 - `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
