@@ -285,12 +285,14 @@ class MEGNetTrainer:
                            ('defect', 'dd', 'defect'),
                            ('atom', 'ad', 'defect'),
                            ('defect', 'da', 'atom')]),
+                atom_fea_len=self.config['model']['embedding_size'],
                 n_conv=self.config['model']['nblocks'],
             )
             self.model = Heterocgcnn(
                 model,
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
+                atom_fea_len=self.config['model']['embedding_size'],
                 n_h=3,
                 fixed_pooling=self.config["model"].get("fixed_pooling", False),
             ).to(self.device)

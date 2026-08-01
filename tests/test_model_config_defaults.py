@@ -25,7 +25,7 @@ class ModelConfigDefaultsTests(unittest.TestCase):
                 self.assertEqual(model["max_neighbors"], 12)
                 self.assertEqual(model["test_batch_size"], 1)
 
-    def test_megnet_capacity_is_matched_by_representation(self):
+    def test_megnet_uses_representation_specific_hidden_sizes(self):
         for mode in ("full", "full_x", "attention", "was_x", "attention_was"):
             with self.subTest(mode=mode):
                 model = get_config("megnet", "och", mode)["model"]
@@ -34,13 +34,26 @@ class ModelConfigDefaultsTests(unittest.TestCase):
         for mode in ("hetero", "hetero_fixed_pool", "hetero_was"):
             with self.subTest(mode=mode):
                 model = get_config("megnet", "och", mode)["model"]
-                self.assertEqual(model["embedding_size"], 32)
+                self.assertEqual(model["embedding_size"], 16)
 
     def test_alignn_memory_specific_defaults_are_unchanged(self):
         model = get_config("alignn", "och", "full")["model"]
         self.assertEqual(model["train_batch_size"], 64)
         self.assertEqual(model["test_batch_size"], 1)
         self.assertEqual(model["max_neighbors"], 12)
+
+    def test_alignn_and_cgcnn_heterogeneous_backbones_use_hidden_size_thirty_two(self):
+        for model_name in ("alignn", "cgcnn"):
+            for mode in ("hetero", "hetero_fixed_pool", "hetero_was"):
+                with self.subTest(model=model_name, mode=mode):
+                    model = get_config(model_name, "imp2d", mode)["model"]
+                    self.assertEqual(model["embedding_size"], 32)
+
+    def test_nonheterogeneous_alignn_capacity_is_unchanged(self):
+        for mode in ("full", "full_x", "attention", "definet"):
+            with self.subTest(mode=mode):
+                model = get_config("alignn", "imp2d", mode)["model"]
+                self.assertEqual(model["embedding_size"], 64)
 
     def test_low_density_vacancy_datasets_use_batch_size_eight(self):
         for dataset in ("vacancy", "2dmd_low"):

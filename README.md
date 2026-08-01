@@ -309,6 +309,12 @@ HeteroALIGNN uses one shared geometric-angle update for every line-graph edge.
 The angle convolution does not distinguish `aa`/`dd`/`ad`/`da` relation
 combinations.
 
+The heterogeneous ALIGNN and CGCNN backbones default to hidden size `32`, and
+the heterogeneous MEGNet backbone defaults to `16`. Homogeneous ALIGNN and
+CGCNN modes remain at `64`, while homogeneous MEGNet uses `32`.
+`--alignn-embedding-size` still overrides the ALIGNN default for an explicit
+experiment.
+
 All CGCNN, MEGNet, and ALIGNN heterogeneous graph conversions use only physical
 periodic-neighbor edges. They do not add synthetic zero-distance self-loops
 because the backbones already preserve root/node features internally.
