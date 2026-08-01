@@ -206,13 +206,11 @@ MEMORY_LIMITED_TRAIN_BATCH_SIZE = 16
 DEFAULT_TRAIN_BATCH_SIZE = 64
 DEFAULT_TEST_BATCH_SIZE = 1
 CGCNN_MEGNET_MAX_NEIGHBORS = 12
-CGCNN_HETERO_EMBEDDING_SIZE = 32
 MEGNET_EMBEDDING_SIZE = 32
-MEGNET_HETERO_EMBEDDING_SIZE = 16
+MEGNET_HETERO_EMBEDDING_SIZE = 32
 ALIGNN_BLOCKS = 3
 ALIGNN_GCN_BLOCKS = 3
 ALIGNN_MAX_NEIGHBORS = 12
-ALIGNN_HETERO_EMBEDDING_SIZE = 32
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
@@ -279,20 +277,13 @@ def _finalize_config(config, model, dataset):
     config['model']['test_batch_size'] = DEFAULT_TEST_BATCH_SIZE
     if model in ('cgcnn', 'megnet'):
         config['model']['max_neighbors'] = CGCNN_MEGNET_MAX_NEIGHBORS
-    is_hetero = (
-        '_hetero' in config['task']
-        or config['task'] == 'hetero_cgcnn_was'
-    )
-    if model == 'cgcnn' and is_hetero:
-        config['model']['embedding_size'] = CGCNN_HETERO_EMBEDDING_SIZE
     if model == 'megnet':
+        is_hetero = '_hetero' in config['task']
         config['model']['embedding_size'] = (
             MEGNET_HETERO_EMBEDDING_SIZE if is_hetero
             else MEGNET_EMBEDDING_SIZE
         )
     if model == 'alignn':
-        if is_hetero:
-            config['model']['embedding_size'] = ALIGNN_HETERO_EMBEDDING_SIZE
         config['model']['nblocks'] = ALIGNN_BLOCKS
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS

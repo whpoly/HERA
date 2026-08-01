@@ -64,9 +64,8 @@ class HeteroPhysicalEdgeTests(unittest.TestCase):
         self.assertEqual(edge_counts["cgcnn"], edge_counts["alignn"])
 
     def test_cgcnn_ad_and_da_use_distinct_convolutions(self):
-        config = get_config("cgcnn", "imp2d", "hetero")
         trainer = MEGNetTrainer(
-            config,
+            get_config("cgcnn", "imp2d", "hetero"),
             "cpu",
             seed=123,
         )
@@ -74,13 +73,6 @@ class HeteroPhysicalEdgeTests(unittest.TestCase):
         ad_conv = conv["atom__ad__defect"]
         da_conv = conv["defect__da__atom"]
 
-        self.assertEqual(config["model"]["embedding_size"], 32)
-        self.assertEqual(trainer.model.atom_fea_len, 32)
-        self.assertEqual(ad_conv.channels, 32)
-        self.assertTrue(all(
-            embedding.out_features == 32
-            for embedding in trainer.model.base_model.embedding.values()
-        ))
         self.assertEqual(
             trainer.model.base_model.incoming_edge_types["atom"],
             [
