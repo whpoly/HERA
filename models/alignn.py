@@ -352,14 +352,21 @@ class HeteroRelationConv(nn.Module):
 
 
 class HeteroNodeUpdate(nn.Module):
-    """Fuse incoming relation slots with a node-type-specific FFN."""
+    """Fuse relation slots, then normalize the complete residual update.
+
+    This follows the DeFiNet-style placement of normalization: relation fusion
+    first produces ``x + delta``, and one outer BatchNorm stabilizes the full
+    node state. ``SafeBatchNorm1d`` is required because a native graph can have
+    only one defect node in a micro-batch.
+    """
 
     def __init__(self, channels, num_relations):
         super().__init__()
         self.fusion = RelationFusionUpdate(channels, num_relations)
+        self.batch_norm = SafeBatchNorm1d(channels)
 
     def forward(self, x, incoming_by_relation):
-        return self.fusion(x, incoming_by_relation)
+        return self.batch_norm(self.fusion(x, incoming_by_relation))
 
 
 def _hetero_relation_update(

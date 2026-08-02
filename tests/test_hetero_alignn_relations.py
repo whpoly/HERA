@@ -1,6 +1,8 @@
 import unittest
 
-from HERA.models.alignn import HeteroALIGNN
+import torch
+
+from HERA.models.alignn import HeteroALIGNN, HeteroNodeUpdate, SafeBatchNorm1d
 
 
 METADATA = (
@@ -39,6 +41,40 @@ class HeteroAlignnRelationTests(unittest.TestCase):
             model.gcn_layers[0].atom_convs[AD_KEY],
             model.gcn_layers[0].atom_convs[DA_KEY],
         )
+
+    def test_node_update_batch_normalizes_complete_residual(self):
+        update = HeteroNodeUpdate(channels=8, num_relations=2)
+        update.train()
+        x = torch.randn(4, 8, requires_grad=True)
+        relation_inputs = [torch.zeros_like(x), torch.randn_like(x)]
+
+        output = update(x, relation_inputs)
+
+        self.assertIsInstance(update.batch_norm, SafeBatchNorm1d)
+        self.assertFalse(hasattr(update, "layer_norm"))
+        self.assertEqual(tuple(output.shape), (4, 8))
+        self.assertTrue(torch.isfinite(output).all())
+        self.assertTrue(torch.allclose(
+            output.detach().mean(dim=0),
+            torch.zeros(8),
+            atol=1e-5,
+        ))
+
+        output.square().mean().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(torch.isfinite(x.grad).all())
+
+    def test_node_update_supports_one_defect_node(self):
+        update = HeteroNodeUpdate(channels=8, num_relations=2)
+        update.train()
+        x = torch.randn(1, 8, requires_grad=True)
+
+        output = update(x, [torch.zeros_like(x), torch.randn_like(x)])
+
+        self.assertEqual(tuple(output.shape), (1, 8))
+        self.assertTrue(torch.isfinite(output).all())
+        output.sum().backward()
+        self.assertTrue(torch.isfinite(x.grad).all())
 
 
 if __name__ == "__main__":
