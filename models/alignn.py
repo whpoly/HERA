@@ -354,20 +354,20 @@ class HeteroRelationConv(nn.Module):
 class HeteroNodeUpdate(nn.Module):
     """Fuse relation slots and normalize only the residual delta.
 
-    Keeping ``x`` outside BatchNorm preserves the identity path while still
-    stabilizing the learned relation update. ``SafeBatchNorm1d`` is required
-    because a native graph can have only one defect node in a micro-batch.
+    Keeping ``x`` outside LayerNorm preserves the identity path while
+    stabilizing the learned relation update independently for every node.
+    This avoids batch-statistic noise when a graph has very few defect nodes.
     """
 
     def __init__(self, channels, num_relations):
         super().__init__()
         self.fusion = RelationFusionUpdate(channels, num_relations)
-        self.batch_norm = SafeBatchNorm1d(channels)
+        self.layer_norm = nn.LayerNorm(channels)
 
     def forward(self, x, incoming_by_relation):
         fused = self.fusion(x, incoming_by_relation)
         delta = fused - x
-        return x + self.batch_norm(delta)
+        return x + self.layer_norm(delta)
 
 
 def _hetero_relation_update(

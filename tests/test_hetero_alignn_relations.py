@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from HERA.models.alignn import HeteroALIGNN, HeteroNodeUpdate, SafeBatchNorm1d
+from HERA.models.alignn import HeteroALIGNN, HeteroNodeUpdate
 
 
 METADATA = (
@@ -42,7 +42,7 @@ class HeteroAlignnRelationTests(unittest.TestCase):
             model.gcn_layers[0].atom_convs[DA_KEY],
         )
 
-    def test_node_update_batch_normalizes_only_residual_delta(self):
+    def test_node_update_layer_normalizes_only_residual_delta(self):
         update = HeteroNodeUpdate(channels=8, num_relations=2)
         update.train()
         x = (torch.randn(4, 8) + 5.0).requires_grad_()
@@ -50,18 +50,18 @@ class HeteroAlignnRelationTests(unittest.TestCase):
 
         output = update(x, relation_inputs)
 
-        self.assertIsInstance(update.batch_norm, SafeBatchNorm1d)
-        self.assertFalse(hasattr(update, "layer_norm"))
+        self.assertIsInstance(update.layer_norm, torch.nn.LayerNorm)
+        self.assertFalse(hasattr(update, "batch_norm"))
         self.assertEqual(tuple(output.shape), (4, 8))
         self.assertTrue(torch.isfinite(output).all())
         self.assertTrue(torch.allclose(
-            (output - x).detach().mean(dim=0),
-            torch.zeros(8),
+            (output - x).detach().mean(dim=-1),
+            torch.zeros(4),
             atol=1e-5,
         ))
         self.assertTrue(torch.allclose(
-            output.detach().mean(dim=0),
-            x.detach().mean(dim=0),
+            output.detach().mean(dim=-1),
+            x.detach().mean(dim=-1),
             atol=1e-5,
         ))
 
