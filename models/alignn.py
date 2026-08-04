@@ -352,12 +352,11 @@ class HeteroRelationConv(nn.Module):
 
 
 class HeteroNodeUpdate(nn.Module):
-    """Fuse relation slots, then normalize the complete residual update.
+    """Fuse relation slots and normalize only the residual delta.
 
-    This follows the DeFiNet-style placement of normalization: relation fusion
-    first produces ``x + delta``, and one outer BatchNorm stabilizes the full
-    node state. ``SafeBatchNorm1d`` is required because a native graph can have
-    only one defect node in a micro-batch.
+    Keeping ``x`` outside BatchNorm preserves the identity path while still
+    stabilizing the learned relation update. ``SafeBatchNorm1d`` is required
+    because a native graph can have only one defect node in a micro-batch.
     """
 
     def __init__(self, channels, num_relations):
@@ -366,7 +365,9 @@ class HeteroNodeUpdate(nn.Module):
         self.batch_norm = SafeBatchNorm1d(channels)
 
     def forward(self, x, incoming_by_relation):
-        return self.batch_norm(self.fusion(x, incoming_by_relation))
+        fused = self.fusion(x, incoming_by_relation)
+        delta = fused - x
+        return x + self.batch_norm(delta)
 
 
 def _hetero_relation_update(

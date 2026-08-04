@@ -42,10 +42,10 @@ class HeteroAlignnRelationTests(unittest.TestCase):
             model.gcn_layers[0].atom_convs[DA_KEY],
         )
 
-    def test_node_update_batch_normalizes_complete_residual(self):
+    def test_node_update_batch_normalizes_only_residual_delta(self):
         update = HeteroNodeUpdate(channels=8, num_relations=2)
         update.train()
-        x = torch.randn(4, 8, requires_grad=True)
+        x = (torch.randn(4, 8) + 5.0).requires_grad_()
         relation_inputs = [torch.zeros_like(x), torch.randn_like(x)]
 
         output = update(x, relation_inputs)
@@ -55,8 +55,13 @@ class HeteroAlignnRelationTests(unittest.TestCase):
         self.assertEqual(tuple(output.shape), (4, 8))
         self.assertTrue(torch.isfinite(output).all())
         self.assertTrue(torch.allclose(
-            output.detach().mean(dim=0),
+            (output - x).detach().mean(dim=0),
             torch.zeros(8),
+            atol=1e-5,
+        ))
+        self.assertTrue(torch.allclose(
+            output.detach().mean(dim=0),
+            x.detach().mean(dim=0),
             atol=1e-5,
         ))
 
