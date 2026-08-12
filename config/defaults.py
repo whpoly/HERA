@@ -211,6 +211,7 @@ MEGNET_HETERO_EMBEDDING_SIZE = 32
 ALIGNN_BLOCKS = 3
 ALIGNN_GCN_BLOCKS = 3
 ALIGNN_MAX_NEIGHBORS = 12
+ALIGNN_HETERO_NODE_NORM = 'layernorm'
 DEFINET_MODES = ('attention', 'attention_was')
 ALIGNN_MODES = (
     'full',
@@ -287,6 +288,7 @@ def _finalize_config(config, model, dataset):
         config['model']['nblocks'] = ALIGNN_BLOCKS
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
+        config['model']['hetero_node_norm'] = ALIGNN_HETERO_NODE_NORM
     if dataset in ('vacancy', '2dmd_low'):
         config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
     elif dataset in ('2dmd_high', 'native'):

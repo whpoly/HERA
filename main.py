@@ -133,6 +133,11 @@ ALIGNN_DEFAULT_MODES = [
     'was_x',
     'attention_was',
 ]
+ALIGNN_NODE_NORM_MODES = frozenset((
+    'hetero',
+    'hetero_fixed_pool',
+    'hetero_was',
+))
 
 
 def set_seed(seed):
@@ -176,6 +181,25 @@ def with_radius(config, radius):
     return config
 
 
+def expand_alignn_node_norm_runs(mode_runs, norm_values, enabled):
+    """Expand HeteroALIGNN run specs into isolated normalization ablations."""
+    if not enabled or norm_values is None:
+        return mode_runs
+    if isinstance(norm_values, str):
+        norm_values = [norm_values]
+    norm_values = list(dict.fromkeys(norm_values))
+
+    expanded = []
+    for run in mode_runs:
+        for normalization in norm_values:
+            norm_run = copy.deepcopy(run)
+            norm_run['label'] = f'{run["label"]}_norm_{normalization}'
+            norm_run['norm_label'] = f'norm_{normalization}'
+            norm_run['config']['model']['hetero_node_norm'] = normalization
+            expanded.append(norm_run)
+    return expanded
+
+
 def apply_training_overrides(config, args, model_name):
     config = copy.deepcopy(config)
     if args.train_batch_size is not None:
@@ -207,6 +231,12 @@ def apply_training_overrides(config, args, model_name):
             config['model']['angle_embed_size'] = args.alignn_angle_embed_size
         if args.alignn_grad_accum_steps is not None:
             config['optim']['grad_accum_steps'] = args.alignn_grad_accum_steps
+        if args.alignn_hetero_node_norm is not None:
+            norm_values = args.alignn_hetero_node_norm
+            if isinstance(norm_values, str):
+                norm_values = [norm_values]
+            if len(norm_values) == 1:
+                config['model']['hetero_node_norm'] = norm_values[0]
         if args.alignn_amp:
             config['optim']['amp'] = True
     return config
@@ -717,6 +747,17 @@ def main():
                         help='Override angle basis size only for ALIGNN runs')
     parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
                         help='Accumulate ALIGNN gradients over this many micro-batches')
+    parser.add_argument(
+        '--alignn-hetero-node-norm',
+        nargs='+',
+        choices=('layernorm', 'batchnorm', 'none'),
+        default=None,
+        help=(
+            'One or more normalizations applied to HeteroALIGNN residual '
+            'deltas: layernorm, batchnorm, none. Multiple values run an '
+            'isolated benchmark for each choice (default: layernorm)'
+        ),
+    )
     parser.add_argument('--early-stopping-patience', type=int, default=None,
                         help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
@@ -797,6 +838,10 @@ def main():
     if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
         parser.error('--alignn-cutoff must be > 0')
     args.seeds = parse_seed_values(args.seeds, parser)
+    if args.alignn_hetero_node_norm is not None:
+        args.alignn_hetero_node_norm = list(dict.fromkeys(
+            args.alignn_hetero_node_norm
+        ))
     if args.cv5 and len(args.seeds) != 1:
         parser.error('--cv5 requires exactly one --seed value, e.g. --cv5 --seed 123')
     args.r = parse_radius_values(args.r, parser)
@@ -950,12 +995,20 @@ def main():
                         for radius in radii
                     ]
 
+                mode_runs = expand_alignn_node_norm_runs(
+                    mode_runs,
+                    args.alignn_hetero_node_norm,
+                    model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES,
+                )
+
                 for run in mode_runs:
                     run_label = run['label']
                     train_mode = run['mode']
                     mode_parts = [dataset_dir, train_mode]
                     if run['radius_label'] is not None:
                         mode_parts.append(run['radius_label'])
+                    if run.get('norm_label') is not None:
+                        mode_parts.append(run['norm_label'])
                     mode_dir = os.path.join(*mode_parts)
                     os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
@@ -984,6 +1037,7 @@ def main():
                     f'nblocks={config["model"]["nblocks"]}, '
                     f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
                     f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                    f'hetero_node_norm={config["model"].get("hetero_node_norm", "layernorm")}, '
                     f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                     f'amp={config["optim"].get("amp", False)}'
                 )
@@ -1005,6 +1059,8 @@ def main():
                         explain_parts = [args.explain_dir, model_name, dataset_name, train_mode]
                         if run['radius_label'] is not None:
                             explain_parts.append(run['radius_label'])
+                        if run.get('norm_label') is not None:
+                            explain_parts.append(run['norm_label'])
                         explain_root = os.path.join(*explain_parts)
                     else:
                         explain_root = os.path.join(mode_dir, 'explanations')
@@ -1043,20 +1099,6 @@ def main():
 
                 if args.resume:
                     for run in run_specs:
-                        summary_losses = read_mode_summary_losses(run['summary_path'])
-                        if (
-                                summary_losses is not None
-                                and len(summary_losses) == len(args.seeds)
-                        ):
-                            print(
-                                f'\nResume: complete summary found for '
-                                f'{model_name.upper()} - {run["label"].upper()}; '
-                                'skipping all seeds.'
-                            )
-                            results[run['label']] = summary_losses
-                            completed_labels.add(run['label'])
-                            continue
-
                         completed_losses = completed_resume_losses(
                             run['mode_dir'],
                             args.seeds,
@@ -1108,16 +1150,6 @@ def main():
                 for run in run_specs:
                     run_label = run['label']
                     if args.resume:
-                        summary_losses = read_mode_summary_losses(run['summary_path'])
-                        if summary_losses is not None:
-                            print(
-                                f'\nResume: summary found for '
-                                f'{model_name.upper()} - {run_label.upper()}; '
-                                'skipping dataset load/train.'
-                            )
-                            results[run_label] = summary_losses
-                            continue
-
                         completed_losses = completed_resume_losses(
                             run['mode_dir'],
                             args.seeds,

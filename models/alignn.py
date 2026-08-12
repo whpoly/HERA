@@ -352,22 +352,41 @@ class HeteroRelationConv(nn.Module):
 
 
 class HeteroNodeUpdate(nn.Module):
-    """Fuse relation slots and normalize only the residual delta.
+    """Fuse relation slots and optionally normalize only the residual delta.
 
-    Keeping ``x`` outside LayerNorm preserves the identity path while
-    stabilizing the learned relation update independently for every node.
-    This avoids batch-statistic noise when a graph has very few defect nodes.
+    Keeping ``x`` outside the normalization preserves the identity path.
+    LayerNorm avoids batch-statistic noise for graphs with very few defect
+    nodes, while SafeBatchNorm1d provides the directly comparable ablation.
     """
 
-    def __init__(self, channels, num_relations):
+    def __init__(self, channels, num_relations, normalization="layernorm"):
         super().__init__()
+        if isinstance(normalization, bool):
+            normalization = "layernorm" if normalization else "none"
+        normalization = str(normalization).lower()
+        if normalization not in {"layernorm", "batchnorm", "none"}:
+            raise ValueError(
+                "normalization must be one of: layernorm, batchnorm, none"
+            )
+        self.normalization = normalization
         self.fusion = RelationFusionUpdate(channels, num_relations)
-        self.layer_norm = nn.LayerNorm(channels)
+        self.layer_norm = (
+            nn.LayerNorm(channels)
+            if normalization == "layernorm"
+            else nn.Identity()
+        )
+        self.batch_norm = (
+            SafeBatchNorm1d(channels)
+            if normalization == "batchnorm"
+            else nn.Identity()
+        )
 
     def forward(self, x, incoming_by_relation):
         fused = self.fusion(x, incoming_by_relation)
         delta = fused - x
-        return x + self.layer_norm(delta)
+        delta = self.layer_norm(delta)
+        delta = self.batch_norm(delta)
+        return x + delta
 
 
 def _hetero_relation_update(
@@ -582,7 +601,8 @@ class DefiNetALIGNNLayer(nn.Module):
 class HeteroALIGNNLayer(nn.Module):
     """Heterogeneous ALIGNN block for atom/defect node and edge types."""
 
-    def __init__(self, hidden_dim, angle_dim, metadata, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, angle_dim, metadata,
+                 vertex_aggregation="add", node_delta_norm="layernorm"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
@@ -597,6 +617,7 @@ class HeteroALIGNNLayer(nn.Module):
             node_type: HeteroNodeUpdate(
                 hidden_dim,
                 sum(edge_type[2] == node_type for edge_type in self.edge_types),
+                normalization=node_delta_norm,
             )
             for node_type in self.node_types
         })
@@ -635,7 +656,8 @@ class HeteroALIGNNLayer(nn.Module):
 class HeteroGraphConvLayer(nn.Module):
     """Heterogeneous graph-conv block after ALIGNN line-graph blocks."""
 
-    def __init__(self, hidden_dim, metadata, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, metadata, vertex_aggregation="add",
+                 node_delta_norm="layernorm"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
@@ -649,6 +671,7 @@ class HeteroGraphConvLayer(nn.Module):
             node_type: HeteroNodeUpdate(
                 hidden_dim,
                 sum(edge_type[2] == node_type for edge_type in self.edge_types),
+                normalization=node_delta_norm,
             )
             for node_type in self.node_types
         })
@@ -911,6 +934,7 @@ class HeteroALIGNN(nn.Module):
             angle_embed_size=40,
             vertex_aggregation="add",
             fixed_pooling=False,
+            node_delta_norm="layernorm",
             cutoff=8.0,
     ):
         super().__init__()
@@ -918,6 +942,7 @@ class HeteroALIGNN(nn.Module):
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.hidden_dim = hidden_dim
         self.fixed_pooling = fixed_pooling
+        self.node_delta_norm = node_delta_norm
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim)
             for node_type in self.node_types
@@ -934,11 +959,22 @@ class HeteroALIGNN(nn.Module):
             self.angle_expansion.out_features, hidden_dim
         )
         self.layers = nn.ModuleList([
-            HeteroALIGNNLayer(hidden_dim, self.angle_expansion.out_features, metadata, vertex_aggregation=vertex_aggregation)
+            HeteroALIGNNLayer(
+                hidden_dim,
+                self.angle_expansion.out_features,
+                metadata,
+                vertex_aggregation=vertex_aggregation,
+                node_delta_norm=node_delta_norm,
+            )
             for _ in range(n_blocks)
         ])
         self.gcn_layers = nn.ModuleList([
-            HeteroGraphConvLayer(hidden_dim, metadata, vertex_aggregation=vertex_aggregation)
+            HeteroGraphConvLayer(
+                hidden_dim,
+                metadata,
+                vertex_aggregation=vertex_aggregation,
+                node_delta_norm=node_delta_norm,
+            )
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(

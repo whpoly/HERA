@@ -51,7 +51,7 @@ class HeteroAlignnRelationTests(unittest.TestCase):
         output = update(x, relation_inputs)
 
         self.assertIsInstance(update.layer_norm, torch.nn.LayerNorm)
-        self.assertFalse(hasattr(update, "batch_norm"))
+        self.assertIsInstance(update.batch_norm, torch.nn.Identity)
         self.assertEqual(tuple(output.shape), (4, 8))
         self.assertTrue(torch.isfinite(output).all())
         self.assertTrue(torch.allclose(
@@ -80,6 +80,59 @@ class HeteroAlignnRelationTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(output).all())
         output.sum().backward()
         self.assertTrue(torch.isfinite(x.grad).all())
+
+    def test_node_update_can_disable_layer_norm(self):
+        update = HeteroNodeUpdate(
+            channels=8,
+            num_relations=2,
+            normalization="none",
+        )
+        x = torch.randn(4, 8)
+        relation_inputs = [torch.zeros_like(x), torch.randn_like(x)]
+
+        expected = update.fusion(x, relation_inputs)
+        output = update(x, relation_inputs)
+
+        self.assertIsInstance(update.layer_norm, torch.nn.Identity)
+        self.assertIsInstance(update.batch_norm, torch.nn.Identity)
+        self.assertTrue(torch.allclose(output, expected))
+
+    def test_node_update_can_use_safe_batch_norm(self):
+        update = HeteroNodeUpdate(
+            channels=8,
+            num_relations=2,
+            normalization="batchnorm",
+        )
+        update.train()
+        x = torch.randn(1, 8)
+        relation_inputs = [torch.zeros_like(x), torch.randn_like(x)]
+
+        output = update(x, relation_inputs)
+
+        self.assertIsInstance(update.layer_norm, torch.nn.Identity)
+        self.assertIsInstance(update.batch_norm, torch.nn.BatchNorm1d)
+        self.assertTrue(torch.isfinite(output).all())
+
+    def test_model_propagates_disabled_node_norm_to_all_hetero_blocks(self):
+        model = HeteroALIGNN(
+            node_input_shape=92,
+            edge_input_shape=40,
+            metadata=METADATA,
+            hidden_dim=32,
+            n_blocks=1,
+            gcn_blocks=1,
+            node_delta_norm="none",
+        )
+
+        updates = [
+            *model.layers[0].node_updates.values(),
+            *model.gcn_layers[0].node_updates.values(),
+        ]
+        self.assertTrue(updates)
+        self.assertTrue(all(
+            isinstance(update.layer_norm, torch.nn.Identity)
+            for update in updates
+        ))
 
 
 if __name__ == "__main__":

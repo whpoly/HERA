@@ -326,6 +326,10 @@ class MEGNetTrainer:
                 ),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 fixed_pooling=self.config["model"].get("fixed_pooling", False),
+                node_delta_norm=self.config["model"].get(
+                    "hetero_node_norm",
+                    "layernorm",
+                ),
                 cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:

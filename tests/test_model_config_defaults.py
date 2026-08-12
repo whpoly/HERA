@@ -41,6 +41,7 @@ class ModelConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(model["train_batch_size"], 64)
         self.assertEqual(model["test_batch_size"], 1)
         self.assertEqual(model["max_neighbors"], 12)
+        self.assertEqual(model["hetero_node_norm"], "layernorm")
 
     def test_low_density_vacancy_datasets_use_batch_size_eight(self):
         for dataset in ("vacancy", "2dmd_low"):

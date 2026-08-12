@@ -136,6 +136,14 @@ Common arguments:
 - `--alignn-grad-accum-steps`: keep an effective large batch while using a
   smaller memory-resident micro-batch, e.g. `--alignn-train-batch-size 4
   --alignn-grad-accum-steps 16` gives an effective ALIGNN training batch of 64.
+- HeteroALIGNN applies LayerNorm only to each residual delta by default. Use
+  `--alignn-hetero-node-norm layernorm`, `batchnorm`, or `none` to compare
+  normalization choices while preserving the residual identity path. Pass
+  multiple values in one command, for example `--alignn-hetero-node-norm
+  layernorm batchnorm none`, to run all choices in one benchmark with separate
+  result directories and combined summaries. Any explicitly selected norm,
+  including a single value, uses its own `norm_<choice>` directory so
+  `--resume` cannot reuse results produced by a different normalization.
 - ALIGNN, CGCNN, and MEGNet runs all stop early by default after 50 epochs
   without a relative validation MAE improvement greater than `0.5%`. Use
   `--early-stopping-patience` and
