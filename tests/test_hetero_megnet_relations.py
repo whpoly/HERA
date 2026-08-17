@@ -71,6 +71,38 @@ class HeteroMegnetRelationTests(unittest.TestCase):
             torch.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]),
         ))
 
+    def test_layer_uses_layernorm_for_hetero_updates(self):
+        layer = self.make_layer()
+
+        for update in layer.node_updates.values():
+            self.assertEqual(update.normalization, "layernorm")
+            self.assertIsInstance(update.layer_norm, torch.nn.LayerNorm)
+        self.assertEqual(layer.state_update.normalization, "layernorm")
+        self.assertIsInstance(layer.state_update.layer_norm, torch.nn.LayerNorm)
+
+    def test_layernorm_is_applied_only_to_the_residual_delta(self):
+        fusion = RelationFusionUpdate(
+            channels=8,
+            num_relations=2,
+            normalization="layernorm",
+        )
+        root = torch.randn(4, 8) + 5.0
+        relation_inputs = [torch.zeros_like(root), torch.randn_like(root)]
+
+        output = fusion(root, relation_inputs)
+        delta = output - root
+
+        self.assertTrue(torch.allclose(
+            delta.mean(dim=-1),
+            torch.zeros(4),
+            atol=1e-5,
+        ))
+        self.assertTrue(torch.allclose(
+            output.mean(dim=-1),
+            root.mean(dim=-1),
+            atol=1e-5,
+        ))
+
     def test_empty_dd_relation_does_not_train_its_module(self):
         layer = self.make_layer()
         x_dict = {

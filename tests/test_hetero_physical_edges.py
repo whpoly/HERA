@@ -93,6 +93,18 @@ class HeteroPhysicalEdgeTests(unittest.TestCase):
             next(da_conv.parameters()),
         )
 
+    def test_cgcnn_uses_layernorm_for_hetero_updates(self):
+        trainer = MEGNetTrainer(
+            get_config("cgcnn", "imp2d", "hetero"),
+            "cpu",
+            seed=123,
+        )
+
+        for updates in trainer.model.base_model.node_updates:
+            for update in updates.values():
+                self.assertEqual(update.normalization, "layernorm")
+                self.assertIsInstance(update.layer_norm, torch.nn.LayerNorm)
+
     def test_all_backbones_forward_with_an_empty_dd_relation(self):
         original_embedding = datasets.elem_embedding
         datasets.elem_embedding = {

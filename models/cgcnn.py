@@ -161,6 +161,7 @@ class HeteroCrystalGraphConvNet(nn.Module):
                 node_type: RelationFusionUpdate(
                     atom_fea_len,
                     len(self.incoming_edge_types[node_type]),
+                    normalization="layernorm",
                 )
                 for node_type in self.node_types
             })

@@ -334,6 +334,9 @@ cross-relation sum or mean is applied before this update. Missing relation
 slots are represented by zeros. The host FFN receives `[root, HH, HD]`
 (`aa`, `da` in source-to-destination edge naming), while the defect FFN
 receives `[root, DH, DD]` (`ad`, `dd`).
+HeteroCGCNN and HeteroMEGNet apply LayerNorm to the FFN residual delta before
+adding it to the root state. HeteroMEGNet applies the same update to its global
+state, so the normalization never depends on batch statistics.
 Within each ALIGNN relation, gated messages are normalized only by that
 relation's accumulated gate weights. This preserves relation identity and
 avoids cross-graph leakage from relation types that occur elsewhere in a mixed

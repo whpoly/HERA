@@ -147,16 +147,25 @@ class MegnetModule(MessagePassing):
 # ------------------------------------------------------------------ #
 
 class RelationFusionUpdate(nn.Module):
-    """Fuse relation-wise aggregates without summing relation channels."""
+    """Fuse relation-wise aggregates and optionally normalize the residual delta."""
 
-    def __init__(self, channels, num_relations):
+    def __init__(self, channels, num_relations, normalization="none"):
         super().__init__()
+        normalization = str(normalization).lower()
+        if normalization not in {"layernorm", "none"}:
+            raise ValueError("normalization must be one of: layernorm, none")
         self.channels = channels
         self.num_relations = num_relations
+        self.normalization = normalization
         self.ffn = nn.Sequential(
             nn.Linear((num_relations + 1) * channels, 2 * channels),
             nn.SiLU(),
             nn.Linear(2 * channels, channels),
+        )
+        self.layer_norm = (
+            nn.LayerNorm(channels)
+            if normalization == "layernorm"
+            else nn.Identity()
         )
 
     def forward(self, x, relation_inputs):
@@ -167,7 +176,8 @@ class RelationFusionUpdate(nn.Module):
             )
         if x.size(0) == 0:
             return x
-        return x + self.ffn(torch.cat([x, *relation_inputs], dim=-1))
+        delta = self.ffn(torch.cat([x, *relation_inputs], dim=-1))
+        return x + self.layer_norm(delta)
 
 
 class HeteroMegnetLayer(nn.Module):
@@ -219,12 +229,14 @@ class HeteroMegnetLayer(nn.Module):
             ntype: RelationFusionUpdate(
                 embedding_size,
                 len(self.incoming_edge_types[ntype]),
+                normalization="layernorm",
             )
             for ntype in self.node_types
         })
         self.state_update = RelationFusionUpdate(
             embedding_size,
             len(self.edge_types),
+            normalization="layernorm",
         )
 
     @staticmethod
