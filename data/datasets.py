@@ -51,6 +51,9 @@ MODE_REPRESENTATION = {
     'attention_was': 'attention',
     'definet': 'attention',
     'definet_was': 'attention',
+    # Hypergraphs reuse the defect-marked structures from the heterogeneous
+    # representation; the converter builds a distinct incidence matrix.
+    'hypergraph': 'hetero',
 }
 
 
@@ -533,7 +536,8 @@ def load_dataset(
     Args:
         dataset_name: one of vacancy, 2dmd_low, 2dmd_high, native, och, imp2d,
             semi
-        model_name: 'megnet', 'cgcnn', or 'definet' (used as task prefix)
+        model_name: 'megnet', 'cgcnn', 'definet', 'alignn', or 'hypergraph'
+            (used as task prefix)
         local_cutoff: optional local/host boundary radius for hetero and attention structures
         representations: optional subset of full, hetero, attention, sparse to build
         modes: optional training modes; converted to the needed representation subset

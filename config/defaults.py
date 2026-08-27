@@ -200,7 +200,7 @@ _CONFIG_REGISTRY = {
 }
 
 VALID_DATASETS = list(_CONFIG_REGISTRY.keys())
-VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet']
+VALID_MODELS = ['alignn', 'megnet', 'cgcnn', 'definet', 'hypergraph']
 VACANCY_TRAIN_BATCH_SIZE = 8
 MEMORY_LIMITED_TRAIN_BATCH_SIZE = 16
 DEFAULT_TRAIN_BATCH_SIZE = 64
@@ -224,6 +224,7 @@ ALIGNN_MODES = (
     'attention_was',
     'definet',
     'definet_was',
+    'hypergraph',
 )
 FIXED_POOL_MODES = (
     'hetero_fixed_pool',
@@ -242,6 +243,7 @@ ALIGNN_DEFINET_TASKS = {
 }
 WAS_MODELS = ('cgcnn', 'megnet', 'alignn')
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
+HYPERGRAPH_MODELS = ('cgcnn', 'megnet', 'alignn', 'hypergraph')
 VALID_MODES = [
     'sparse',
     'full',
@@ -254,6 +256,7 @@ VALID_MODES = [
     'attention_was',
     'definet',
     'definet_was',
+    'hypergraph',
 ]
 
 
@@ -311,11 +314,11 @@ def get_config(model: str, dataset: str, mode: str):
     """Get the config dict for a specific model/dataset/mode combination.
 
     Args:
-        model: 'megnet', 'cgcnn', 'definet', or 'alignn'
+        model: 'megnet', 'cgcnn', 'definet', 'alignn', or 'hypergraph'
         dataset: one of VALID_DATASETS
         mode: one of 'sparse', 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
             'attention', 'was_x', 'hetero_was', 'attention_was',
-            'definet', 'definet_was'
+            'definet', 'definet_was', 'hypergraph'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -326,6 +329,13 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(f"Unknown model '{model}'. Choose from {VALID_MODELS}")
     if mode not in VALID_MODES:
         raise ValueError(f"Unknown mode '{mode}'. Choose from {VALID_MODES}")
+    if model == 'hypergraph' and mode != 'hypergraph':
+        raise ValueError("The hypergraph model only supports mode 'hypergraph'")
+    if mode == 'hypergraph' and model not in HYPERGRAPH_MODELS:
+        raise ValueError(
+            "The hypergraph mode is only supported for cgcnn, megnet, "
+            "alignn, and hypergraph"
+        )
     if mode == 'sparse' and (
             model != 'megnet'
             or dataset not in ('vacancy', '2dmd_low', '2dmd_high')
@@ -363,6 +373,13 @@ def get_config(model: str, dataset: str, mode: str):
     ) = _CONFIG_REGISTRY[dataset](model)
     if mode == 'sparse':
         return _finalize_sparse_config(config_sparse, dataset)
+    if mode == 'hypergraph':
+        config = copy.deepcopy(config_hetero)
+        config['task'] = f'{model}_hypergraph'
+        config['model']['hypergraph_radius'] = 3.0
+        config['model']['n_heads'] = 4
+        config['model']['dropout'] = 0.0
+        return _finalize_config(config, model, dataset)
     if mode in CGCNN_DEFINET_MODES:
         return _finalize_config(
             _definet_attention_config(config_attention, mode, model),

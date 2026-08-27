@@ -1,4 +1,4 @@
-"""CGCNN model variants: CGCNN (homogeneous), CrystalGraphConvNet, Heterocgcnn, AttentionCGCNN."""
+"""CGCNN model variants, including heterogeneous and hypergraph hybrids."""
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ from .modules import (
     RelationFusionUpdate,
     ShiftedSoftplus,
 )
+from .hypergraph import RegionHypergraphInteraction
 
 
 class CGCNN(nn.Module):
@@ -56,6 +57,103 @@ class CGCNN(nn.Module):
             for fc, softplus in zip(self.fcs, self.softpluses):
                 crys_fea = softplus(fc(crys_fea))
 
+        return self.fc_out(crys_fea)
+
+
+class HyperCGCNN(nn.Module):
+    """CGCNN physical-bond updates interleaved with region hypergraph updates."""
+
+    def __init__(
+            self,
+            orig_atom_fea_len,
+            nbr_fea_len,
+            atom_fea_len=64,
+            n_conv=3,
+            h_fea_len=128,
+            n_h=1,
+            n_heads=4,
+            dropout=0.0,
+            classification=False,
+    ):
+        super().__init__()
+        self.classification = classification
+        self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
+        self.convs = nn.ModuleList([
+            CGConv(
+                channels=(atom_fea_len, atom_fea_len),
+                dim=nbr_fea_len,
+                batch_norm=True,
+            )
+            for _ in range(n_conv)
+        ])
+        self.hypergraph = RegionHypergraphInteraction(
+            atom_fea_len,
+            n_steps=n_conv,
+            heads=n_heads,
+            dropout=dropout,
+        )
+        self.pooling = MeanAggregation()
+        self.conv_to_fc = nn.Linear(4 * atom_fea_len, h_fea_len)
+
+        if n_h > 1:
+            self.fcs = nn.ModuleList([
+                nn.Linear(h_fea_len, h_fea_len)
+                for _ in range(n_h - 1)
+            ])
+            self.softpluses = nn.ModuleList([
+                nn.Softplus()
+                for _ in range(n_h - 1)
+            ])
+        if self.classification:
+            self.fc_out = nn.Linear(h_fea_len, 8)
+            self.dropout = nn.Dropout()
+        else:
+            self.fc_out = nn.Linear(h_fea_len, 1)
+
+    def forward(
+            self,
+            x,
+            edge_index,
+            edge_attr,
+            batch,
+            hyperedge_index,
+            hyperedge_type=None,
+            region_type=None,
+    ):
+        atom_fea = self.embedding(x.float())
+        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+            self.hypergraph.normalize_inputs(
+                atom_fea,
+                hyperedge_index,
+                batch=batch,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        )
+        atom_fea = self.hypergraph.add_region_features(atom_fea, region_type)
+        for step, conv_func in enumerate(self.convs):
+            atom_fea = conv_func(
+                x=atom_fea,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+            )
+            atom_fea = self.hypergraph.update(
+                step,
+                atom_fea,
+                hyperedge_index,
+                hyperedge_type,
+                num_hyperedges,
+            )
+
+        global_pool = self.pooling(atom_fea, batch)
+        region_pool = self.hypergraph.pool(atom_fea, hyperedge_index, num_graphs)
+        crys_fea = torch.cat([global_pool, region_pool], dim=-1)
+        crys_fea = F.softplus(self.conv_to_fc(F.softplus(crys_fea)))
+        if self.classification:
+            crys_fea = self.dropout(crys_fea)
+        if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
+            for fc, softplus in zip(self.fcs, self.softpluses):
+                crys_fea = softplus(fc(crys_fea))
         return self.fc_out(crys_fea)
 
 
@@ -316,7 +414,7 @@ class AttentionCGCNN(nn.Module):
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
         self.convs = nn.ModuleList([
             AttentionCGConv(channels=atom_fea_len, dim=nbr_fea_len,
-                            n_heads=n_heads, batch_norm=True)
+                            n_heads=n_heads)
             for _ in range(n_conv)
         ])
 
@@ -386,13 +484,20 @@ class DefiNet(nn.Module):
             )
             for _ in range(n_conv)
         ])
+        self.global_distribute_norms = nn.ModuleList([
+            nn.LayerNorm(atom_fea_len)
+            for _ in range(n_conv)
+        ])
         self.convs = nn.ModuleList([
             DefectAwareGateConv(
                 channels=atom_fea_len,
                 dim=nbr_fea_len,
                 n_marker_types=n_marker_types,
-                batch_norm=True,
             )
+            for _ in range(n_conv)
+        ])
+        self.global_aggregate_norms = nn.ModuleList([
+            nn.LayerNorm(atom_fea_len)
             for _ in range(n_conv)
         ])
         self.global_aggregate = nn.ModuleList([
@@ -420,9 +525,16 @@ class DefiNet(nn.Module):
         num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
         global_fea = self.global_seed.expand(num_graphs, -1)
 
-        for distribute, conv_func, aggregate in zip(
-                self.global_distribute, self.convs, self.global_aggregate):
-            atom_fea = atom_fea + distribute(torch.cat([atom_fea, global_fea[batch]], dim=-1))
+        for distribute, distribute_norm, conv_func, aggregate, aggregate_norm in zip(
+                self.global_distribute,
+                self.global_distribute_norms,
+                self.convs,
+                self.global_aggregate,
+                self.global_aggregate_norms):
+            distribute_delta = distribute(
+                torch.cat([atom_fea, global_fea[batch]], dim=-1)
+            )
+            atom_fea = atom_fea + distribute_norm(distribute_delta)
             atom_fea = conv_func(
                 x=atom_fea,
                 edge_index=edge_index,
@@ -430,7 +542,8 @@ class DefiNet(nn.Module):
                 defect_marker=defect_marker,
             )
             pooled = self.pooling(atom_fea, batch)
-            global_fea = global_fea + aggregate(torch.cat([pooled, global_fea], dim=-1))
+            aggregate_delta = aggregate(torch.cat([pooled, global_fea], dim=-1))
+            global_fea = global_fea + aggregate_norm(aggregate_delta)
 
         crys_fea = torch.cat([self.pooling(atom_fea, batch), global_fea], dim=-1)
         crys_fea = self.conv_to_fc(F.softplus(crys_fea))

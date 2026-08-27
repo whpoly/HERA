@@ -53,6 +53,7 @@ DEFAULT_NATIVE_CSV = (
 )
 
 MODEL_DISPLAY = {
+    "alignn": "ALIGNN",
     "cgcnn": "CGCNN",
     "megnet": "MEGNet",
     "definet": "DeFiNet",
@@ -67,6 +68,9 @@ MODE_DISPLAY = {
 }
 
 MODEL_COLORS = {
+    "Full ALIGNN": "#3268a8",
+    "Hetero ALIGNN": "#d4553f",
+    "Hetero (LayerNorm) ALIGNN": "#d4553f",
     "Full CGCNN": "#5aa0c8",
     "Full + X CGCNN": "#4f7fb8",
     "Hetero CGCNN": "#e8896d",
@@ -316,12 +320,25 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    normalization = None
+    if "_norm_" in mode:
+        mode, normalization = mode.rsplit("_norm_", 1)
     if "_r" in mode:
         base, radius = mode.rsplit("_r", 1)
         if base == "hetero" and radius == "0":
-            return MODE_DISPLAY["hetero"]
-        return f"{MODE_DISPLAY.get(base, base.replace('_', ' ').title())} r{radius}"
-    return MODE_DISPLAY.get(mode, mode.replace("_", " ").title())
+            display = MODE_DISPLAY["hetero"]
+        else:
+            display = f"{MODE_DISPLAY.get(base, base.replace('_', ' ').title())} r{radius}"
+    else:
+        display = MODE_DISPLAY.get(mode, mode.replace("_", " ").title())
+    if normalization is not None:
+        norm_display = {
+            "layernorm": "LayerNorm",
+            "batchnorm": "BatchNorm",
+            "none": "No Norm",
+        }.get(normalization, normalization)
+        display = f"{display} ({norm_display})"
+    return display
 
 
 def model_mode_display(model, mode):

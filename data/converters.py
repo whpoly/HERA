@@ -134,6 +134,19 @@ class AtomFeaturesExtractor:
 #  Structure → PyG Data converter
 # ------------------------------------------------------------------ #
 
+class RegionHypergraphData(Data):
+    """PyG data with three independently batched hyperedges per graph."""
+
+    NUM_REGION_HYPEREDGES = 3
+
+    def __inc__(self, key, value, *args, **kwargs):
+        if key == 'hyperedge_index':
+            return torch.tensor(
+                [[self.num_nodes], [self.NUM_REGION_HYPEREDGES]],
+                device=value.device,
+            )
+        return super().__inc__(key, value, *args, **kwargs)
+
 class SimpleCrystalConverter:
     NODE_TYPE_NAMES = ['atom', 'defect']
     EDGE_TYPE_NAMES = [
@@ -161,6 +174,7 @@ class SimpleCrystalConverter:
             cutoff=6.0,
             local_radius=None,
             max_neighbors=None,
+            hypergraph_radius=3.0,
             ignore_state=False,
     ):
         self.cutoff = cutoff
@@ -168,6 +182,9 @@ class SimpleCrystalConverter:
         self.max_neighbors = None if max_neighbors is None else int(max_neighbors)
         if self.max_neighbors is not None and self.max_neighbors < 1:
             raise ValueError("max_neighbors must be >= 1")
+        self.hypergraph_radius = float(hypergraph_radius)
+        if self.hypergraph_radius < 0:
+            raise ValueError("hypergraph_radius must be >= 0")
         self.atom_converter = atom_converter if atom_converter else DummyConverter()
         self.bond_converter = bond_converter if bond_converter else DummyConverter()
         self.add_z_bond_coord = add_z_bond_coord
@@ -244,11 +261,105 @@ class SimpleCrystalConverter:
             all_nbrs = capped_nbrs
         return all_nbrs
 
+    def _hypergraph_region_types(self, structure):
+        """Return 0=defect, 1=near pristine, 2=far pristine per atom."""
+        defect_indices = [
+            idx
+            for idx, site in enumerate(structure)
+            if int(site.properties.get('pool_type', site.properties.get('type', 0))) == 1
+        ]
+        if not defect_indices:
+            source_id = getattr(structure, 'source_id', '<unknown>')
+            raise ValueError(
+                f"Hypergraph conversion requires at least one defect atom; "
+                f"none was marked in structure {source_id!r}"
+            )
+
+        region_types = []
+        for idx in range(len(structure)):
+            if idx in defect_indices:
+                region_types.append(0)
+                continue
+            min_distance = min(
+                structure.get_distance(idx, defect_idx)
+                for defect_idx in defect_indices
+            )
+            region_types.append(1 if min_distance <= self.hypergraph_radius else 2)
+        return torch.tensor(region_types, dtype=torch.long)
+
     def convert(self, d):
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task in ('sparse', 'full', 'full_x', 'was_x', 'local'):
+        if self.task == 'hypergraph':
+            region_type = self._hypergraph_region_types(d)
+            node_ids = torch.arange(len(d), dtype=torch.long)
+            hyperedge_index = torch.stack([node_ids, region_type], dim=0)
+            hyperedge_type = torch.arange(
+                RegionHypergraphData.NUM_REGION_HYPEREDGES,
+                dtype=torch.long,
+            )
+            x = torch.tensor(self.atom_converter.convert(d), dtype=torch.float32)
+
+            bond_index = [[], []]
+            bond_attr = []
+            bond_vec = []
+            all_nbrs = self._neighbor_lists(d)
+            for i, nbrs in enumerate(all_nbrs):
+                bond_index[0] += [i] * len(nbrs)
+                bond_index[1].extend([nbr[2] for nbr in nbrs])
+                bond_attr.extend([nbr[1] for nbr in nbrs])
+                center = np.asarray(d[i].coords)
+                bond_vec.extend([
+                    np.asarray(nbr.coords) - center
+                    for nbr in nbrs
+                ])
+            edge_index = torch.tensor(np.asarray(bond_index), dtype=torch.long)
+            distances_preprocessed = np.asarray(bond_attr)
+            if self.add_z_bond_coord:
+                cart_coords = np.asarray(d.cart_coords)
+                z_coord_diff = np.abs(
+                    cart_coords[edge_index[0], 2]
+                    - cart_coords[edge_index[1], 2]
+                )
+                distances_preprocessed = np.stack(
+                    (distances_preprocessed, z_coord_diff),
+                    axis=0,
+                )
+            edge_attr = torch.tensor(
+                self.bond_converter.convert(distances_preprocessed),
+                dtype=torch.float32,
+            )
+            edge_vec = torch.tensor(
+                np.asarray(bond_vec, dtype=float).reshape(-1, 3),
+                dtype=torch.float32,
+            )
+
+            if self.ignore_state:
+                state = [[0.0, 0.0]]
+            else:
+                state = getattr(d, "state", None) or [[0.0, 0.0]]
+            if len(state[0]) > 2:
+                raise NotImplementedError("We currently only support state length of 1 and 2")
+            if len(state[0]) == 1:
+                state[0].append(state[0][0])
+
+            return RegionHypergraphData(
+                x=x,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                edge_vec=edge_vec,
+                bond_batch=MyTensor(np.zeros(edge_index.shape[1])).long(),
+                hyperedge_index=hyperedge_index,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+                state=torch.tensor(state, dtype=torch.float32),
+                y=d.y if hasattr(d, "y") else 0,
+                weight=d.weight if hasattr(d, 'weight') else 1,
+                structure=d,
+                **self._source_metadata_kwargs(d),
+            )
+        elif self.task in ('sparse', 'full', 'full_x', 'was_x', 'local'):
             bond_index = [[], []]
             bond_attr = []
             bond_vec = []

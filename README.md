@@ -6,8 +6,8 @@ This repository contains research code for defect-property prediction on crystal
 
 | Item | Supported Options |
 | --- | --- |
-| Models | `megnet`, `cgcnn`, `definet`, `alignn`, `all` |
-| Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `all` |
+| Models | `megnet`, `cgcnn`, `definet`, `alignn`, `hypergraph`, `all` |
+| Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `all` |
 | Datasets | `vacancy`, `2dmd_low`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -72,12 +72,14 @@ python -m HERA.main --help
 
 Common arguments:
 
-- `--model`: `alignn`, `megnet`, `cgcnn`, `definet`, or `all`; `all` runs the ALIGNN,
+- `--model`: `alignn`, `megnet`, `cgcnn`, `definet`, `hypergraph`, or `all`; `all` runs the ALIGNN,
   MEGNet, and CGCNN suites in that order, with DeFiNet-style modes included for ALIGNN and CGCNN
 - For the default ALIGNN benchmark (`--mode all` or no explicit `--mode`),
   `hetero` runs first and `definet` second, followed by their related
   `hetero_fixed_pool`, `hetero_was`, and `definet_was` modes. Explicitly
-  listed modes keep the order supplied on the command line.
+  listed modes keep the order supplied on the command line. The hybrid
+  `hypergraph` mode is included in the default CGCNN, MEGNet, and ALIGNN
+  suites.
 - Multi-seed ALIGNN benchmarks run in seed-major order: every requested mode
   is completed for one seed before the next seed starts. Each mode still writes
   to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
@@ -87,7 +89,7 @@ Common arguments:
   list. Other datasets do not run the sparse representation.
 - `--dataset`: one or more dataset names, or `all` to run every dataset
 - `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
-  `hetero_was`, `attention_was`, `definet`, `definet_was`, or `all`
+  `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
   currently `6`; no reduced/cropped graph modes are exposed.
@@ -107,6 +109,13 @@ Common arguments:
   full-graph-only `was` mode is no longer exposed.
 - `hetero`, `hetero_fixed_pool`, and `hetero_was` use the `--r` values as the local/host boundary
   cutoff while keeping the full model graph and config graph cutoff.
+- `hypergraph` uses three semantic hyperedges per crystal: defect atoms,
+  pristine atoms within 3.0 A of any defect, and all remaining pristine atoms.
+  Distances use periodic minimum images. With `--model cgcnn`, `megnet`, or
+  `alignn`, the original physical bond (and ALIGNN angle) updates are
+  interleaved with hyperedge updates. `--model hypergraph` runs the pure
+  hypergraph baseline without a physical backbone. Override the threshold with
+  `--hypergraph-radius`.
 - CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was_x` and `hetero_was`,
   which concatenate current and previous/reference atom features.
 - Attention ablations are `attention` and `attention_was`. DeFiNet-style modes
@@ -144,7 +153,11 @@ Common arguments:
   result directories and combined summaries. Any explicitly selected norm,
   including a single value, uses its own `norm_<choice>` directory so
   `--resume` cannot reuse results produced by a different normalization.
-- ALIGNN, CGCNN, and MEGNet runs all stop early by default after 50 epochs
+- All Attention and DeFiNet variants use LayerNorm instead of batch-dependent
+  normalization. Their message-passing residuals follow `root +
+  LayerNorm(delta)`; AttentionMEGNet applies this independently to node, edge,
+  and global-state deltas.
+- ALIGNN, CGCNN, MEGNet, and hypergraph runs all stop early by default after 50 epochs
   without a relative validation MAE improvement greater than `0.5%`. Use
   `--early-stopping-patience` and
   `--early-stopping-min-delta-percent` to tune this for every selected model,
@@ -180,6 +193,10 @@ python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 
 python -m HERA.main --model cgcnn --dataset native --device cuda:0 --epochs 300 --seed all
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --cv5 --seed 123
 python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
+python -m HERA.main --model cgcnn --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
+python -m HERA.main --model megnet --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
+python -m HERA.main --model alignn --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
+python -m HERA.main --model hypergraph --dataset native --hypergraph-radius 3.0 --device cuda:0
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 4 --alignn-grad-accum-steps 16 --alignn-amp
@@ -269,24 +286,35 @@ configurations. Outputs include `summary.csv`, `comparison.csv`, prediction
 CSVs, per-material POSCAR0 value tables under
 `<model>/<mode>/poscar0_values/`, and figures under `figures/`.
 
-### Native initial/relaxed leave-one-out final DFE
+### Native final-structure leave-one-out and POSCAR0 transfer
 
-To leave out every eligible native-defect material in turn, train on the other
-materials, and predict the final relaxed defect formation energy from initial
-and relaxed structures:
+To leave out every eligible native-defect material in turn, directly predict
+its final relaxed structures, and compare against POSCAR0 one-shot transfer:
 
 ```bash
 python -m HERA.native_initial_relaxed_leave_one_out --seed 123 --model cgcnn megnet definet --mode full hetero attention --epochs 500 --device cuda:0 --run-dir HERA/logs/native_initial_relaxed_seed123 --atom-init HERA/atom_init.json
 ```
 
+For the controlled ordinary ALIGNN versus HeteroALIGNN + LayerNorm comparison:
+
+```bash
+python -m HERA.native_initial_relaxed_leave_one_out --seed all --model alignn --mode full hetero --alignn-hetero-node-norm layernorm --epochs 500 --device cuda:0 --run-dir HERA/logs/native_alignn_layernorm_loo --atom-init HERA/atom_init.json
+```
+
 By default the script discovers all materials that have both POSCAR0 initial
-structures and non-POSCAR0 relaxed structures. For each held-out material it
-runs two comparisons: train on all usable rows from the other materials and
-test the held-out POSCAR0 initial structures, or train on all usable rows from
-the other materials plus the held-out POSCAR0 initial structures and test the
-held-out lowest-energy relaxed structure for each native defect group. The
-target is the lowest non-POSCAR0 DFE for each native defect group. Outputs
-include `summary.csv`, `summary.md`, per-sample
+structures and non-POSCAR0 relaxed structures. Every CIF retains its own DFE
+from the native CSV; labels are never replaced by a group minimum. For each
+held-out material the script trains a source model on all rows from the other
+materials and evaluates two protocols on the same final structures (the
+lowest-DFE non-POSCAR0 CIF in each defect group): direct prediction, and a copy
+of the source model fine-tuned using only the held-out POSCAR0 rows. Use
+`--finetune-epochs` and `--finetune-lr` to control adaptation. This LOO runner
+updates the full model for 20 epochs by default, using discriminative learning
+rates of `1e-5` for the GNN backbone and `1e-4` for the prediction head. This
+allows representation adaptation while limiting catastrophic forgetting. Use
+`--finetune-backbone-lr` to override the backbone rate. Outputs include
+`summary.csv`, `overall_mae.csv` (sample-weighted across held-out materials),
+`summary.md`, per-sample
 prediction CSVs, material eligibility metadata, and figures following the
 style of `scripts/plot_native_zero_shot_performance.py`. The outer loop is
 material-first: after one held-out material finishes across all selected
@@ -296,6 +324,11 @@ DFT-ordered energy-comparison figure. Outputs are organized as
 with plots in `<run-dir>/<material>/figures/`. When a fixed `--run-dir` is
 reused, existing checkpoints and prediction CSVs are loaded automatically, so
 `--resume` is no longer required.
+When both ALIGNN variants are selected, the runner also writes paired
+`alignn_layernorm_comparison.csv`, cross-material/seed
+`alignn_layernorm_aggregate.csv`, and
+`figures/alignn_layernorm_vs_alignn_loo_mae.png`. Positive relative MAE
+improvement means HeteroALIGNN + LayerNorm performs better than ALIGNN.
 
 ## ALIGNN / HeteroALIGNN
 

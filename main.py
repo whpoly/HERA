@@ -24,9 +24,10 @@ Usage examples:
   python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 
 Supported combinations:
-  Models  : megnet, cgcnn, definet, alignn, all
+  Models  : megnet, cgcnn, definet, alignn, hypergraph, all
   Modes   : sparse, full, full_x, hetero, hetero_fixed_pool, attention,
-            was_x, hetero_was, attention_was, definet, definet_was, all
+            was_x, hetero_was, attention_was, definet, definet_was,
+            hypergraph, all
   Datasets: vacancy, 2dmd_low, 2dmd_high, native, och, imp2d, semi, all
 """
 
@@ -71,6 +72,7 @@ LOCAL_CUTOFF_SWEEP_MODES = (
 )
 FIXED_POOL_MODES = ('hetero_fixed_pool',)
 DEFINET_MODES = ('attention', 'attention_was')
+HYPERGRAPH_MODES = ('hypergraph',)
 ALIGNN_MODES = (
     'full',
     'full_x',
@@ -82,6 +84,7 @@ ALIGNN_MODES = (
     'attention_was',
     'definet',
     'definet_was',
+    'hypergraph',
 )
 WAS_ABLATION_MODELS = ('cgcnn', 'megnet', 'alignn')
 WAS_ABLATION_MODES = (
@@ -109,6 +112,7 @@ CGCNN_DEFAULT_MODES = [
     'attention_was',
     'definet',
     'definet_was',
+    'hypergraph',
 ]
 MEGNET_DEFAULT_MODES = [
     'sparse',
@@ -120,6 +124,7 @@ MEGNET_DEFAULT_MODES = [
     'was_x',
     'hetero_was',
     'attention_was',
+    'hypergraph',
 ]
 ALIGNN_DEFAULT_MODES = [
     'hetero',
@@ -132,6 +137,7 @@ ALIGNN_DEFAULT_MODES = [
     'attention',
     'was_x',
     'attention_was',
+    'hypergraph',
 ]
 ALIGNN_NODE_NORM_MODES = frozenset((
     'hetero',
@@ -239,6 +245,8 @@ def apply_training_overrides(config, args, model_name):
                 config['model']['hetero_node_norm'] = norm_values[0]
         if args.alignn_amp:
             config['optim']['amp'] = True
+    if config['task'].endswith('_hypergraph') and args.hypergraph_radius is not None:
+        config['model']['hypergraph_radius'] = args.hypergraph_radius
     return config
 
 
@@ -577,7 +585,13 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
         f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
         f'{split_label}: {losses}',
     ]
-    if radius_label is not None:
+    if config['task'].endswith('_hypergraph'):
+        mode_summary.insert(
+            1,
+            f'Hypergraph defect-neighbor radius: '
+            f'{config["model"]["hypergraph_radius"]} A',
+        )
+    elif radius_label is not None:
         mode_summary.insert(1, radius_summary(run_label.rsplit('_r', 1)[0], config))
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
@@ -600,6 +614,8 @@ def latest_run_dir(log_dir):
 def default_modes_for_model(model_name):
     if model_name == 'definet':
         return list(DEFINET_MODES)
+    if model_name == 'hypergraph':
+        return list(HYPERGRAPH_MODES)
     if model_name == 'alignn':
         return list(ALIGNN_DEFAULT_MODES)
     if model_name == 'cgcnn':
@@ -610,6 +626,15 @@ def default_modes_for_model(model_name):
 
 
 def validate_modes_for_model(model_name, modes, parser):
+    if model_name == 'hypergraph' and any(mode not in HYPERGRAPH_MODES for mode in modes):
+        parser.error('The hypergraph model only supports --mode hypergraph')
+    if model_name not in ('cgcnn', 'megnet', 'alignn', 'hypergraph') and any(
+            mode in HYPERGRAPH_MODES for mode in modes
+    ):
+        parser.error(
+            'The hypergraph mode is only supported with --model cgcnn, '
+            '--model megnet, --model alignn, or --model hypergraph'
+        )
     if model_name != 'megnet' and 'sparse' in modes:
         parser.error(
             'The sparse mode is the MEGNET_SPARSE reproduction and only '
@@ -623,7 +648,7 @@ def validate_modes_for_model(model_name, modes, parser):
         parser.error(
             'The alignn model supports --mode full full_x hetero '
             'hetero_fixed_pool attention was_x hetero_was attention_was '
-            'definet definet_was'
+            'definet definet_was hypergraph'
         )
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
         parser.error('The was_x and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
@@ -705,12 +730,12 @@ def write_dataset_summary(model_name, dataset_name, modes, results, epochs, seed
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Train crystal GNN models (CGCNN / MEGNet / ALIGNN) with different graph modes.',
+        description='Train crystal GNN and region-hypergraph models for defect properties.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument('--model', required=True, choices=VALID_MODELS + ['all'],
-                        help='Model architecture: megnet, cgcnn, definet, alignn, or all')
+                        help='Model architecture: megnet, cgcnn, definet, alignn, hypergraph, or all')
     parser.add_argument(
         '--dataset',
         required=True,
@@ -766,6 +791,12 @@ def main():
                               'early stopping patience, in percent (default: 0.5)'))
     parser.add_argument('--alignn-amp', action='store_true',
                         help='Use CUDA automatic mixed precision only for ALIGNN runs')
+    parser.add_argument(
+        '--hypergraph-radius',
+        type=float,
+        default=None,
+        help='Defect-neighbor radius for hypergraph regions in angstrom (default: 3.0)',
+    )
     parser.add_argument(
         '--seed',
         dest='seeds',
@@ -837,6 +868,8 @@ def main():
         parser.error('--early-stopping-min-delta-percent must be in [0, 100)')
     if args.alignn_cutoff is not None and args.alignn_cutoff <= 0:
         parser.error('--alignn-cutoff must be > 0')
+    if args.hypergraph_radius is not None and args.hypergraph_radius < 0:
+        parser.error('--hypergraph-radius must be >= 0')
     args.seeds = parse_seed_values(args.seeds, parser)
     if args.alignn_hetero_node_norm is not None:
         args.alignn_hetero_node_norm = list(dict.fromkeys(
@@ -1029,18 +1062,38 @@ def main():
                     f'train={config["model"]["train_batch_size"]}, '
                     f'val/test={config["model"]["test_batch_size"]}'
                 )
-                print(
-                    '  Graph/model: '
-                    f'cutoff={config["model"]["cutoff"]}, '
-                    f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
-                    f'hidden={config["model"]["embedding_size"]}, '
-                    f'nblocks={config["model"]["nblocks"]}, '
-                    f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
-                    f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
-                    f'hetero_node_norm={config["model"].get("hetero_node_norm", "layernorm")}, '
-                    f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
-                    f'amp={config["optim"].get("amp", False)}'
-                )
+                if train_mode == 'hypergraph':
+                    physical_summary = (
+                        'physical_backbone=none, '
+                        if model_name == 'hypergraph'
+                        else (
+                            f'physical_backbone={model_name}, '
+                            f'physical_cutoff={config["model"]["cutoff"]}, '
+                            f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
+                        )
+                    )
+                    print(
+                        '  Hypergraph/model: '
+                        f'{physical_summary}'
+                        'hyperedges=3 (defect/near-pristine/far-pristine), '
+                        f'radius={config["model"]["hypergraph_radius"]} A, '
+                        f'hidden={config["model"]["embedding_size"]}, '
+                        f'nblocks={config["model"]["nblocks"]}, '
+                        f'heads={config["model"].get("n_heads", 4)}'
+                    )
+                else:
+                    print(
+                        '  Graph/model: '
+                        f'cutoff={config["model"]["cutoff"]}, '
+                        f'max_neighbors={config["model"].get("max_neighbors", "all")}, '
+                        f'hidden={config["model"]["embedding_size"]}, '
+                        f'nblocks={config["model"]["nblocks"]}, '
+                        f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
+                        f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
+                        f'hetero_node_norm={config["model"].get("hetero_node_norm", "layernorm")}, '
+                        f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
+                        f'amp={config["optim"].get("amp", False)}'
+                    )
                 early_stopping_patience = config['optim'].get('early_stopping_patience', 0)
                 if early_stopping_patience:
                     print(

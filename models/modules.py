@@ -361,6 +361,9 @@ class AtomTypeAttentionMegnetModule(MessagePassing):
         self.inner_skip = inner_skip
         self.n_heads = n_heads
         self.embed_size = embed_size
+        self.node_norm = nn.LayerNorm(embed_size)
+        self.edge_norm = nn.LayerNorm(embed_size)
+        self.state_norm = nn.LayerNorm(embed_size)
 
         # Type embedding: 0=host, 1=defect
         self.type_emb = nn.Embedding(2, embed_size)
@@ -441,7 +444,11 @@ class AtomTypeAttentionMegnetModule(MessagePassing):
         u_v = _global_pool_with_dim_size(self.global_aggregation, x, batch, num_graphs)
         u_e = _global_pool_with_dim_size(self.global_aggregation, edge_attr, bond_batch, num_graphs)
         state = self.phi_u(torch.cat((u_e, u_v, state), 1))
-        return x + x_skip, edge_attr + edge_attr_skip, state + state_skip
+        return (
+            x_skip + self.node_norm(x),
+            edge_attr_skip + self.edge_norm(edge_attr),
+            state_skip + self.state_norm(state),
+        )
 
     def message(self, x_i, x_j, edge_attr, index, ptr, size_i):
         from torch_geometric.utils import softmax as pyg_softmax
@@ -476,7 +483,7 @@ class AtomTypeAttentionMegnetModule(MessagePassing):
 # ------------------------------------------------------------------ #
 
 class AttentionCGConv(MessagePassing):
-    def __init__(self, channels, dim, n_heads=4, batch_norm=True):
+    def __init__(self, channels, dim, n_heads=4):
         super().__init__(aggr='add')
         self.channels = channels
         self.dim = dim
@@ -495,7 +502,7 @@ class AttentionCGConv(MessagePassing):
             nn.LeakyReLU(0.2),
             nn.Linear(n_heads * 2, n_heads),
         )
-        self.bn = nn.BatchNorm1d(channels) if batch_norm else nn.Identity()
+        self.norm = nn.LayerNorm(channels)
 
         self._attention_weights = None
         self._edge_index = None
@@ -508,9 +515,7 @@ class AttentionCGConv(MessagePassing):
         else:
             self._type_emb = None
         out = self.propagate(edge_index, x=x, edge_attr=edge_attr)
-        out = self.bn(out)
-        out = out + x
-        return out
+        return x + self.norm(out)
 
     def message(self, x_i, x_j, edge_attr, index, ptr, size_i):
         from torch_geometric.utils import softmax as pyg_softmax
@@ -596,7 +601,7 @@ class DefectAwareGateConv(MessagePassing):
     attention layers above, this layer does not apply neighbor softmax.
     """
 
-    def __init__(self, channels, dim, n_marker_types=2, batch_norm=True):
+    def __init__(self, channels, dim, n_marker_types=2):
         super().__init__(aggr='add')
         self.channels = channels
         self.dim = dim
@@ -620,7 +625,7 @@ class DefectAwareGateConv(MessagePassing):
             nn.Linear(2 * channels, channels), ShiftedSoftplus(),
             nn.Linear(channels, channels),
         )
-        self.bn = nn.BatchNorm1d(channels) if batch_norm else nn.Identity()
+        self.norm = nn.LayerNorm(channels)
 
         self._edge_index = None
         self._markers = None
@@ -634,8 +639,8 @@ class DefectAwareGateConv(MessagePassing):
         self._markers = defect_marker.clamp(0, self.n_marker_types - 1)
 
         msg = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr)
-        out = x + self.update_nn(torch.cat([x, msg], dim=-1))
-        return self.bn(out)
+        delta = self.update_nn(torch.cat([x, msg], dim=-1))
+        return x + self.norm(delta)
 
     def message(self, x_j, edge_attr):
         src, dst = self._edge_index

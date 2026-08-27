@@ -30,6 +30,16 @@ HETERO_TASKS = {
     "alignn_hetero_local",
     "alignn_hetero_local_was",
 }
+PURE_HYPERGRAPH_TASKS = {"hypergraph_hypergraph"}
+CGCNN_HYPERGRAPH_TASKS = {"cgcnn_hypergraph"}
+MEGNET_HYPERGRAPH_TASKS = {"megnet_hypergraph"}
+ALIGNN_HYPERGRAPH_TASKS = {"alignn_hypergraph"}
+HYBRID_HYPERGRAPH_TASKS = (
+    CGCNN_HYPERGRAPH_TASKS
+    | MEGNET_HYPERGRAPH_TASKS
+    | ALIGNN_HYPERGRAPH_TASKS
+)
+HYPERGRAPH_TASKS = PURE_HYPERGRAPH_TASKS | HYBRID_HYPERGRAPH_TASKS
 MEGNET_HETERO_TASKS = {
     "megnet_hetero",
     "megnet_hetero_was",
@@ -127,8 +137,53 @@ class PredictionWrapper(nn.Module):
             node_type=None,
             defect_marker=None,
             edge_vec=None,
+            hyperedge_index=None,
+            hyperedge_type=None,
+            region_type=None,
     ):
-        if self.task in MEGNET_HETERO_TASKS:
+        if self.task in PURE_HYPERGRAPH_TASKS:
+            pred = self.model(
+                x,
+                edge_index,
+                batch,
+                state=state,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        elif self.task in CGCNN_HYPERGRAPH_TASKS:
+            pred = self.model(
+                x,
+                edge_index,
+                edge_attr,
+                batch,
+                hyperedge_index,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        elif self.task in MEGNET_HYPERGRAPH_TASKS:
+            pred = self.model(
+                x,
+                edge_index,
+                edge_attr,
+                state,
+                batch,
+                bond_batch,
+                hyperedge_index,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        elif self.task in ALIGNN_HYPERGRAPH_TASKS:
+            pred = self.model(
+                x,
+                edge_index,
+                edge_attr,
+                batch,
+                hyperedge_index,
+                edge_vec=edge_vec,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        elif self.task in MEGNET_HETERO_TASKS:
             x, edge_index, edge_attr, batch, bond_batch = _complete_hetero_inputs(
                 x, edge_index, edge_attr, batch, bond_batch
             )
@@ -313,6 +368,27 @@ def _batch_target(batch, device):
 
 
 def _model_args(batch, task):
+    if task in PURE_HYPERGRAPH_TASKS:
+        return (batch.x, batch.hyperedge_index), {
+            "batch": batch.batch,
+            "state": batch.state,
+            "hyperedge_type": batch.hyperedge_type,
+            "region_type": batch.region_type,
+        }
+    if task in HYBRID_HYPERGRAPH_TASKS:
+        kwargs = {
+            "edge_attr": batch.edge_attr,
+            "batch": batch.batch,
+            "hyperedge_index": batch.hyperedge_index,
+            "hyperedge_type": batch.hyperedge_type,
+            "region_type": batch.region_type,
+        }
+        if task in MEGNET_HYPERGRAPH_TASKS:
+            kwargs["state"] = batch.state
+            kwargs["bond_batch"] = batch.bond_batch
+        if task in ALIGNN_HYPERGRAPH_TASKS:
+            kwargs["edge_vec"] = getattr(batch, "edge_vec", None)
+        return (batch.x, batch.edge_index), kwargs
     if task in HETERO_TASKS:
         edge_index_dict = _nonempty_edge_dict(batch.edge_index_dict)
         edge_attr_dict = _select_dict_keys(batch.edge_attr_dict, edge_index_dict.keys())
@@ -542,7 +618,10 @@ def _extract_node_values(explanation, batch, task, type_index):
         return values, type_labels
 
     values = _mask_to_vector(explanation.node_mask)
-    node_types = getattr(batch, "node_type", None)
+    if task in HYPERGRAPH_TASKS:
+        node_types = getattr(batch, "region_type", None)
+    else:
+        node_types = getattr(batch, "node_type", None)
     if node_types is not None:
         node_types = _tensor_like_to_list(node_types)
     return [float(v) for v in values], node_types

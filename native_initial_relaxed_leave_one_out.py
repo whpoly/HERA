@@ -1,16 +1,14 @@
 #!/usr/bin/env python
 """Leave-one-material-out native-defect initial/relaxed DFE tests.
 
-The target in this experiment is the final relaxed defect formation energy
-for each native-defect group. By default that value is the lowest non-POSCAR0
-DFE observed for the group. Two cross-domain protocols are run for every
-eligible held-out material:
+Every CIF keeps its own DFE from the native ``id_prop_A_rich.csv`` file. The
+lowest-DFE non-POSCAR0 row in each defect group is the final structure used for
+evaluation and plotting. Two protocols are run for every eligible material:
 
-1. Train on all usable rows from the other materials, then test the held-out
-   POSCAR0 initial structures against the final relaxed DFE.
-2. Train on all usable rows from the other materials plus the held-out POSCAR0
-   initial structures, then test held-out relaxed structures against the final
-   relaxed DFE.
+1. Train on every row from the other materials, then directly predict the
+   held-out final structures.
+2. Fine-tune a copy of that source model using only the held-out POSCAR0 rows,
+   then predict the same held-out final structures.
 """
 
 from __future__ import annotations
@@ -32,6 +30,8 @@ from sklearn.model_selection import train_test_split
 from .config.defaults import VALID_MODES
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
 from .main import (
+    ALIGNN_NODE_NORM_MODES,
+    expand_alignn_node_norm_runs,
     is_meaningful_relative_improvement,
     parse_radius_values,
     parse_seed_values,
@@ -47,27 +47,44 @@ from .native_ood_case_study import (
     model_mode_display,
     modes_for_model,
 )
-from .training.trainer import MEGNetTrainer
+from .native_poscar0_finetune import (
+    set_train_loader_keep_scaler,
+    train_fixed_epochs,
+)
+from .training.trainer import MEGNetTrainer, load_trusted_checkpoint
 
 
 PROTOCOLS = {
-    "other_train__initial_test": {
-        "display": "Train: other -> Test: initial",
+    "direct__final_test": {
+        "display": "Direct: other -> final structure",
         "train_pool": "other",
-        "test_pool": "initial",
+        "test_pool": "final",
     },
-    "other_plus_initial_train__relaxed_test": {
-        "display": "Train: other+held-out initial -> Test: relaxed",
-        "train_pool": "other_plus_initial",
-        "test_pool": "relaxed",
+    "poscar0_transfer__final_test": {
+        "display": "One-shot transfer: POSCAR0 -> final structure",
+        "train_pool": "other_then_poscar0",
+        "test_pool": "final",
     },
 }
 
 PROTOCOL_ORDER = list(PROTOCOLS)
 PROTOCOL_COLORS = {
-    "other_train__initial_test": "#3b82f6",
-    "other_plus_initial_train__relaxed_test": "#0f766e",
+    "direct__final_test": "#3b82f6",
+    "poscar0_transfer__final_test": "#0f766e",
 }
+
+ALIGNN_BASELINE_LABEL = "ALIGNN"
+ALIGNN_HETERO_LAYERNORM_LABEL = "HeteroALIGNN + LayerNorm"
+COMPARISON_METRICS = (
+    "mae",
+    "rmse",
+    "ground_state_mae",
+    "top1_accuracy",
+    "ndcg",
+)
+TARGET_SCHEME = "native_raw_dfe_final_structure_v1"
+TRANSFER_SCHEME = "full_model_discriminative_lr_v1"
+PREDICTION_HEAD_ATTRIBUTES = ("fc_out", "fc", "readout", "hiddens")
 
 
 def subset(values, indices):
@@ -83,54 +100,91 @@ def default_run_dir(log_dir):
     return Path(log_dir) / f"native_initial_relaxed_loo_{timestamp}"
 
 
-def add_final_relaxed_targets(metadata, targets):
-    """Attach final relaxed DFE metadata to every row.
-
-    The final target is the minimum DFE among non-POSCAR0 configurations in the
-    same defect group. Groups without any relaxed structure are marked invalid
-    for this experiment and are left out of train/test pools.
-    """
+def add_native_targets(metadata, targets):
+    """Attach original native DFE labels and identify each group's final structure."""
     out = metadata.reset_index(drop=True).copy()
     out["raw_target"] = np.asarray(targets, dtype=float)
     out["is_initial"] = out["configuration"].astype(str).eq("POSCAR0")
     out["is_relaxed"] = ~out["is_initial"]
-    out["has_relaxed_final"] = False
-    out["final_target"] = np.nan
+    out["is_final_relaxed"] = False
     out["final_file"] = None
     out["final_configuration"] = None
-    out["is_final_relaxed"] = False
 
-    for defect_group, group in out.groupby("defect_group", sort=False):
-        relaxed = group[group["is_relaxed"]].copy()
+    for _, group in out.groupby("defect_group", sort=False):
+        relaxed = group[group["is_relaxed"]].sort_values(
+            ["raw_target", "file"], ascending=[True, True]
+        )
         if relaxed.empty:
             continue
-        relaxed = relaxed.sort_values(["raw_target", "file"], ascending=[True, True])
         final_row = relaxed.iloc[0]
-        idx = group.index
-        out.loc[idx, "has_relaxed_final"] = True
-        out.loc[idx, "final_target"] = float(final_row["raw_target"])
-        out.loc[idx, "final_file"] = final_row["file"]
-        out.loc[idx, "final_configuration"] = final_row["configuration"]
+        out.loc[group.index, "final_file"] = final_row["file"]
+        out.loc[group.index, "final_configuration"] = final_row["configuration"]
         out.loc[final_row.name, "is_final_relaxed"] = True
-
     return out
+
+
+def split_backbone_and_head_parameters(model):
+    """Return trainable backbone/head groups for discriminative fine-tuning."""
+    for parameter in model.parameters():
+        parameter.requires_grad_(True)
+
+    for attribute in PREDICTION_HEAD_ATTRIBUTES:
+        head = getattr(model, attribute, None)
+        if head is None:
+            continue
+        head_parameters = list(head.parameters())
+        if not head_parameters:
+            continue
+        head_ids = {id(parameter) for parameter in head_parameters}
+        backbone_parameters = [
+            parameter for parameter in model.parameters() if id(parameter) not in head_ids
+        ]
+        if not backbone_parameters:
+            raise ValueError(
+                f"{type(model).__name__}.{attribute} contains every model parameter; "
+                "cannot construct separate backbone/head learning rates."
+            )
+        return attribute, backbone_parameters, head_parameters
+    raise ValueError(
+        f"No supported prediction head found on {type(model).__name__}; "
+        f"expected one of {PREDICTION_HEAD_ATTRIBUTES}."
+    )
+
+
+def reset_discriminative_optimizer(trainer, backbone_lr, head_lr):
+    """Update the full model while protecting the backbone with a smaller LR."""
+    head_name, backbone_parameters, head_parameters = split_backbone_and_head_parameters(
+        trainer.model
+    )
+    weight_decay = trainer.config["optim"].get("weight_decay", 1e-4)
+    trainer.optimizer = torch.optim.AdamW(
+        [
+            {"params": backbone_parameters, "lr": backbone_lr, "name": "backbone"},
+            {"params": head_parameters, "lr": head_lr, "name": "prediction_head"},
+        ],
+        weight_decay=weight_decay,
+    )
+    return (
+        head_name,
+        sum(parameter.numel() for parameter in backbone_parameters),
+        sum(parameter.numel() for parameter in head_parameters),
+    )
 
 
 def eligible_materials(metadata):
     rows = []
-    valid = metadata["has_relaxed_final"].to_numpy()
     initial = metadata["is_initial"].to_numpy()
-    relaxed = metadata["is_final_relaxed"].to_numpy()
+    final_relaxed = metadata["is_final_relaxed"].to_numpy()
     for material, group in metadata.groupby("material", sort=True):
         idx = group.index.to_numpy()
-        n_initial = int(np.sum(valid[idx] & initial[idx]))
-        n_relaxed = int(np.sum(valid[idx] & relaxed[idx]))
+        n_initial = int(np.sum(initial[idx]))
+        n_final = int(np.sum(final_relaxed[idx]))
         rows.append(
             {
                 "material": material,
-                "n_initial_with_final": n_initial,
-                "n_relaxed_with_final": n_relaxed,
-                "eligible": n_initial > 0 and n_relaxed > 0,
+                "n_initial": n_initial,
+                "n_final_structures": n_final,
+                "eligible": n_initial > 0 and n_final > 0,
             }
         )
     table = pd.DataFrame(rows)
@@ -153,20 +207,33 @@ def save_history(path, rows):
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
-def save_checkpoint(path, trainer, model_state_dict):
+def save_checkpoint(path, trainer, model_state_dict, transfer_scheme=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "model": model_state_dict,
             "scaler": trainer.scaler.state_dict(),
+            "target_scheme": TARGET_SCHEME,
+            "transfer_scheme": transfer_scheme,
         },
         path,
     )
 
 
-def load_checkpoint(path, config, device, seed):
+def load_checkpoint(path, config, device, seed, expected_transfer_scheme=None):
     trainer = MEGNetTrainer(config, device, seed=seed)
-    checkpoint = torch.load(path, map_location=device)
+    checkpoint = load_trusted_checkpoint(path, map_location=device)
+    if checkpoint.get("target_scheme") != TARGET_SCHEME:
+        raise ValueError(
+            f"Checkpoint {path} predates the {TARGET_SCHEME} target scheme. "
+            "It cannot be reused for native raw-DFE evaluation."
+        )
+    if checkpoint.get("transfer_scheme") != expected_transfer_scheme:
+        raise ValueError(
+            f"Checkpoint {path} uses transfer scheme "
+            f"{checkpoint.get('transfer_scheme')!r}, expected "
+            f"{expected_transfer_scheme!r}."
+        )
     trainer.model.load_state_dict(checkpoint["model"])
     trainer.scaler.load_state_dict(checkpoint["scaler"])
     return trainer, copy.deepcopy(checkpoint["model"])
@@ -278,6 +345,8 @@ def metric_row(
     n_val,
     n_test,
     best_val,
+    node_normalization=None,
+    n_finetune=0,
 ):
     row = {
         "material": material,
@@ -289,25 +358,27 @@ def metric_row(
         "seed": int(seed),
         "n_train": int(n_train),
         "n_val": int(n_val),
+        "n_finetune_poscar0": int(n_finetune),
         "n_test": int(n_test),
         "best_val_mae": float(best_val),
+        "node_normalization": node_normalization or "",
+        "target_scheme": TARGET_SCHEME,
+        "transfer_scheme": TRANSFER_SCHEME if n_finetune else "",
     }
     row.update({key: float(value) for key, value in metrics.items()})
     return row
 
 
 def masks_for_material(metadata, material):
-    valid = metadata["has_relaxed_final"].to_numpy()
     material_mask = metadata["material"].astype(str).eq(str(material)).to_numpy()
     initial = metadata["is_initial"].to_numpy()
     final_relaxed = metadata["is_final_relaxed"].to_numpy()
     other = ~material_mask
 
     return {
-        "train_other": np.where(other & valid)[0],
-        "train_other_plus_initial": np.where((other & valid) | (material_mask & valid & initial))[0],
-        "test_initial": np.where(material_mask & valid & initial)[0],
-        "test_relaxed": np.where(material_mask & valid & final_relaxed)[0],
+        "train_other": np.where(other)[0],
+        "finetune_poscar0": np.where(material_mask & initial)[0],
+        "test_final": np.where(material_mask & final_relaxed)[0],
     }
 
 
@@ -315,7 +386,7 @@ def prediction_path(out_dir, protocol, material):
     return out_dir / "predictions" / protocol / f"{material}.csv"
 
 
-def load_compatible_prediction(path, expected_indices):
+def load_compatible_prediction(path, expected_indices, expected_targets):
     if not path.exists():
         return None, None
     pred_df = pd.read_csv(path)
@@ -325,8 +396,15 @@ def load_compatible_prediction(path, expected_indices):
             f"  Existing prediction has {len(pred_df)} rows, expected {expected_n}; recomputing: {path}"
         )
         return None, None
+    if "target_scheme" not in pred_df or not pred_df["target_scheme"].eq(TARGET_SCHEME).all():
+        print(f"  Existing prediction uses an incompatible target scheme; recomputing: {path}")
+        return None, None
     if "target" not in pred_df.columns or "prediction" not in pred_df.columns:
         print(f"  Existing prediction is missing required columns; recomputing: {path}")
+        return None, None
+    expected = tensor_subset(expected_targets, expected_indices).numpy()
+    if not np.allclose(pred_df["target"].to_numpy(dtype=float), expected, rtol=0.0, atol=1e-6):
+        print(f"  Existing prediction targets differ from native raw DFE; recomputing: {path}")
         return None, None
     print(f"  Resume prediction: {path}")
     metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
@@ -348,11 +426,18 @@ def run_training_group(
     checkpoint_path = group_dir / f"{train_kind}_checkpoint.pth"
     history_path = group_dir / f"{train_kind}_history.csv"
 
+    trainer = None
     if checkpoint_path.exists():
-        print(f"  Resume {train_kind} checkpoint: {checkpoint_path}")
-        trainer, state = load_checkpoint(checkpoint_path, run["config"], args.device, args.seed)
-        best_val = float("nan")
-    else:
+        try:
+            trainer, state = load_checkpoint(
+                checkpoint_path, run["config"], args.device, args.seed
+            )
+            print(f"  Resume {train_kind} checkpoint: {checkpoint_path}")
+            best_val = float("nan")
+        except ValueError as exc:
+            print(f"  Ignore incompatible checkpoint: {exc}")
+
+    if trainer is None:
         print(
             f"  Train {train_kind} model for held-out {material} "
             f"(train={len(train_idx)}, val={len(val_idx)})"
@@ -373,49 +458,104 @@ def run_training_group(
     return trainer, state, best_val, train_idx, val_idx
 
 
+def finetune_on_poscar0(args, run, base_trainer, base_state, data, targets, indices, out_dir):
+    """Fine-tune a copy of the source model using only held-out POSCAR0 rows."""
+    checkpoint_path = out_dir / "poscar0_transfer_checkpoint.pth"
+    history_path = out_dir / "poscar0_transfer_history.csv"
+
+    if checkpoint_path.exists():
+        try:
+            trainer, state = load_checkpoint(
+                checkpoint_path,
+                run["config"],
+                args.device,
+                args.seed,
+                expected_transfer_scheme=TRANSFER_SCHEME,
+            )
+            print(f"  Resume POSCAR0 transfer checkpoint: {checkpoint_path}")
+            return trainer, state
+        except ValueError as exc:
+            print(f"  Ignore incompatible transfer checkpoint: {exc}")
+
+    set_seed(args.seed)
+    trainer = MEGNetTrainer(run["config"], args.device, seed=args.seed)
+    trainer.model.load_state_dict(base_state)
+    trainer.scaler.load_state_dict(base_trainer.scaler.state_dict())
+    head_name, n_backbone, n_head = reset_discriminative_optimizer(
+        trainer,
+        backbone_lr=args.finetune_backbone_lr,
+        head_lr=args.finetune_lr,
+    )
+    print(
+        f"  POSCAR0 transfer scope: full model; backbone={n_backbone} params "
+        f"at lr={args.finetune_backbone_lr:g}, {head_name} head={n_head} params "
+        f"at lr={args.finetune_lr:g}"
+    )
+    set_train_loader_keep_scaler(
+        trainer,
+        subset(data, indices),
+        tensor_subset(targets, indices),
+    )
+    train_fixed_epochs(
+        trainer,
+        args.finetune_epochs,
+        history_path,
+        phase="poscar0_transfer",
+    )
+    state = copy.deepcopy(trainer.model.state_dict())
+    save_checkpoint(
+        checkpoint_path,
+        trainer,
+        state,
+        transfer_scheme=TRANSFER_SCHEME,
+    )
+    return trainer, state
+
+
 def run_material(args, model_name, run, data, targets, metadata, material, out_dir):
     idx = masks_for_material(metadata, material)
-    if len(idx["test_initial"]) == 0 or len(idx["test_relaxed"]) == 0:
+    if len(idx["finetune_poscar0"]) == 0 or len(idx["test_final"]) == 0:
         return [], {
             "material": material,
-            "reason": "missing initial or relaxed held-out samples with relaxed final target",
+            "reason": "missing held-out POSCAR0 or final relaxed structures",
         }
 
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
+    base_trainer, base_state, best_val, train_idx, val_idx = run_training_group(
+        args,
+        run,
+        data,
+        targets,
+        metadata,
+        material,
+        "other_train",
+        idx["train_other"],
+        out_dir,
+    )
+    node_normalization = (
+        run["config"]["model"].get("hetero_node_norm")
+        if model_name == "alignn" and run["mode"] in ALIGNN_NODE_NORM_MODES
+        else None
+    )
 
-    protocol = "other_train__initial_test"
+    protocol = "direct__final_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    pred_df, metrics = load_compatible_prediction(pred_path, idx["test_initial"])
-    if pred_df is not None:
-        other_train_idx, other_val_idx = split_train_val(
-            idx["train_other"], args.val_fraction, args.seed
-        )
-        other_best_val = float("nan")
-    else:
-        other_trainer, other_state, other_best_val, other_train_idx, other_val_idx = (
-            run_training_group(
-                args,
-                run,
-                data,
-                targets,
-                metadata,
-                material,
-                "other_train",
-                idx["train_other"],
-                out_dir,
-            )
-        )
+    pred_df, metrics = load_compatible_prediction(
+        pred_path, idx["test_final"], targets
+    )
+    if pred_df is None:
         pred_df, metrics = predict_dataframe(
-            other_trainer,
+            base_trainer,
             data,
             targets,
             metadata,
-            idx["test_initial"],
-            other_state,
+            idx["test_final"],
+            base_state,
         )
         pred_df.insert(0, "seed", args.seed)
         pred_df.insert(1, "protocol", protocol)
+        pred_df.insert(2, "target_scheme", TARGET_SCHEME)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
         pred_df.to_csv(pred_path, index=False)
     rows.append(
@@ -426,45 +566,41 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
             protocol,
             args.seed,
             metrics,
-            len(other_train_idx),
-            len(other_val_idx),
-            len(idx["test_initial"]),
-            other_best_val,
+            len(train_idx),
+            len(val_idx),
+            len(idx["test_final"]),
+            best_val,
+            node_normalization,
         )
     )
 
-    protocol = "other_plus_initial_train__relaxed_test"
+    protocol = "poscar0_transfer__final_test"
     pred_path = prediction_path(out_dir, protocol, material)
-    pred_df, metrics = load_compatible_prediction(pred_path, idx["test_relaxed"])
-    if pred_df is not None:
-        augmented_train_idx, augmented_val_idx = split_train_val(
-            idx["train_other_plus_initial"], args.val_fraction, args.seed
-        )
-        augmented_best_val = float("nan")
-    else:
-        augmented_trainer, augmented_state, augmented_best_val, augmented_train_idx, augmented_val_idx = (
-            run_training_group(
-                args,
-                run,
-                data,
-                targets,
-                metadata,
-                material,
-                "other_plus_initial_train",
-                idx["train_other_plus_initial"],
-                out_dir,
-            )
+    pred_df, metrics = load_compatible_prediction(
+        pred_path, idx["test_final"], targets
+    )
+    if pred_df is None:
+        transfer_trainer, transfer_state = finetune_on_poscar0(
+            args,
+            run,
+            base_trainer,
+            base_state,
+            data,
+            targets,
+            idx["finetune_poscar0"],
+            out_dir,
         )
         pred_df, metrics = predict_dataframe(
-            augmented_trainer,
+            transfer_trainer,
             data,
             targets,
             metadata,
-            idx["test_relaxed"],
-            augmented_state,
+            idx["test_final"],
+            transfer_state,
         )
         pred_df.insert(0, "seed", args.seed)
         pred_df.insert(1, "protocol", protocol)
+        pred_df.insert(2, "target_scheme", TARGET_SCHEME)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
         pred_df.to_csv(pred_path, index=False)
     rows.append(
@@ -475,20 +611,183 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
             protocol,
             args.seed,
             metrics,
-            len(augmented_train_idx),
-            len(augmented_val_idx),
-            len(idx["test_relaxed"]),
-            augmented_best_val,
+            len(train_idx),
+            len(val_idx),
+            len(idx["test_final"]),
+            best_val,
+            node_normalization,
+            n_finetune=len(idx["finetune_poscar0"]),
         )
     )
 
     return rows, None
 
 
+def expand_leave_one_out_runs(model_name, requested_modes, radii, norm_values=None):
+    """Build isolated LOO run specs, including HeteroALIGNN norm labels."""
+    model_modes = modes_for_model(model_name, requested_modes)
+    runs = expand_mode_runs(model_name, model_modes, radii)
+    expanded = []
+    for run in runs:
+        expanded.extend(
+            expand_alignn_node_norm_runs(
+                [run],
+                norm_values,
+                model_name == "alignn" and run["mode"] in ALIGNN_NODE_NORM_MODES,
+            )
+        )
+    return expanded
+
+
+def build_alignn_layernorm_comparison(summary_df):
+    """Pair ordinary ALIGNN and LayerNorm HeteroALIGNN LOO measurements."""
+    if summary_df.empty or "model" not in summary_df.columns:
+        return pd.DataFrame()
+
+    alignn = summary_df[summary_df["model"].astype(str).eq("alignn")].copy()
+    if alignn.empty:
+        return pd.DataFrame()
+    normalization = alignn.get(
+        "node_normalization",
+        pd.Series("", index=alignn.index, dtype=object),
+    ).fillna("").astype(str).str.lower()
+    mode = alignn["mode"].astype(str)
+    baseline = alignn[mode.eq("full")].copy()
+    hetero = alignn[
+        mode.str.match(r"^hetero(?:_r[^_]+)?(?:_norm_layernorm)?$")
+        & (normalization.eq("layernorm") | mode.str.endswith("_norm_layernorm"))
+    ].copy()
+    if baseline.empty or hetero.empty:
+        return pd.DataFrame()
+
+    keys = ["material", "protocol", "seed"]
+    keep_metrics = [metric for metric in COMPARISON_METRICS if metric in alignn.columns]
+    baseline = baseline[keys + keep_metrics].rename(
+        columns={metric: f"alignn_{metric}" for metric in keep_metrics}
+    )
+    hetero_columns = keys + ["mode"] + keep_metrics
+    hetero = hetero[hetero_columns].rename(
+        columns={
+            "mode": "hetero_mode",
+            **{metric: f"hetero_layernorm_{metric}" for metric in keep_metrics},
+        }
+    )
+    paired = baseline.merge(hetero, on=keys, how="inner", validate="one_to_one")
+    if paired.empty:
+        return paired
+
+    lower_is_better = {"mae", "rmse", "ground_state_mae"}
+    for metric in keep_metrics:
+        baseline_col = f"alignn_{metric}"
+        hetero_col = f"hetero_layernorm_{metric}"
+        delta_col = f"hetero_minus_alignn_{metric}"
+        paired[delta_col] = paired[hetero_col] - paired[baseline_col]
+        if metric in lower_is_better:
+            paired[f"hetero_relative_improvement_{metric}_percent"] = np.where(
+                paired[baseline_col].ne(0),
+                -100.0 * paired[delta_col] / paired[baseline_col].abs(),
+                np.nan,
+            )
+    if "mae" in keep_metrics:
+        delta = paired["hetero_minus_alignn_mae"]
+        paired["mae_winner"] = np.select(
+            [delta.lt(0), delta.gt(0)],
+            [ALIGNN_HETERO_LAYERNORM_LABEL, ALIGNN_BASELINE_LABEL],
+            default="Tie",
+        )
+    return paired.sort_values(keys).reset_index(drop=True)
+
+
+def aggregate_alignn_layernorm_comparison(comparison_df):
+    """Aggregate paired ALIGNN comparison across held-out materials and seeds."""
+    if comparison_df.empty:
+        return pd.DataFrame()
+    rows = []
+    for protocol, group in comparison_df.groupby("protocol", sort=False):
+        row = {"protocol": protocol, "n_pairs": len(group)}
+        for metric in COMPARISON_METRICS:
+            baseline_col = f"alignn_{metric}"
+            hetero_col = f"hetero_layernorm_{metric}"
+            if baseline_col not in group or hetero_col not in group:
+                continue
+            row[f"alignn_{metric}_mean"] = group[baseline_col].mean()
+            row[f"alignn_{metric}_std"] = group[baseline_col].std(ddof=1)
+            row[f"hetero_layernorm_{metric}_mean"] = group[hetero_col].mean()
+            row[f"hetero_layernorm_{metric}_std"] = group[hetero_col].std(ddof=1)
+            row[f"hetero_minus_alignn_{metric}_mean"] = (
+                group[hetero_col] - group[baseline_col]
+            ).mean()
+        if "hetero_minus_alignn_mae" in group:
+            row["hetero_mae_win_rate"] = group["hetero_minus_alignn_mae"].lt(0).mean()
+            row["mae_tie_rate"] = group["hetero_minus_alignn_mae"].eq(0).mean()
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def plot_alignn_layernorm_comparison(aggregate_df, run_dir):
+    if aggregate_df.empty or "alignn_mae_mean" not in aggregate_df:
+        return None
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    labels = [PROTOCOLS.get(p, {"display": p})["display"] for p in aggregate_df["protocol"]]
+    x = np.arange(len(labels), dtype=float)
+    width = 0.36
+    fig, ax = plt.subplots(figsize=(max(7.2, 2.7 * len(labels)), 5.2))
+    for offset, prefix, label, color in (
+        (-width / 2, "alignn", ALIGNN_BASELINE_LABEL, "#3268a8"),
+        (width / 2, "hetero_layernorm", ALIGNN_HETERO_LAYERNORM_LABEL, "#d4553f"),
+    ):
+        means = aggregate_df[f"{prefix}_mae_mean"].to_numpy(dtype=float)
+        stds = aggregate_df[f"{prefix}_mae_std"].fillna(0).to_numpy(dtype=float)
+        ax.bar(
+            x + offset,
+            means,
+            width,
+            yerr=stds,
+            capsize=3,
+            label=label,
+            color=color,
+            edgecolor="black",
+            linewidth=0.4,
+        )
+    ax.set_ylabel("Leave-one-material-out MAE (eV)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=12, ha="right")
+    ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    output_dir = Path(run_dir) / "figures"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / "alignn_layernorm_vs_alignn_loo_mae.png"
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+    return output
+
+
+def write_alignn_layernorm_comparison(summary_df, run_dir, make_plot=False):
+    comparison_df = build_alignn_layernorm_comparison(summary_df)
+    if comparison_df.empty:
+        return comparison_df, pd.DataFrame(), None
+    aggregate_df = aggregate_alignn_layernorm_comparison(comparison_df)
+    run_dir = Path(run_dir)
+    comparison_df.to_csv(run_dir / "alignn_layernorm_comparison.csv", index=False)
+    aggregate_df.to_csv(run_dir / "alignn_layernorm_aggregate.csv", index=False)
+    figure = plot_alignn_layernorm_comparison(aggregate_df, run_dir) if make_plot else None
+    return comparison_df, aggregate_df, figure
+
+
 def write_settings(run_dir, args, materials):
     settings = vars(args).copy()
     settings["materials"] = list(materials)
     settings["run_dir"] = str(run_dir)
+    settings["target_scheme"] = TARGET_SCHEME
+    settings["transfer_scheme"] = TRANSFER_SCHEME
+    settings["protocols"] = list(PROTOCOLS)
     (run_dir / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
@@ -660,6 +959,13 @@ def load_prediction_outputs(run_dir, material=None, model=None, mode=None):
     for path in prediction_paths:
         df = pd.read_csv(path)
         if df.empty:
+            continue
+        if (
+            "target_scheme" not in df
+            or not df["target_scheme"].eq(TARGET_SCHEME).all()
+            or "protocol" not in df
+            or not df["protocol"].isin(PROTOCOLS).all()
+        ):
             continue
         parts = path.relative_to(run_dir).parts
         if len(parts) < 6:
@@ -1174,9 +1480,35 @@ def plot_material_model_energy_order_comparisons(run_dir, material=None):
     return outputs
 
 
+def aggregate_overall_mae(summary_df):
+    """Compute sample-weighted MAE across all held-out materials and seeds."""
+    if summary_df.empty:
+        return pd.DataFrame()
+    rows = []
+    keys = ["model", "mode", "model_mode", "protocol", "protocol_display"]
+    for values, group in summary_df.groupby(keys, sort=False, dropna=False):
+        n_test = group["n_test"].to_numpy(dtype=int)
+        total = int(np.sum(n_test))
+        if total == 0:
+            continue
+        row = dict(zip(keys, values))
+        row.update(
+            {
+                "n_material_seed_runs": int(len(group)),
+                "n_predictions": total,
+                "overall_mae": float(
+                    np.sum(group["mae"].to_numpy(dtype=float) * n_test) / total
+                ),
+                "target_scheme": TARGET_SCHEME,
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def write_summary_markdown(summary_df, skipped_df, run_dir):
     lines = [
-        "# Native Initial/Relaxed Leave-One-Out",
+        "# Native Final-Structure Leave-One-Out and POSCAR0 Transfer",
         "",
         "| Material | Model | Mode | Protocol | N test | MAE | RMSE | GS MAE | Top-1 |",
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
@@ -1200,6 +1532,50 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
     else:
         lines.append("|  |  |  |  | 0 |  |  |  |  |")
 
+    overall_df = aggregate_overall_mae(summary_df)
+    if not overall_df.empty:
+        lines.extend(
+            [
+                "",
+                "## Overall sample-weighted MAE",
+                "",
+                "| Model | Mode | Protocol | Predictions | Overall MAE |",
+                "| --- | --- | --- | ---: | ---: |",
+            ]
+        )
+        for row in overall_df.itertuples():
+            lines.append(
+                f"| {row.model} | {mode_display_name(row.mode)} | "
+                f"{row.protocol_display} | {row.n_predictions} | "
+                f"{row.overall_mae:.3f} |"
+            )
+
+    comparison_df = build_alignn_layernorm_comparison(summary_df)
+    aggregate_df = aggregate_alignn_layernorm_comparison(comparison_df)
+    if not aggregate_df.empty:
+        lines.extend(
+            [
+                "",
+                "## ALIGNN vs HeteroALIGNN + LayerNorm",
+                "",
+                "| Protocol | Pairs | ALIGNN MAE | Hetero + LN MAE | Hetero - ALIGNN | Hetero win rate |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in aggregate_df.itertuples():
+            protocol = PROTOCOLS.get(row.protocol, {"display": row.protocol})["display"]
+            lines.append(
+                "| {protocol} | {pairs} | {baseline:.3f} | {hetero:.3f} | "
+                "{delta:+.3f} | {win_rate:.1%} |".format(
+                    protocol=protocol,
+                    pairs=int(row.n_pairs),
+                    baseline=row.alignn_mae_mean,
+                    hetero=row.hetero_layernorm_mae_mean,
+                    delta=row.hetero_minus_alignn_mae_mean,
+                    win_rate=row.hetero_mae_win_rate,
+                )
+            )
+
     if not skipped_df.empty:
         lines.extend(["", "## Skipped Materials", ""])
         for row in skipped_df.itertuples():
@@ -1212,8 +1588,12 @@ def write_progress_outputs(run_dir, summary_rows, skipped_rows):
     summary_df = pd.DataFrame(summary_rows)
     skipped_df = pd.DataFrame(skipped_rows)
     summary_df.to_csv(Path(run_dir) / "summary.csv", index=False)
+    aggregate_overall_mae(summary_df).to_csv(
+        Path(run_dir) / "overall_mae.csv", index=False
+    )
     if not skipped_df.empty:
         skipped_df.to_csv(Path(run_dir) / "skipped_materials.csv", index=False)
+    write_alignn_layernorm_comparison(summary_df, run_dir, make_plot=False)
     write_summary_markdown(summary_df, skipped_df, run_dir)
     return summary_df, skipped_df
 
@@ -1235,8 +1615,12 @@ def run_single_seed(args, run_dir, radii):
     skipped_rows = []
     run_specs = []
     for model_name in args.models:
-        model_modes = modes_for_model(model_name, args.mode)
-        runs = expand_mode_runs(model_name, model_modes, radii)
+        runs = expand_leave_one_out_runs(
+            model_name,
+            args.mode,
+            radii,
+            norm_values=args.alignn_hetero_node_norm,
+        )
         for run in runs:
             run_specs.append((model_name, run))
 
@@ -1253,9 +1637,8 @@ def run_single_seed(args, run_dir, radii):
                 local_cutoff=run["local_cutoff"],
                 representations=[representation],
             )
-            metadata = add_final_relaxed_targets(raw_metadata, raw_targets)
-            final_targets = torch.tensor(metadata["final_target"].to_numpy(dtype=float)).float()
-            dataset_cache[cache_key] = (datasets, final_targets, metadata)
+            metadata = add_native_targets(raw_metadata, raw_targets)
+            dataset_cache[cache_key] = (datasets, raw_targets, metadata)
         return dataset_cache[cache_key]
 
     first_model, first_run = run_specs[0]
@@ -1315,9 +1698,19 @@ def run_single_seed(args, run_dir, radii):
     completed_materials = sorted(set(summary_df["material"])) if "material" in summary_df else []
     write_settings(run_dir, args, completed_materials)
     write_summary_markdown(summary_df, skipped_df, run_dir)
+    _, _, comparison_figure = write_alignn_layernorm_comparison(
+        summary_df,
+        run_dir,
+        make_plot=True,
+    )
 
     print(f"\nSummary written to {run_dir / 'summary.csv'}")
+    print(f"Overall MAE written to {run_dir / 'overall_mae.csv'}")
     print(f"Markdown summary written to {run_dir / 'summary.md'}")
+    if comparison_figure is not None:
+        print(f"ALIGNN comparison written to {run_dir / 'alignn_layernorm_comparison.csv'}")
+        print(f"ALIGNN aggregate written to {run_dir / 'alignn_layernorm_aggregate.csv'}")
+        print(f"ALIGNN comparison figure written to {comparison_figure}")
     print("Figures are updated after each completed material under <run-dir>/<material>/figures")
     return summary_df, skipped_df
 
@@ -1325,8 +1718,8 @@ def run_single_seed(args, run_dir, radii):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Run native-defect leave-one-material-out tests using initial and "
-            "relaxed structures to predict final relaxed DFE."
+            "Compare direct native-defect prediction with POSCAR0 one-shot "
+            "transfer learning on held-out final structures."
         )
     )
     parser.add_argument(
@@ -1343,6 +1736,19 @@ def main():
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--val-fraction", type=float, default=0.2)
+    parser.add_argument("--finetune-epochs", type=int, default=20)
+    parser.add_argument(
+        "--finetune-lr",
+        type=float,
+        default=1e-4,
+        help="POSCAR0 transfer learning rate for the prediction head.",
+    )
+    parser.add_argument(
+        "--finetune-backbone-lr",
+        type=float,
+        default=1e-5,
+        help="Smaller POSCAR0 transfer learning rate for the GNN backbone.",
+    )
     parser.add_argument("--atom-init", default="./HERA/atom_init.json")
     parser.add_argument("--native-csv", default=DEFAULT_NATIVE_CSV)
     parser.add_argument("--log-dir", default="logs")
@@ -1360,7 +1766,7 @@ def main():
         dest="models",
         nargs="+",
         default=["cgcnn"],
-        choices=["cgcnn", "megnet", "definet"],
+        choices=["alignn", "cgcnn", "megnet", "definet"],
     )
     parser.add_argument(
         "--mode",
@@ -1385,11 +1791,30 @@ def main():
             "Hetero is fixed to r0."
         ),
     )
+    parser.add_argument(
+        "--alignn-hetero-node-norm",
+        nargs="+",
+        choices=("layernorm", "batchnorm", "none"),
+        default=None,
+        help=(
+            "Normalization for HeteroALIGNN residual deltas. Use layernorm "
+            "for the controlled HeteroALIGNN + LayerNorm versus ALIGNN "
+            "comparison. Each value gets an isolated checkpoint directory."
+        ),
+    )
     args = parser.parse_args()
     args.seeds = parse_seed_values(args.seeds, parser)
+    if args.alignn_hetero_node_norm is not None:
+        args.alignn_hetero_node_norm = list(dict.fromkeys(args.alignn_hetero_node_norm))
 
     if not 0 < args.val_fraction < 1:
         parser.error("--val-fraction must be between 0 and 1.")
+    if args.finetune_epochs < 1:
+        parser.error("--finetune-epochs must be at least 1.")
+    if args.finetune_lr <= 0:
+        parser.error("--finetune-lr must be positive.")
+    if args.finetune_backbone_lr <= 0:
+        parser.error("--finetune-backbone-lr must be positive.")
 
     radii = parse_radius_values(args.r, parser)
     init_elem_embedding(args.atom_init)
@@ -1414,11 +1839,18 @@ def main():
             pd.concat(all_skipped, ignore_index=True) if all_skipped else pd.DataFrame()
         )
         combined_summary.to_csv(run_dir / "summary.csv", index=False)
+        aggregate_overall_mae(combined_summary).to_csv(
+            run_dir / "overall_mae.csv", index=False
+        )
         if not combined_skipped.empty:
             combined_skipped.to_csv(run_dir / "skipped_materials.csv", index=False)
         write_summary_markdown(combined_summary, combined_skipped, run_dir)
+        write_alignn_layernorm_comparison(combined_summary, run_dir, make_plot=True)
         settings = vars(args).copy()
         settings["seeds"] = requested_seeds
+        settings["target_scheme"] = TARGET_SCHEME
+        settings["transfer_scheme"] = TRANSFER_SCHEME
+        settings["protocols"] = list(PROTOCOLS)
         (run_dir / "settings.json").write_text(
             json.dumps(settings, indent=2), encoding="utf-8"
         )

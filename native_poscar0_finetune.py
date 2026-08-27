@@ -35,7 +35,7 @@ from .native_ood_case_study import (
     load_native_with_metadata,
     modes_for_model,
 )
-from .training.trainer import MEGNetTrainer, set_attr
+from .training.trainer import MEGNetTrainer, load_trusted_checkpoint, set_attr
 
 
 def subset(values, indices):
@@ -65,7 +65,7 @@ def save_checkpoint(path, trainer):
 
 def load_checkpoint(path, config, device, seed):
     trainer = MEGNetTrainer(config, device, seed=seed)
-    checkpoint = torch.load(path, map_location=device)
+    checkpoint = load_trusted_checkpoint(path, map_location=device)
     trainer.model.load_state_dict(checkpoint["model"])
     trainer.scaler.load_state_dict(checkpoint["scaler"])
     return trainer

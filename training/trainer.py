@@ -13,9 +13,10 @@ from ..data.converters import (
     FlattenGaussianDistanceConverter,
     AtomFeaturesExtractor,
 )
-from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet
+from ..models.megnet import MEGNet, HeteroMEGNet, AttentionMEGNet, HyperMEGNet
 from ..models.cgcnn import (
     CGCNN,
+    HyperCGCNN,
     HeteroCrystalGraphConvNet,
     Heterocgcnn,
     AttentionCGCNN,
@@ -23,10 +24,12 @@ from ..models.cgcnn import (
 )
 from ..models.alignn import (
     ALIGNN,
+    HyperALIGNN,
     HeteroALIGNN,
     AttentionALIGNN,
     DefiNetALIGNN,
 )
+from ..models.hypergraph import RegionHypergraphNet
 from ..utils.scaler import Scaler
 from .losses import MAELoss
 
@@ -88,6 +91,10 @@ DEFINET_ATTENTION_TASKS = (
     'definet_attention_was',
     'definet_attention_local_was',
 )
+PURE_HYPERGRAPH_TASKS = ('hypergraph_hypergraph',)
+CGCNN_HYPERGRAPH_TASKS = ('cgcnn_hypergraph',)
+MEGNET_HYPERGRAPH_TASKS = ('megnet_hypergraph',)
+ALIGNN_HYPERGRAPH_TASKS = ('alignn_hypergraph',)
 HETERO_NODE_TYPES = ('atom', 'defect')
 HETERO_EDGE_TYPES = (
     ('atom', 'aa', 'atom'),
@@ -95,6 +102,21 @@ HETERO_EDGE_TYPES = (
     ('atom', 'ad', 'defect'),
     ('defect', 'da', 'atom'),
 )
+
+
+def load_trusted_checkpoint(path, map_location=None):
+    """Load a locally generated HERA checkpoint across PyTorch versions.
+
+    HERA checkpoints include scaler state containing NumPy scalar values, so
+    PyTorch 2.6's default ``weights_only=True`` loader rejects them. Call this
+    helper only for checkpoints produced by this project and trusted by the
+    user.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        # PyTorch versions before the weights_only argument was introduced.
+        return torch.load(path, map_location=map_location)
 
 
 def set_attr(structure, attr, name):
@@ -237,6 +259,7 @@ class MEGNetTrainer:
             cutoff=self.config["model"]["cutoff"],
             local_radius=self.config["model"].get("local_radius", self.config["model"]["cutoff"]),
             max_neighbors=self.config["model"].get("max_neighbors"),
+            hypergraph_radius=self.config["model"].get("hypergraph_radius", 3.0),
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
         )
@@ -244,7 +267,54 @@ class MEGNetTrainer:
 
         task = self.config['task']
         # Build model based on task string:  {model}_{mode}
-        if task in (
+        if task in PURE_HYPERGRAPH_TASKS:
+            self.model = RegionHypergraphNet(
+                node_input_shape=atom_converter.get_shape(),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                heads=self.config['model'].get('n_heads', 4),
+                state_input_shape=self.config['model']['state_input_shape'],
+                dropout=self.config['model'].get('dropout', 0.0),
+            ).to(self.device)
+        elif task in MEGNET_HYPERGRAPH_TASKS:
+            self.model = HyperMEGNet(
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                node_input_shape=atom_converter.get_shape(),
+                state_input_shape=self.config['model']['state_input_shape'],
+                embedding_size=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                n_heads=self.config['model'].get('n_heads', 4),
+                dropout=self.config['model'].get('dropout', 0.0),
+                vertex_aggregation=self.config['model']['vertex_aggregation'],
+                global_aggregation=self.config['model']['global_aggregation'],
+            ).to(self.device)
+        elif task in CGCNN_HYPERGRAPH_TASKS:
+            self.model = HyperCGCNN(
+                orig_atom_fea_len=atom_converter.get_shape(),
+                nbr_fea_len=bond_converter.get_shape(eos=use_eos),
+                atom_fea_len=self.config['model']['embedding_size'],
+                n_conv=self.config['model']['nblocks'],
+                n_heads=self.config['model'].get('n_heads', 4),
+                dropout=self.config['model'].get('dropout', 0.0),
+                n_h=3,
+            ).to(self.device)
+        elif task in ALIGNN_HYPERGRAPH_TASKS:
+            self.model = HyperALIGNN(
+                node_input_shape=atom_converter.get_shape(),
+                edge_input_shape=bond_converter.get_shape(eos=use_eos),
+                hidden_dim=self.config['model']['embedding_size'],
+                n_blocks=self.config['model']['nblocks'],
+                gcn_blocks=self.config['model'].get('gcn_blocks', 4),
+                angle_embed_size=self.config['model'].get(
+                    'angle_embed_size',
+                    self.config['model']['edge_embed_size'],
+                ),
+                n_heads=self.config['model'].get('n_heads', 4),
+                dropout=self.config['model'].get('dropout', 0.0),
+                vertex_aggregation=self.config['model']['vertex_aggregation'],
+                cutoff=self.config['model']['cutoff'],
+            ).to(self.device)
+        elif task in (
                 'megnet_sparse',
                 'megnet_full',
                 'megnet_full_x',
@@ -494,7 +564,49 @@ class MEGNetTrainer:
 
     def _forward(self, batch):
         task = self.config['task']
-        if task in MEGNET_HETERO_TASKS:
+        if task in PURE_HYPERGRAPH_TASKS:
+            return _prediction_vector(self.model(
+                batch.x,
+                batch.hyperedge_index,
+                batch.batch,
+                state=batch.state,
+                hyperedge_type=batch.hyperedge_type,
+                region_type=batch.region_type,
+            ))
+        elif task in CGCNN_HYPERGRAPH_TASKS:
+            return _prediction_vector(self.model(
+                batch.x,
+                batch.edge_index,
+                batch.edge_attr,
+                batch.batch,
+                batch.hyperedge_index,
+                hyperedge_type=batch.hyperedge_type,
+                region_type=batch.region_type,
+            ))
+        elif task in MEGNET_HYPERGRAPH_TASKS:
+            return _prediction_vector(self.model(
+                batch.x,
+                batch.edge_index,
+                batch.edge_attr,
+                batch.state,
+                batch.batch,
+                batch.bond_batch,
+                batch.hyperedge_index,
+                hyperedge_type=batch.hyperedge_type,
+                region_type=batch.region_type,
+            ))
+        elif task in ALIGNN_HYPERGRAPH_TASKS:
+            return _prediction_vector(self.model(
+                batch.x,
+                batch.edge_index,
+                batch.edge_attr,
+                batch.batch,
+                batch.hyperedge_index,
+                edge_vec=getattr(batch, 'edge_vec', None),
+                hyperedge_type=batch.hyperedge_type,
+                region_type=batch.region_type,
+            ))
+        elif task in MEGNET_HETERO_TASKS:
             x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict = _complete_hetero_inputs(
                 batch.x_dict,
                 batch.edge_index_dict,
@@ -681,7 +793,7 @@ class MEGNetTrainer:
         torch.save(state_dict, str(path) + '/checkpoint.pth')
 
     def load(self, path, map_location=None):
-        checkpoint = torch.load(path, map_location)
+        checkpoint = load_trusted_checkpoint(path, map_location=map_location)
         try:
             self.model.load_state_dict(checkpoint['model'])
         except Exception:

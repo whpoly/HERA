@@ -1,4 +1,4 @@
-"""MEGNet model variants: MEGNet (homogeneous), HeteroMEGNet, AttentionMEGNet."""
+"""MEGNet model variants, including heterogeneous and hypergraph hybrids."""
 
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ from .modules import (
     AtomTypeAttentionMegnetModule,
     AtomTypeGlobalAttentionReadout,
 )
+from .hypergraph import RegionHypergraphInteraction
 
 
 class MEGNet(nn.Module):
@@ -72,6 +73,135 @@ class MEGNet(nn.Module):
         edge_attr = F.pad(edge_attr, (0, 0, 0, tmp_shape), value=0.0)
         tmp = torch.cat((x, edge_attr, state), 1)
         return self.hiddens(tmp)
+
+
+class HyperMEGNet(nn.Module):
+    """MEGNet edge/node/state blocks interleaved with region hyperedges."""
+
+    def __init__(
+            self,
+            edge_input_shape,
+            node_input_shape,
+            state_input_shape,
+            node_embedding_size=16,
+            embedding_size=32,
+            n_blocks=3,
+            n_heads=4,
+            dropout=0.0,
+            vertex_aggregation="mean",
+            global_aggregation="mean",
+    ):
+        super().__init__()
+        self.embedded = node_input_shape is None
+        if self.embedded:
+            node_input_shape = node_embedding_size
+            self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
+        self.m1 = MegnetModule(
+            edge_input_shape,
+            node_input_shape,
+            state_input_shape,
+            inner_skip=True,
+            embed_size=embedding_size,
+            vertex_aggregation=vertex_aggregation,
+            global_aggregation=global_aggregation,
+        )
+        self.blocks = nn.ModuleList([
+            MegnetModule(
+                embedding_size,
+                embedding_size,
+                embedding_size,
+                embed_size=embedding_size,
+                vertex_aggregation=vertex_aggregation,
+                global_aggregation=global_aggregation,
+            )
+            for _ in range(n_blocks - 1)
+        ])
+        self.hypergraph = RegionHypergraphInteraction(
+            embedding_size,
+            n_steps=n_blocks,
+            heads=n_heads,
+            dropout=dropout,
+        )
+        self.se = Set2Set(embedding_size, 1)
+        self.sv = Set2Set(embedding_size, 1)
+        self.hiddens = nn.Sequential(
+            nn.Linear(8 * embedding_size, 2 * embedding_size), ShiftedSoftplus(),
+            nn.Linear(2 * embedding_size, embedding_size), ShiftedSoftplus(),
+            nn.Linear(embedding_size, 1),
+        )
+
+    def forward(
+            self,
+            x,
+            edge_index,
+            edge_attr,
+            state,
+            batch,
+            bond_batch,
+            hyperedge_index,
+            hyperedge_type=None,
+            region_type=None,
+    ):
+        if self.embedded:
+            x = self.emb(x.long()).squeeze()
+        else:
+            x = x.float()
+
+        x, edge_attr, state = self.m1(
+            x,
+            edge_index,
+            edge_attr,
+            state,
+            batch,
+            bond_batch,
+        )
+        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+            self.hypergraph.normalize_inputs(
+                x,
+                hyperedge_index,
+                batch=batch,
+                state=state,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        )
+        x = self.hypergraph.add_region_features(x, region_type)
+        x = self.hypergraph.update(
+            0,
+            x,
+            hyperedge_index,
+            hyperedge_type,
+            num_hyperedges,
+        )
+        for step, block in enumerate(self.blocks, start=1):
+            x, edge_attr, state = block(
+                x,
+                edge_index,
+                edge_attr,
+                state,
+                batch,
+                bond_batch,
+            )
+            x = self.hypergraph.update(
+                step,
+                x,
+                hyperedge_index,
+                hyperedge_type,
+                num_hyperedges,
+            )
+
+        node_pool = self.sv(x, batch, dim_size=num_graphs)
+        region_pool = self.hypergraph.pool(x, hyperedge_index, num_graphs)
+        if edge_attr.size(0) == 0:
+            edge_pool = x.new_zeros((num_graphs, 2 * x.size(-1)))
+        else:
+            edge_pool = self.se(edge_attr, bond_batch, dim_size=num_graphs)
+        return self.hiddens(torch.cat([
+            node_pool,
+            edge_pool,
+            state,
+            region_pool,
+        ], dim=-1))
 
 
 class HeteroMEGNet(nn.Module):

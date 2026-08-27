@@ -1,4 +1,4 @@
-"""ALIGNN model variants, including a heterogeneous HERA-compatible ALIGNN."""
+"""ALIGNN variants, including heterogeneous and region-hypergraph hybrids."""
 
 from collections import defaultdict
 import math
@@ -13,6 +13,7 @@ from .modules import (
     DefectAwareGateConv,
     RelationFusionUpdate,
 )
+from .hypergraph import RegionHypergraphInteraction
 
 
 def _edge_type_key(edge_type):
@@ -78,14 +79,25 @@ class SafeBatchNorm1d(nn.BatchNorm1d):
         return super().forward(input)
 
 
-class MLPLayer(nn.Module):
-    """Official ALIGNN helper: Linear, BatchNorm, SiLU."""
+def _make_feature_norm(channels, normalization):
+    normalization = str(normalization).lower()
+    if normalization == "layernorm":
+        return nn.LayerNorm(channels)
+    if normalization == "batchnorm":
+        return SafeBatchNorm1d(channels)
+    if normalization == "none":
+        return nn.Identity()
+    raise ValueError("normalization must be one of: layernorm, batchnorm, none")
 
-    def __init__(self, in_features, out_features):
+
+class MLPLayer(nn.Module):
+    """ALIGNN helper: Linear, normalization, SiLU."""
+
+    def __init__(self, in_features, out_features, normalization="batchnorm"):
         super().__init__()
         self.layer = nn.Sequential(
             nn.Linear(in_features, out_features),
-            SafeBatchNorm1d(out_features),
+            _make_feature_norm(out_features, normalization),
             nn.SiLU(),
         )
 
@@ -119,10 +131,10 @@ class AngleExpansion(RBFExpansion):
         super().__init__(-1.0, 1.0, num_centers, sigma=sigma)
 
 
-def _official_feature_embedding(in_features, hidden_dim):
+def _official_feature_embedding(in_features, hidden_dim, normalization="batchnorm"):
     return nn.Sequential(
-        MLPLayer(in_features, hidden_dim),
-        MLPLayer(hidden_dim, hidden_dim),
+        MLPLayer(in_features, hidden_dim, normalization=normalization),
+        MLPLayer(hidden_dim, hidden_dim, normalization=normalization),
     )
 
 
@@ -252,7 +264,7 @@ class GatedGraphConv(nn.Module):
     sum(sigmoid(e_ij) * h_j) / (sum(sigmoid(e_ij)) + eps).
     """
 
-    def __init__(self, channels, edge_dim, aggr="add"):
+    def __init__(self, channels, edge_dim, aggr="add", normalization="batchnorm"):
         super().__init__()
         self.channels = channels
         self.aggr = _normalize_aggr(aggr)
@@ -261,8 +273,10 @@ class GatedGraphConv(nn.Module):
         self.edge_gate = nn.Linear(edge_dim, channels)
         self.src_update = nn.Linear(channels, channels)
         self.dst_update = nn.Linear(channels, channels)
-        self.bn_nodes = SafeBatchNorm1d(channels)
-        self.bn_edges = SafeBatchNorm1d(channels)
+        # Keep the historical attribute names so ordinary ALIGNN checkpoints
+        # retain their existing state-dict keys.
+        self.bn_nodes = _make_feature_norm(channels, normalization)
+        self.bn_edges = _make_feature_norm(channels, normalization)
 
     @staticmethod
     def _split_nodes(x):
@@ -442,9 +456,14 @@ def _hetero_relation_update(
 class GraphConvLayer(nn.Module):
     """Atom graph update block used after ALIGNN line-graph blocks."""
 
-    def __init__(self, hidden_dim, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, vertex_aggregation="add", normalization="batchnorm"):
         super().__init__()
-        self.atom_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.atom_conv = GatedGraphConv(
+            hidden_dim,
+            hidden_dim,
+            aggr=vertex_aggregation,
+            normalization=normalization,
+        )
 
     def forward(self, x, edge_index, edge_attr, size=None):
         return self.atom_conv(
@@ -481,7 +500,7 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
             nn.Linear(channels, channels),
         )
         self.type_emb = nn.Embedding(2, channels)
-        self.norm = SafeBatchNorm1d(channels)
+        self.norm = nn.LayerNorm(channels)
         self._edge_index = None
         self._type_emb = None
         self._attention_weights = None
@@ -499,8 +518,8 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
                 node_type.to(device=x_dst.device, dtype=torch.long).view(-1).clamp(0, 1)
             )
         out = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr, size=size)
-        out = self.update_nn(torch.cat([x_dst, out], dim=-1))
-        return self.norm(x_dst + out)
+        delta = self.update_nn(torch.cat([x_dst, out], dim=-1))
+        return x_dst + self.norm(delta)
 
     def message(self, x_i, x_j, edge_attr, index, ptr, size_i):
         from torch_geometric.utils import softmax as pyg_softmax
@@ -552,7 +571,12 @@ class AttentionALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, n_heads=4, vertex_aggregation="add"):
         super().__init__()
-        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(
+            hidden_dim,
+            hidden_dim,
+            aggr=vertex_aggregation,
+            normalization="layernorm",
+        )
         self.atom_conv = AtomTypeAttentionGatedGraphConv(
             hidden_dim, hidden_dim, n_heads=n_heads, aggr=vertex_aggregation
         )
@@ -576,12 +600,16 @@ class DefiNetALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, n_marker_types=2, vertex_aggregation="add"):
         super().__init__()
-        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(
+            hidden_dim,
+            hidden_dim,
+            aggr=vertex_aggregation,
+            normalization="layernorm",
+        )
         self.atom_conv = DefectAwareGateConv(
             channels=hidden_dim,
             dim=hidden_dim,
             n_marker_types=n_marker_types,
-            batch_norm=True,
         )
 
     def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr, defect_marker=None):
@@ -754,6 +782,135 @@ class ALIGNN(nn.Module):
         return self.fc(node_pool)
 
 
+class HyperALIGNN(nn.Module):
+    """ALIGNN bond/angle updates interleaved with region hypergraph updates."""
+
+    def __init__(
+            self,
+            node_input_shape,
+            edge_input_shape,
+            hidden_dim=64,
+            n_blocks=3,
+            gcn_blocks=4,
+            angle_embed_size=40,
+            n_heads=4,
+            dropout=0.0,
+            vertex_aggregation="add",
+            cutoff=8.0,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
+        self.edge_embedding = _official_feature_embedding(
+            edge_input_shape,
+            hidden_dim,
+        )
+        self.angle_expansion = AngleExpansion(angle_embed_size)
+        self.angle_embedding = _official_feature_embedding(
+            self.angle_expansion.out_features,
+            hidden_dim,
+        )
+        self.layers = nn.ModuleList([
+            ALIGNNLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            for _ in range(n_blocks)
+        ])
+        self.gcn_layers = nn.ModuleList([
+            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            for _ in range(gcn_blocks)
+        ])
+        self.hypergraph = RegionHypergraphInteraction(
+            hidden_dim,
+            n_steps=n_blocks + gcn_blocks,
+            heads=n_heads,
+            dropout=dropout,
+        )
+        self.readout = nn.Sequential(
+            nn.Linear(4 * hidden_dim, 2 * hidden_dim), nn.SiLU(),
+            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(
+            self,
+            x,
+            edge_index,
+            edge_attr,
+            batch,
+            hyperedge_index,
+            edge_vec=None,
+            hyperedge_type=None,
+            region_type=None,
+    ):
+        x = self.node_embedding(x.float())
+        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+            self.hypergraph.normalize_inputs(
+                x,
+                hyperedge_index,
+                batch=batch,
+                hyperedge_type=hyperedge_type,
+                region_type=region_type,
+            )
+        )
+        x = self.hypergraph.add_region_features(x, region_type)
+
+        raw_edge_vec = edge_vec
+        if edge_vec is None:
+            edge_vec = edge_attr.new_zeros((edge_attr.size(0), 3))
+        else:
+            edge_vec = edge_vec.float()
+        edge_attr = _embed_distance_edges(
+            edge_attr,
+            raw_edge_vec,
+            self.distance_expansion,
+            self.edge_embedding,
+        )
+        line_edge_index, angle_attr = build_line_graph(
+            edge_index,
+            edge_vec,
+            self.angle_expansion,
+        )
+        angle_attr = self.angle_embedding(angle_attr.float())
+
+        step = 0
+        for layer in self.layers:
+            x, edge_attr, angle_attr = layer(
+                x,
+                edge_index,
+                edge_attr,
+                line_edge_index,
+                angle_attr,
+            )
+            x = self.hypergraph.update(
+                step,
+                x,
+                hyperedge_index,
+                hyperedge_type,
+                num_hyperedges,
+            )
+            step += 1
+        for layer in self.gcn_layers:
+            x, edge_attr = layer(x, edge_index, edge_attr)
+            x = self.hypergraph.update(
+                step,
+                x,
+                hyperedge_index,
+                hyperedge_type,
+                num_hyperedges,
+            )
+            step += 1
+
+        global_pool = _pool_mean_or_zeros(
+            x,
+            batch,
+            num_graphs,
+            self.hidden_dim,
+            x,
+        )
+        region_pool = self.hypergraph.pool(x, hyperedge_index, num_graphs)
+        return self.readout(torch.cat([global_pool, region_pool], dim=-1))
+
+
 class AttentionALIGNN(nn.Module):
     """Homogeneous ALIGNN with atom-type-aware local and global attention."""
 
@@ -771,11 +928,23 @@ class AttentionALIGNN(nn.Module):
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.node_embedding = MLPLayer(
+            node_input_shape,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
-        self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
+        self.edge_embedding = _official_feature_embedding(
+            edge_input_shape,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.angle_expansion = AngleExpansion(angle_embed_size)
-        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
+        self.angle_embedding = _official_feature_embedding(
+            self.angle_expansion.out_features,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.layers = nn.ModuleList([
             AttentionALIGNNLayer(
                 hidden_dim,
@@ -786,7 +955,11 @@ class AttentionALIGNN(nn.Module):
             for _ in range(n_blocks)
         ])
         self.gcn_layers = nn.ModuleList([
-            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            GraphConvLayer(
+                hidden_dim,
+                vertex_aggregation=vertex_aggregation,
+                normalization="layernorm",
+            )
             for _ in range(gcn_blocks)
         ])
         self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
@@ -855,11 +1028,23 @@ class DefiNetALIGNN(nn.Module):
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.node_embedding = MLPLayer(
+            node_input_shape,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
-        self.edge_embedding = _official_feature_embedding(edge_input_shape, hidden_dim)
+        self.edge_embedding = _official_feature_embedding(
+            edge_input_shape,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.angle_expansion = AngleExpansion(angle_embed_size)
-        self.angle_embedding = _official_feature_embedding(self.angle_expansion.out_features, hidden_dim)
+        self.angle_embedding = _official_feature_embedding(
+            self.angle_expansion.out_features,
+            hidden_dim,
+            normalization="layernorm",
+        )
         self.layers = nn.ModuleList([
             DefiNetALIGNNLayer(
                 hidden_dim,
@@ -870,7 +1055,11 @@ class DefiNetALIGNN(nn.Module):
             for _ in range(n_blocks)
         ])
         self.gcn_layers = nn.ModuleList([
-            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            GraphConvLayer(
+                hidden_dim,
+                vertex_aggregation=vertex_aggregation,
+                normalization="layernorm",
+            )
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
