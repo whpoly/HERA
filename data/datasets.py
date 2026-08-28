@@ -54,6 +54,7 @@ MODE_REPRESENTATION = {
     # Hypergraphs reuse the defect-marked structures from the heterogeneous
     # representation; the converter builds a distinct incidence matrix.
     'hypergraph': 'hetero',
+    'hypergraph_was': 'hetero',
 }
 
 

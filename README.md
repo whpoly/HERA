@@ -7,7 +7,7 @@ This repository contains research code for defect-property prediction on crystal
 | Item | Supported Options |
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `hypergraph`, `all` |
-| Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `all` |
+| Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `hypergraph_was`, `all` |
 | Datasets | `vacancy`, `2dmd_low`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
@@ -89,7 +89,7 @@ Common arguments:
   list. Other datasets do not run the sparse representation.
 - `--dataset`: one or more dataset names, or `all` to run every dataset
 - `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
-  `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, or `all`
+  `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `hypergraph_was`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
   currently `6`; no reduced/cropped graph modes are exposed.
@@ -116,7 +116,12 @@ Common arguments:
   interleaved with hyperedge updates. `--model hypergraph` runs the pure
   hypergraph baseline without a physical backbone. Override the threshold with
   `--hypergraph-radius`.
-- CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was_x` and `hetero_was`,
+- `hypergraph_was` keeps the same physical graph and three hyperedges as
+  `hypergraph`, but concatenates current and previous/reference (`was`) atom
+  embeddings. It is available for CGCNN, MEGNet, and ALIGNN so the two modes
+  form a controlled input-feature comparison.
+- CGCNN, MEGNet, and ALIGNN support WAS ablation modes `was_x`, `hetero_was`,
+  and `hypergraph_was`,
   which concatenate current and previous/reference atom features.
 - Attention ablations are `attention` and `attention_was`. DeFiNet-style modes
   are `definet` and `definet_was` for CGCNN and ALIGNN.
@@ -196,6 +201,7 @@ python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume 
 python -m HERA.main --model cgcnn --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
 python -m HERA.main --model megnet --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
 python -m HERA.main --model alignn --dataset native --mode hypergraph --hypergraph-radius 3.0 --device cuda:0
+python -m HERA.main --model all --dataset native --mode hypergraph hypergraph_was --hypergraph-radius 3.0 --device cuda:0
 python -m HERA.main --model hypergraph --dataset native --hypergraph-radius 3.0 --device cuda:0
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 1 --alignn-test-batch-size 1
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp

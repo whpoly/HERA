@@ -156,12 +156,21 @@ class HypergraphModelTests(unittest.TestCase):
             self.assertEqual(config["model"]["hypergraph_radius"], 3.0)
         self.assertEqual(representation_for_mode("hypergraph"), "hetero")
         self.assertEqual(dataset_index_for_mode("hypergraph"), 1)
+        self.assertEqual(representation_for_mode("hypergraph_was"), "hetero")
+        self.assertEqual(dataset_index_for_mode("hypergraph_was"), 1)
         with self.assertRaisesRegex(ValueError, "only supports mode 'hypergraph'"):
             get_config("hypergraph", "native", "full")
         for model_name in ("cgcnn", "megnet", "alignn"):
             self.assertIn("hypergraph", default_modes_for_model(model_name))
+            self.assertIn("hypergraph_was", default_modes_for_model(model_name))
+            was_config = get_config(model_name, "native", "hypergraph_was")
+            self.assertEqual(was_config["task"], f"{model_name}_hypergraph_was")
+            self.assertEqual(was_config["model"]["atom_features"], "was_species")
+            self.assertEqual(was_config["model"]["hypergraph_radius"], 3.0)
+        with self.assertRaisesRegex(ValueError, "only supports mode 'hypergraph'"):
+            get_config("hypergraph", "native", "hypergraph_was")
         overridden = apply_training_overrides(
-            get_config("cgcnn", "native", "hypergraph"),
+            get_config("cgcnn", "native", "hypergraph_was"),
             SimpleNamespace(
                 train_batch_size=None,
                 test_batch_size=None,

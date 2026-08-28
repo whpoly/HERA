@@ -31,9 +31,9 @@ HETERO_TASKS = {
     "alignn_hetero_local_was",
 }
 PURE_HYPERGRAPH_TASKS = {"hypergraph_hypergraph"}
-CGCNN_HYPERGRAPH_TASKS = {"cgcnn_hypergraph"}
-MEGNET_HYPERGRAPH_TASKS = {"megnet_hypergraph"}
-ALIGNN_HYPERGRAPH_TASKS = {"alignn_hypergraph"}
+CGCNN_HYPERGRAPH_TASKS = {"cgcnn_hypergraph", "cgcnn_hypergraph_was"}
+MEGNET_HYPERGRAPH_TASKS = {"megnet_hypergraph", "megnet_hypergraph_was"}
+ALIGNN_HYPERGRAPH_TASKS = {"alignn_hypergraph", "alignn_hypergraph_was"}
 HYBRID_HYPERGRAPH_TASKS = (
     CGCNN_HYPERGRAPH_TASKS
     | MEGNET_HYPERGRAPH_TASKS

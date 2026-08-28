@@ -225,6 +225,7 @@ ALIGNN_MODES = (
     'definet',
     'definet_was',
     'hypergraph',
+    'hypergraph_was',
 )
 FIXED_POOL_MODES = (
     'hetero_fixed_pool',
@@ -257,6 +258,7 @@ VALID_MODES = [
     'definet',
     'definet_was',
     'hypergraph',
+    'hypergraph_was',
 ]
 
 
@@ -318,7 +320,7 @@ def get_config(model: str, dataset: str, mode: str):
         dataset: one of VALID_DATASETS
         mode: one of 'sparse', 'full', 'full_x', 'hetero', 'hetero_fixed_pool',
             'attention', 'was_x', 'hetero_was', 'attention_was',
-            'definet', 'definet_was', 'hypergraph'
+            'definet', 'definet_was', 'hypergraph', 'hypergraph_was'
 
     Returns:
         config dict ready for MEGNetTrainer
@@ -335,6 +337,11 @@ def get_config(model: str, dataset: str, mode: str):
         raise ValueError(
             "The hypergraph mode is only supported for cgcnn, megnet, "
             "alignn, and hypergraph"
+        )
+    if mode == 'hypergraph_was' and model not in WAS_MODELS:
+        raise ValueError(
+            "The hypergraph_was mode is only supported for cgcnn, megnet, "
+            "and alignn"
         )
     if mode == 'sparse' and (
             model != 'megnet'
@@ -373,9 +380,11 @@ def get_config(model: str, dataset: str, mode: str):
     ) = _CONFIG_REGISTRY[dataset](model)
     if mode == 'sparse':
         return _finalize_sparse_config(config_sparse, dataset)
-    if mode == 'hypergraph':
-        config = copy.deepcopy(config_hetero)
-        config['task'] = f'{model}_hypergraph'
+    if mode in ('hypergraph', 'hypergraph_was'):
+        config = copy.deepcopy(
+            config_hetero_was if mode == 'hypergraph_was' else config_hetero
+        )
+        config['task'] = f'{model}_{mode}'
         config['model']['hypergraph_radius'] = 3.0
         config['model']['n_heads'] = 4
         config['model']['dropout'] = 0.0

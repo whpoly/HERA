@@ -27,7 +27,7 @@ Supported combinations:
   Models  : megnet, cgcnn, definet, alignn, hypergraph, all
   Modes   : sparse, full, full_x, hetero, hetero_fixed_pool, attention,
             was_x, hetero_was, attention_was, definet, definet_was,
-            hypergraph, all
+            hypergraph, hypergraph_was, all
   Datasets: vacancy, 2dmd_low, 2dmd_high, native, och, imp2d, semi, all
 """
 
@@ -72,7 +72,7 @@ LOCAL_CUTOFF_SWEEP_MODES = (
 )
 FIXED_POOL_MODES = ('hetero_fixed_pool',)
 DEFINET_MODES = ('attention', 'attention_was')
-HYPERGRAPH_MODES = ('hypergraph',)
+HYPERGRAPH_MODES = ('hypergraph', 'hypergraph_was')
 ALIGNN_MODES = (
     'full',
     'full_x',
@@ -85,11 +85,13 @@ ALIGNN_MODES = (
     'definet',
     'definet_was',
     'hypergraph',
+    'hypergraph_was',
 )
 WAS_ABLATION_MODELS = ('cgcnn', 'megnet', 'alignn')
 WAS_ABLATION_MODES = (
     'was_x',
     'hetero_was',
+    'hypergraph_was',
 )
 ATTENTION_ABLATION_MODELS = ('cgcnn', 'megnet', 'definet', 'alignn')
 ATTENTION_ABLATION_MODES = (
@@ -113,6 +115,7 @@ CGCNN_DEFAULT_MODES = [
     'definet',
     'definet_was',
     'hypergraph',
+    'hypergraph_was',
 ]
 MEGNET_DEFAULT_MODES = [
     'sparse',
@@ -125,6 +128,7 @@ MEGNET_DEFAULT_MODES = [
     'hetero_was',
     'attention_was',
     'hypergraph',
+    'hypergraph_was',
 ]
 ALIGNN_DEFAULT_MODES = [
     'hetero',
@@ -138,6 +142,7 @@ ALIGNN_DEFAULT_MODES = [
     'was_x',
     'attention_was',
     'hypergraph',
+    'hypergraph_was',
 ]
 ALIGNN_NODE_NORM_MODES = frozenset((
     'hetero',
@@ -245,7 +250,7 @@ def apply_training_overrides(config, args, model_name):
                 config['model']['hetero_node_norm'] = norm_values[0]
         if args.alignn_amp:
             config['optim']['amp'] = True
-    if config['task'].endswith('_hypergraph') and args.hypergraph_radius is not None:
+    if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
     return config
 
@@ -585,7 +590,7 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
         f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
         f'{split_label}: {losses}',
     ]
-    if config['task'].endswith('_hypergraph'):
+    if config['task'].endswith(('_hypergraph', '_hypergraph_was')):
         mode_summary.insert(
             1,
             f'Hypergraph defect-neighbor radius: '
@@ -615,7 +620,7 @@ def default_modes_for_model(model_name):
     if model_name == 'definet':
         return list(DEFINET_MODES)
     if model_name == 'hypergraph':
-        return list(HYPERGRAPH_MODES)
+        return ['hypergraph']
     if model_name == 'alignn':
         return list(ALIGNN_DEFAULT_MODES)
     if model_name == 'cgcnn':
@@ -626,7 +631,7 @@ def default_modes_for_model(model_name):
 
 
 def validate_modes_for_model(model_name, modes, parser):
-    if model_name == 'hypergraph' and any(mode not in HYPERGRAPH_MODES for mode in modes):
+    if model_name == 'hypergraph' and any(mode != 'hypergraph' for mode in modes):
         parser.error('The hypergraph model only supports --mode hypergraph')
     if model_name not in ('cgcnn', 'megnet', 'alignn', 'hypergraph') and any(
             mode in HYPERGRAPH_MODES for mode in modes
@@ -648,10 +653,10 @@ def validate_modes_for_model(model_name, modes, parser):
         parser.error(
             'The alignn model supports --mode full full_x hetero '
             'hetero_fixed_pool attention was_x hetero_was attention_was '
-            'definet definet_was hypergraph'
+            'definet definet_was hypergraph hypergraph_was'
         )
     if model_name not in WAS_ABLATION_MODELS and any(mode in WAS_ABLATION_MODES for mode in modes):
-        parser.error('The was_x and hetero_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
+        parser.error('The was_x, hetero_was, and hypergraph_was modes are only supported with --model cgcnn, --model megnet, or --model alignn')
     if model_name not in ATTENTION_ABLATION_MODELS and any(mode in ATTENTION_ABLATION_MODES for mode in modes):
         parser.error('The attention ablation modes are only supported with --model cgcnn, --model megnet, --model definet, or --model alignn')
 
@@ -1062,7 +1067,7 @@ def main():
                     f'train={config["model"]["train_batch_size"]}, '
                     f'val/test={config["model"]["test_batch_size"]}'
                 )
-                if train_mode == 'hypergraph':
+                if train_mode in HYPERGRAPH_MODES:
                     physical_summary = (
                         'physical_backbone=none, '
                         if model_name == 'hypergraph'

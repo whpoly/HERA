@@ -291,7 +291,7 @@ class SimpleCrystalConverter:
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
-        if self.task == 'hypergraph':
+        if self.task in ('hypergraph', 'hypergraph_was'):
             region_type = self._hypergraph_region_types(d)
             node_ids = torch.arange(len(d), dtype=torch.long)
             hyperedge_index = torch.stack([node_ids, region_type], dim=0)
