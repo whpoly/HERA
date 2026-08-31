@@ -95,5 +95,40 @@ for index in "${!pids[@]}"; do
     fi
 done
 
+loo_run_dir="$RUN_ROOT/native_leave_one_out"
+loo_log="/home/wuhao/job_logs/hera_hypergraph_${SLURM_JOB_ID}_native_loo.log"
+loo_gpu="${allocated_gpus[0]}"
+
+echo "Launching native leave-one-material-out comparison on allocated GPU=$loo_gpu"
+if (
+    export CUDA_VISIBLE_DEVICES="$loo_gpu"
+    echo "Benchmark: native leave-one-material-out"
+    echo "Models: ordinary full-graph ALIGNN vs Hypergraph ALIGNN"
+    echo "Visible GPU: $CUDA_VISIBLE_DEVICES (PyTorch device cuda:0)"
+    echo "Start time: $(date --iso-8601=seconds)"
+    nvidia-smi
+
+    python -m HERA.native_initial_relaxed_leave_one_out \
+        --seed 123 \
+        --model alignn \
+        --mode full hypergraph \
+        --hypergraph-radius 3.0 \
+        --epochs 500 \
+        --device cuda:0 \
+        --atom-init HERA/atom_init.json \
+        --run-dir "$loo_run_dir" \
+        --resume
+    loo_exit_code=$?
+
+    echo "End time: $(date --iso-8601=seconds)"
+    exit "$loo_exit_code"
+) >"$loo_log" 2>&1; then
+    echo "Completed native leave-one-material-out comparison; log=$loo_log"
+else
+    exit_code=$?
+    echo "Failed native leave-one-material-out comparison with exit code $exit_code; log=$loo_log" >&2
+    status=1
+fi
+
 echo "End time: $(date --iso-8601=seconds)"
 exit "$status"

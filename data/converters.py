@@ -135,14 +135,13 @@ class AtomFeaturesExtractor:
 # ------------------------------------------------------------------ #
 
 class RegionHypergraphData(Data):
-    """PyG data with three independently batched hyperedges per graph."""
-
-    NUM_REGION_HYPEREDGES = 3
+    """PyG data with a variable number of independently batched hyperedges."""
 
     def __inc__(self, key, value, *args, **kwargs):
         if key == 'hyperedge_index':
+            num_hyperedges = int(self.hyperedge_type.numel())
             return torch.tensor(
-                [[self.num_nodes], [self.NUM_REGION_HYPEREDGES]],
+                [[self.num_nodes], [num_hyperedges]],
                 device=value.device,
             )
         return super().__inc__(key, value, *args, **kwargs)
@@ -261,8 +260,20 @@ class SimpleCrystalConverter:
             all_nbrs = capped_nbrs
         return all_nbrs
 
-    def _hypergraph_region_types(self, structure):
-        """Return 0=defect, 1=near pristine, 2=far pristine per atom."""
+    def _hypergraph_regions(self, structure):
+        """Build independent defect-core/local hyperedges plus one far field.
+
+        Every defect gets two distinct hyperedges: a singleton defect-core
+        hyperedge and a local-neighborhood hyperedge containing that defect
+        together with pristine atoms inside ``hypergraph_radius``. Other
+        defects are deliberately excluded from the local hyperedge. A pristine
+        atom may belong to multiple overlapping local neighborhoods. Pristine
+        atoms outside every local neighborhood share one far-field hyperedge.
+
+        Node ``region_type`` remains an exclusive marker used for input region
+        embeddings: 0=defect, 1=near at least one defect, 2=far pristine.
+        Hyperedge types use the same IDs for core/local/far readout pooling.
+        """
         defect_indices = [
             idx
             for idx, site in enumerate(structure)
@@ -275,29 +286,63 @@ class SimpleCrystalConverter:
                 f"none was marked in structure {source_id!r}"
             )
 
-        region_types = []
-        for idx in range(len(structure)):
-            if idx in defect_indices:
-                region_types.append(0)
-                continue
-            min_distance = min(
-                structure.get_distance(idx, defect_idx)
-                for defect_idx in defect_indices
-            )
-            region_types.append(1 if min_distance <= self.hypergraph_radius else 2)
-        return torch.tensor(region_types, dtype=torch.long)
+        defect_set = set(defect_indices)
+        pristine_indices = [
+            idx for idx in range(len(structure)) if idx not in defect_set
+        ]
+        near_pristine = set()
+        hyperedge_members = []
+        hyperedge_types = []
+
+        for defect_idx in defect_indices:
+            local_pristine = [
+                idx
+                for idx in pristine_indices
+                if structure.get_distance(idx, defect_idx) <= self.hypergraph_radius
+            ]
+            near_pristine.update(local_pristine)
+
+            # Keep defect identities separate even when multiple defects occur
+            # in the same crystal.
+            hyperedge_members.append([defect_idx])
+            hyperedge_types.append(0)
+
+            # The center defect anchors its own local environment; no other
+            # defect is admitted to this hyperedge.
+            hyperedge_members.append([defect_idx, *local_pristine])
+            hyperedge_types.append(1)
+
+        far_pristine = [
+            idx for idx in pristine_indices if idx not in near_pristine
+        ]
+        if far_pristine:
+            hyperedge_members.append(far_pristine)
+            hyperedge_types.append(2)
+
+        node_ids = []
+        hyperedge_ids = []
+        for hyperedge_id, members in enumerate(hyperedge_members):
+            node_ids.extend(members)
+            hyperedge_ids.extend([hyperedge_id] * len(members))
+
+        region_type = torch.full((len(structure),), 2, dtype=torch.long)
+        if near_pristine:
+            region_type[list(sorted(near_pristine))] = 1
+        region_type[defect_indices] = 0
+        hyperedge_index = torch.tensor(
+            [node_ids, hyperedge_ids],
+            dtype=torch.long,
+        )
+        hyperedge_type = torch.tensor(hyperedge_types, dtype=torch.long)
+        return region_type, hyperedge_index, hyperedge_type
 
     def convert(self, d):
         if self.task in self.LOCAL_STRUCTURE_MODES:
             d = self._local_radius_structure(d)
 
         if self.task in ('hypergraph', 'hypergraph_was'):
-            region_type = self._hypergraph_region_types(d)
-            node_ids = torch.arange(len(d), dtype=torch.long)
-            hyperedge_index = torch.stack([node_ids, region_type], dim=0)
-            hyperedge_type = torch.arange(
-                RegionHypergraphData.NUM_REGION_HYPEREDGES,
-                dtype=torch.long,
+            region_type, hyperedge_index, hyperedge_type = (
+                self._hypergraph_regions(d)
             )
             x = torch.tensor(self.atom_converter.convert(d), dtype=torch.float32)
 

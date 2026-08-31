@@ -1043,6 +1043,10 @@ def main():
                     run_label = run['label']
                     train_mode = run['mode']
                     mode_parts = [dataset_dir, train_mode]
+                    if train_mode in HYPERGRAPH_MODES:
+                        mode_parts.append(
+                            run['config']['model']['hypergraph_schema']
+                        )
                     if run['radius_label'] is not None:
                         mode_parts.append(run['radius_label'])
                     if run.get('norm_label') is not None:
@@ -1080,7 +1084,8 @@ def main():
                     print(
                         '  Hypergraph/model: '
                         f'{physical_summary}'
-                        'hyperedges=3 (defect/near-pristine/far-pristine), '
+                        'hyperedges=per-defect core + centered local + optional far, '
+                        f'schema={config["model"]["hypergraph_schema"]}, '
                         f'radius={config["model"]["hypergraph_radius"]} A, '
                         f'hidden={config["model"]["embedding_size"]}, '
                         f'nblocks={config["model"]["nblocks"]}, '

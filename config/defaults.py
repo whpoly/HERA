@@ -5,6 +5,7 @@ import copy
 
 EARLY_STOPPING_PATIENCE = 50
 EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
+HYPERGRAPH_SCHEMA = 'per_defect_neighborhood_v2'
 
 
 def _base_optim():
@@ -386,6 +387,7 @@ def get_config(model: str, dataset: str, mode: str):
         )
         config['task'] = f'{model}_{mode}'
         config['model']['hypergraph_radius'] = 3.0
+        config['model']['hypergraph_schema'] = HYPERGRAPH_SCHEMA
         config['model']['n_heads'] = 4
         config['model']['dropout'] = 0.0
         return _finalize_config(config, model, dataset)

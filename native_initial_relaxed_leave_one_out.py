@@ -9,6 +9,10 @@ evaluation and plotting. Two protocols are run for every eligible material:
    held-out final structures.
 2. Fine-tune a copy of that source model using only the held-out POSCAR0 rows,
    then predict the same held-out final structures.
+
+By default, the runner makes a controlled comparison between ordinary
+full-graph ALIGNN and Hypergraph ALIGNN. Both variants use the same native
+leave-one-material-out splits and evaluation protocols.
 """
 
 from __future__ import annotations
@@ -73,8 +77,8 @@ PROTOCOL_COLORS = {
     "poscar0_transfer__final_test": "#0f766e",
 }
 
-ALIGNN_BASELINE_LABEL = "ALIGNN"
-ALIGNN_HETERO_LAYERNORM_LABEL = "HeteroALIGNN + LayerNorm"
+ALIGNN_BASELINE_LABEL = "ALIGNN (ordinary GNN)"
+ALIGNN_HYPERGRAPH_LABEL = "Hypergraph ALIGNN"
 COMPARISON_METRICS = (
     "mae",
     "rmse",
@@ -623,12 +627,26 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
     return rows, None
 
 
-def expand_leave_one_out_runs(model_name, requested_modes, radii, norm_values=None):
-    """Build isolated LOO run specs, including HeteroALIGNN norm labels."""
+def expand_leave_one_out_runs(
+    model_name,
+    requested_modes,
+    radii,
+    norm_values=None,
+    hypergraph_radius=None,
+):
+    """Build isolated LOO run specs and apply hypergraph-region settings."""
     model_modes = modes_for_model(model_name, requested_modes)
     runs = expand_mode_runs(model_name, model_modes, radii)
     expanded = []
     for run in runs:
+        if (
+            run["mode"] in {"hypergraph", "hypergraph_was"}
+            and hypergraph_radius is not None
+        ):
+            radius = float(hypergraph_radius)
+            run["config"]["model"]["hypergraph_radius"] = radius
+            schema = run["config"]["model"]["hypergraph_schema"]
+            run["label"] = f'{run["label"]}_r{radius:g}_{schema}'
         expanded.extend(
             expand_alignn_node_norm_runs(
                 [run],
@@ -639,25 +657,22 @@ def expand_leave_one_out_runs(model_name, requested_modes, radii, norm_values=No
     return expanded
 
 
-def build_alignn_layernorm_comparison(summary_df):
-    """Pair ordinary ALIGNN and LayerNorm HeteroALIGNN LOO measurements."""
+def build_alignn_hypergraph_comparison(summary_df):
+    """Pair ordinary ALIGNN and Hypergraph ALIGNN LOO measurements."""
     if summary_df.empty or "model" not in summary_df.columns:
         return pd.DataFrame()
 
     alignn = summary_df[summary_df["model"].astype(str).eq("alignn")].copy()
     if alignn.empty:
         return pd.DataFrame()
-    normalization = alignn.get(
-        "node_normalization",
-        pd.Series("", index=alignn.index, dtype=object),
-    ).fillna("").astype(str).str.lower()
     mode = alignn["mode"].astype(str)
     baseline = alignn[mode.eq("full")].copy()
-    hetero = alignn[
-        mode.str.match(r"^hetero(?:_r[^_]+)?(?:_norm_layernorm)?$")
-        & (normalization.eq("layernorm") | mode.str.endswith("_norm_layernorm"))
+    hypergraph = alignn[
+        mode.str.match(
+            r"^hypergraph(?:_r[^_]+)?(?:_per_defect_neighborhood_v2)?$"
+        )
     ].copy()
-    if baseline.empty or hetero.empty:
+    if baseline.empty or hypergraph.empty:
         return pd.DataFrame()
 
     keys = ["material", "protocol", "seed"]
@@ -665,41 +680,46 @@ def build_alignn_layernorm_comparison(summary_df):
     baseline = baseline[keys + keep_metrics].rename(
         columns={metric: f"alignn_{metric}" for metric in keep_metrics}
     )
-    hetero_columns = keys + ["mode"] + keep_metrics
-    hetero = hetero[hetero_columns].rename(
+    hypergraph_columns = keys + ["mode"] + keep_metrics
+    hypergraph = hypergraph[hypergraph_columns].rename(
         columns={
-            "mode": "hetero_mode",
-            **{metric: f"hetero_layernorm_{metric}" for metric in keep_metrics},
+            "mode": "hypergraph_mode",
+            **{metric: f"hypergraph_alignn_{metric}" for metric in keep_metrics},
         }
     )
-    paired = baseline.merge(hetero, on=keys, how="inner", validate="one_to_one")
+    paired = baseline.merge(
+        hypergraph,
+        on=keys,
+        how="inner",
+        validate="one_to_one",
+    )
     if paired.empty:
         return paired
 
     lower_is_better = {"mae", "rmse", "ground_state_mae"}
     for metric in keep_metrics:
         baseline_col = f"alignn_{metric}"
-        hetero_col = f"hetero_layernorm_{metric}"
-        delta_col = f"hetero_minus_alignn_{metric}"
-        paired[delta_col] = paired[hetero_col] - paired[baseline_col]
+        hypergraph_col = f"hypergraph_alignn_{metric}"
+        delta_col = f"hypergraph_minus_alignn_{metric}"
+        paired[delta_col] = paired[hypergraph_col] - paired[baseline_col]
         if metric in lower_is_better:
-            paired[f"hetero_relative_improvement_{metric}_percent"] = np.where(
+            paired[f"hypergraph_relative_improvement_{metric}_percent"] = np.where(
                 paired[baseline_col].ne(0),
                 -100.0 * paired[delta_col] / paired[baseline_col].abs(),
                 np.nan,
             )
     if "mae" in keep_metrics:
-        delta = paired["hetero_minus_alignn_mae"]
+        delta = paired["hypergraph_minus_alignn_mae"]
         paired["mae_winner"] = np.select(
             [delta.lt(0), delta.gt(0)],
-            [ALIGNN_HETERO_LAYERNORM_LABEL, ALIGNN_BASELINE_LABEL],
+            [ALIGNN_HYPERGRAPH_LABEL, ALIGNN_BASELINE_LABEL],
             default="Tie",
         )
     return paired.sort_values(keys).reset_index(drop=True)
 
 
-def aggregate_alignn_layernorm_comparison(comparison_df):
-    """Aggregate paired ALIGNN comparison across held-out materials and seeds."""
+def aggregate_alignn_hypergraph_comparison(comparison_df):
+    """Aggregate paired GNN/hypergraph comparison across materials and seeds."""
     if comparison_df.empty:
         return pd.DataFrame()
     rows = []
@@ -707,24 +727,25 @@ def aggregate_alignn_layernorm_comparison(comparison_df):
         row = {"protocol": protocol, "n_pairs": len(group)}
         for metric in COMPARISON_METRICS:
             baseline_col = f"alignn_{metric}"
-            hetero_col = f"hetero_layernorm_{metric}"
-            if baseline_col not in group or hetero_col not in group:
+            hypergraph_col = f"hypergraph_alignn_{metric}"
+            if baseline_col not in group or hypergraph_col not in group:
                 continue
             row[f"alignn_{metric}_mean"] = group[baseline_col].mean()
             row[f"alignn_{metric}_std"] = group[baseline_col].std(ddof=1)
-            row[f"hetero_layernorm_{metric}_mean"] = group[hetero_col].mean()
-            row[f"hetero_layernorm_{metric}_std"] = group[hetero_col].std(ddof=1)
-            row[f"hetero_minus_alignn_{metric}_mean"] = (
-                group[hetero_col] - group[baseline_col]
+            row[f"hypergraph_alignn_{metric}_mean"] = group[hypergraph_col].mean()
+            row[f"hypergraph_alignn_{metric}_std"] = group[hypergraph_col].std(ddof=1)
+            row[f"hypergraph_minus_alignn_{metric}_mean"] = (
+                group[hypergraph_col] - group[baseline_col]
             ).mean()
-        if "hetero_minus_alignn_mae" in group:
-            row["hetero_mae_win_rate"] = group["hetero_minus_alignn_mae"].lt(0).mean()
-            row["mae_tie_rate"] = group["hetero_minus_alignn_mae"].eq(0).mean()
+        if "hypergraph_minus_alignn_mae" in group:
+            delta = group["hypergraph_minus_alignn_mae"]
+            row["hypergraph_mae_win_rate"] = delta.lt(0).mean()
+            row["mae_tie_rate"] = delta.eq(0).mean()
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def plot_alignn_layernorm_comparison(aggregate_df, run_dir):
+def plot_alignn_hypergraph_comparison(aggregate_df, run_dir):
     if aggregate_df.empty or "alignn_mae_mean" not in aggregate_df:
         return None
 
@@ -739,7 +760,7 @@ def plot_alignn_layernorm_comparison(aggregate_df, run_dir):
     fig, ax = plt.subplots(figsize=(max(7.2, 2.7 * len(labels)), 5.2))
     for offset, prefix, label, color in (
         (-width / 2, "alignn", ALIGNN_BASELINE_LABEL, "#3268a8"),
-        (width / 2, "hetero_layernorm", ALIGNN_HETERO_LAYERNORM_LABEL, "#d4553f"),
+        (width / 2, "hypergraph_alignn", ALIGNN_HYPERGRAPH_LABEL, "#d4553f"),
     ):
         means = aggregate_df[f"{prefix}_mae_mean"].to_numpy(dtype=float)
         stds = aggregate_df[f"{prefix}_mae_std"].fillna(0).to_numpy(dtype=float)
@@ -763,21 +784,21 @@ def plot_alignn_layernorm_comparison(aggregate_df, run_dir):
     fig.tight_layout()
     output_dir = Path(run_dir) / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output = output_dir / "alignn_layernorm_vs_alignn_loo_mae.png"
+    output = output_dir / "hypergraph_alignn_vs_alignn_loo_mae.png"
     fig.savefig(output, dpi=220)
     plt.close(fig)
     return output
 
 
-def write_alignn_layernorm_comparison(summary_df, run_dir, make_plot=False):
-    comparison_df = build_alignn_layernorm_comparison(summary_df)
+def write_alignn_hypergraph_comparison(summary_df, run_dir, make_plot=False):
+    comparison_df = build_alignn_hypergraph_comparison(summary_df)
     if comparison_df.empty:
         return comparison_df, pd.DataFrame(), None
-    aggregate_df = aggregate_alignn_layernorm_comparison(comparison_df)
+    aggregate_df = aggregate_alignn_hypergraph_comparison(comparison_df)
     run_dir = Path(run_dir)
-    comparison_df.to_csv(run_dir / "alignn_layernorm_comparison.csv", index=False)
-    aggregate_df.to_csv(run_dir / "alignn_layernorm_aggregate.csv", index=False)
-    figure = plot_alignn_layernorm_comparison(aggregate_df, run_dir) if make_plot else None
+    comparison_df.to_csv(run_dir / "alignn_hypergraph_comparison.csv", index=False)
+    aggregate_df.to_csv(run_dir / "alignn_hypergraph_aggregate.csv", index=False)
+    figure = plot_alignn_hypergraph_comparison(aggregate_df, run_dir) if make_plot else None
     return comparison_df, aggregate_df, figure
 
 
@@ -1550,15 +1571,15 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
                 f"{row.overall_mae:.3f} |"
             )
 
-    comparison_df = build_alignn_layernorm_comparison(summary_df)
-    aggregate_df = aggregate_alignn_layernorm_comparison(comparison_df)
+    comparison_df = build_alignn_hypergraph_comparison(summary_df)
+    aggregate_df = aggregate_alignn_hypergraph_comparison(comparison_df)
     if not aggregate_df.empty:
         lines.extend(
             [
                 "",
-                "## ALIGNN vs HeteroALIGNN + LayerNorm",
+                "## ALIGNN (ordinary GNN) vs Hypergraph ALIGNN",
                 "",
-                "| Protocol | Pairs | ALIGNN MAE | Hetero + LN MAE | Hetero - ALIGNN | Hetero win rate |",
+                "| Protocol | Pairs | ALIGNN MAE | Hypergraph ALIGNN MAE | Hypergraph - ALIGNN | Hypergraph win rate |",
                 "| --- | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
@@ -1570,9 +1591,9 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
                     protocol=protocol,
                     pairs=int(row.n_pairs),
                     baseline=row.alignn_mae_mean,
-                    hetero=row.hetero_layernorm_mae_mean,
-                    delta=row.hetero_minus_alignn_mae_mean,
-                    win_rate=row.hetero_mae_win_rate,
+                    hetero=row.hypergraph_alignn_mae_mean,
+                    delta=row.hypergraph_minus_alignn_mae_mean,
+                    win_rate=row.hypergraph_mae_win_rate,
                 )
             )
 
@@ -1593,7 +1614,7 @@ def write_progress_outputs(run_dir, summary_rows, skipped_rows):
     )
     if not skipped_df.empty:
         skipped_df.to_csv(Path(run_dir) / "skipped_materials.csv", index=False)
-    write_alignn_layernorm_comparison(summary_df, run_dir, make_plot=False)
+    write_alignn_hypergraph_comparison(summary_df, run_dir, make_plot=False)
     write_summary_markdown(summary_df, skipped_df, run_dir)
     return summary_df, skipped_df
 
@@ -1620,6 +1641,7 @@ def run_single_seed(args, run_dir, radii):
             args.mode,
             radii,
             norm_values=args.alignn_hetero_node_norm,
+            hypergraph_radius=args.hypergraph_radius,
         )
         for run in runs:
             run_specs.append((model_name, run))
@@ -1698,7 +1720,7 @@ def run_single_seed(args, run_dir, radii):
     completed_materials = sorted(set(summary_df["material"])) if "material" in summary_df else []
     write_settings(run_dir, args, completed_materials)
     write_summary_markdown(summary_df, skipped_df, run_dir)
-    _, _, comparison_figure = write_alignn_layernorm_comparison(
+    _, _, comparison_figure = write_alignn_hypergraph_comparison(
         summary_df,
         run_dir,
         make_plot=True,
@@ -1708,8 +1730,8 @@ def run_single_seed(args, run_dir, radii):
     print(f"Overall MAE written to {run_dir / 'overall_mae.csv'}")
     print(f"Markdown summary written to {run_dir / 'summary.md'}")
     if comparison_figure is not None:
-        print(f"ALIGNN comparison written to {run_dir / 'alignn_layernorm_comparison.csv'}")
-        print(f"ALIGNN aggregate written to {run_dir / 'alignn_layernorm_aggregate.csv'}")
+        print(f"ALIGNN comparison written to {run_dir / 'alignn_hypergraph_comparison.csv'}")
+        print(f"ALIGNN aggregate written to {run_dir / 'alignn_hypergraph_aggregate.csv'}")
         print(f"ALIGNN comparison figure written to {comparison_figure}")
     print("Figures are updated after each completed material under <run-dir>/<material>/figures")
     return summary_df, skipped_df
@@ -1718,8 +1740,9 @@ def run_single_seed(args, run_dir, radii):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Compare direct native-defect prediction with POSCAR0 one-shot "
-            "transfer learning on held-out final structures."
+            "Compare ordinary ALIGNN and Hypergraph ALIGNN with direct native-"
+            "defect prediction and POSCAR0 one-shot transfer learning on held-"
+            "out final structures."
         )
     )
     parser.add_argument(
@@ -1765,14 +1788,23 @@ def main():
         "--model",
         dest="models",
         nargs="+",
-        default=["cgcnn"],
+        default=["alignn"],
         choices=["alignn", "cgcnn", "megnet", "definet"],
     )
     parser.add_argument(
         "--mode",
         nargs="+",
-        default=["hetero"],
+        default=["full", "hypergraph"],
         choices=VALID_MODES,
+    )
+    parser.add_argument(
+        "--hypergraph-radius",
+        type=float,
+        default=3.0,
+        help=(
+            "Defect-neighbor radius for the near-pristine hyperedge in angstrom "
+            "(default: 3.0)."
+        ),
     )
     parser.add_argument(
         "--materials",
@@ -1797,9 +1829,9 @@ def main():
         choices=("layernorm", "batchnorm", "none"),
         default=None,
         help=(
-            "Normalization for HeteroALIGNN residual deltas. Use layernorm "
-            "for the controlled HeteroALIGNN + LayerNorm versus ALIGNN "
-            "comparison. Each value gets an isolated checkpoint directory."
+            "Optional normalization ablation for HeteroALIGNN residual deltas "
+            "when hetero mode is explicitly selected. Each value gets an "
+            "isolated checkpoint directory."
         ),
     )
     args = parser.parse_args()
@@ -1815,6 +1847,8 @@ def main():
         parser.error("--finetune-lr must be positive.")
     if args.finetune_backbone_lr <= 0:
         parser.error("--finetune-backbone-lr must be positive.")
+    if args.hypergraph_radius < 0:
+        parser.error("--hypergraph-radius must be non-negative.")
 
     radii = parse_radius_values(args.r, parser)
     init_elem_embedding(args.atom_init)
@@ -1845,7 +1879,7 @@ def main():
         if not combined_skipped.empty:
             combined_skipped.to_csv(run_dir / "skipped_materials.csv", index=False)
         write_summary_markdown(combined_summary, combined_skipped, run_dir)
-        write_alignn_layernorm_comparison(combined_summary, run_dir, make_plot=True)
+        write_alignn_hypergraph_comparison(combined_summary, run_dir, make_plot=True)
         settings = vars(args).copy()
         settings["seeds"] = requested_seeds
         settings["target_scheme"] = TARGET_SCHEME

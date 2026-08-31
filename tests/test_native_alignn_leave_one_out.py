@@ -9,15 +9,15 @@ import torch.nn as nn
 
 from HERA.native_initial_relaxed_leave_one_out import (
     add_native_targets,
-    aggregate_alignn_layernorm_comparison,
+    aggregate_alignn_hypergraph_comparison,
     aggregate_overall_mae,
-    build_alignn_layernorm_comparison,
+    build_alignn_hypergraph_comparison,
     eligible_materials,
     expand_leave_one_out_runs,
     masks_for_material,
     reset_discriminative_optimizer,
 )
-from HERA.native_ood_case_study import model_mode_display
+from HERA.native_ood_case_study import color_for_label, model_mode_display
 from HERA.training.trainer import load_trusted_checkpoint
 
 
@@ -132,15 +132,40 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
         self.assertEqual(runs[0]["config"]["task"], "alignn_full")
         self.assertEqual(runs[1]["config"]["task"], "alignn_hetero")
 
+    def test_builds_full_and_hypergraph_alignn_runs_with_requested_radius(self):
+        runs = expand_leave_one_out_runs(
+            "alignn",
+            ["full", "hypergraph"],
+            radii=None,
+            hypergraph_radius=4.5,
+        )
+
+        self.assertEqual(
+            [run["label"] for run in runs],
+            ["full", "hypergraph_r4.5_per_defect_neighborhood_v2"],
+        )
+        self.assertEqual(runs[0]["config"]["task"], "alignn_full")
+        self.assertEqual(runs[1]["config"]["task"], "alignn_hypergraph")
+        self.assertEqual(runs[1]["config"]["model"]["hypergraph_radius"], 4.5)
+
     def test_layernorm_label_is_human_readable(self):
         self.assertEqual(
             model_mode_display("alignn", "hetero_r0_norm_layernorm"),
             "Hetero (LayerNorm) ALIGNN",
         )
 
-    def test_pairs_and_aggregates_alignn_mae(self):
+    def test_hypergraph_radius_label_uses_hypergraph_color(self):
+        label = model_mode_display(
+            "alignn",
+            "hypergraph_r3_per_defect_neighborhood_v2",
+        )
+
+        self.assertEqual(label, "Hypergraph r3 ALIGNN")
+        self.assertEqual(color_for_label(label, 0), "#d4553f")
+
+    def test_pairs_and_aggregates_hypergraph_alignn_mae(self):
         rows = []
-        for material, baseline, hetero in (("GaN", 0.4, 0.3), ("AlN", 0.2, 0.25)):
+        for material, baseline, hypergraph in (("GaN", 0.4, 0.3), ("AlN", 0.2, 0.25)):
             common = {
                 "material": material,
                 "model": "alignn",
@@ -155,26 +180,25 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
             rows.append(
                 {
                     **common,
-                    "mode": "hetero_r0_norm_layernorm",
-                    "mae": hetero,
-                    "node_normalization": "layernorm",
+                    "mode": "hypergraph_r3_per_defect_neighborhood_v2",
+                    "mae": hypergraph,
                 }
             )
 
-        comparison = build_alignn_layernorm_comparison(pd.DataFrame(rows))
+        comparison = build_alignn_hypergraph_comparison(pd.DataFrame(rows))
         self.assertEqual(len(comparison), 2)
         gan = comparison[comparison["material"].eq("GaN")].iloc[0]
-        self.assertAlmostEqual(gan["hetero_minus_alignn_mae"], -0.1)
-        self.assertAlmostEqual(gan["hetero_relative_improvement_mae_percent"], 25.0)
-        self.assertEqual(gan["mae_winner"], "HeteroALIGNN + LayerNorm")
+        self.assertAlmostEqual(gan["hypergraph_minus_alignn_mae"], -0.1)
+        self.assertAlmostEqual(gan["hypergraph_relative_improvement_mae_percent"], 25.0)
+        self.assertEqual(gan["mae_winner"], "Hypergraph ALIGNN")
 
-        aggregate = aggregate_alignn_layernorm_comparison(comparison)
+        aggregate = aggregate_alignn_hypergraph_comparison(comparison)
         self.assertEqual(int(aggregate.iloc[0]["n_pairs"]), 2)
         self.assertAlmostEqual(aggregate.iloc[0]["alignn_mae_mean"], 0.3)
-        self.assertAlmostEqual(aggregate.iloc[0]["hetero_layernorm_mae_mean"], 0.275)
-        self.assertAlmostEqual(aggregate.iloc[0]["hetero_mae_win_rate"], 0.5)
+        self.assertAlmostEqual(aggregate.iloc[0]["hypergraph_alignn_mae_mean"], 0.275)
+        self.assertAlmostEqual(aggregate.iloc[0]["hypergraph_mae_win_rate"], 0.5)
 
-    def test_does_not_pair_non_layernorm_hetero_run(self):
+    def test_does_not_pair_heterogeneous_alignn_run(self):
         frame = pd.DataFrame(
             [
                 {
@@ -197,7 +221,7 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
                 },
             ]
         )
-        self.assertTrue(build_alignn_layernorm_comparison(frame).empty)
+        self.assertTrue(build_alignn_hypergraph_comparison(frame).empty)
 
 
 if __name__ == "__main__":

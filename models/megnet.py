@@ -155,7 +155,13 @@ class HyperMEGNet(nn.Module):
             batch,
             bond_batch,
         )
-        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+        (
+            num_graphs,
+            num_hyperedges,
+            hyperedge_index,
+            hyperedge_type,
+            region_type,
+        ) = (
             self.hypergraph.normalize_inputs(
                 x,
                 hyperedge_index,
@@ -191,7 +197,14 @@ class HyperMEGNet(nn.Module):
             )
 
         node_pool = self.sv(x, batch, dim_size=num_graphs)
-        region_pool = self.hypergraph.pool(x, hyperedge_index, num_graphs)
+        region_pool = self.hypergraph.pool(
+            x,
+            hyperedge_index,
+            hyperedge_type,
+            batch,
+            num_graphs,
+            num_hyperedges,
+        )
         if edge_attr.size(0) == 0:
             edge_pool = x.new_zeros((num_graphs, 2 * x.size(-1)))
         else:

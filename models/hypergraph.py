@@ -41,9 +41,12 @@ class RegionHypergraphBlock(nn.Module):
 
 
 class RegionHypergraphInteraction(nn.Module):
-    """Reusable three-region hypergraph updates for a physical GNN backbone."""
+    """Reusable per-defect hypergraph updates for a physical GNN backbone."""
 
     NUM_REGION_TYPES = 3
+    DEFECT_CORE = 0
+    LOCAL_NEIGHBORHOOD = 1
+    FAR_FIELD = 2
 
     def __init__(self, hidden_dim, n_steps, heads=4, dropout=0.0):
         super().__init__()
@@ -78,34 +81,51 @@ class RegionHypergraphInteraction(nn.Module):
             region_type=None,
     ):
         num_graphs = self.graph_count(batch=batch, state=state)
-        num_hyperedges = num_graphs * self.NUM_REGION_TYPES
         if hyperedge_type is None:
-            hyperedge_type = torch.arange(
-                num_hyperedges,
-                device=x.device,
-                dtype=torch.long,
-            ) % self.NUM_REGION_TYPES
-        else:
-            hyperedge_type = hyperedge_type.to(
-                device=x.device,
-                dtype=torch.long,
-            ).view(-1)
-        if hyperedge_type.numel() != num_hyperedges:
             raise ValueError(
-                f"Expected {num_hyperedges} hyperedge types for {num_graphs} "
-                f"graphs, got {hyperedge_type.numel()}"
+                "hyperedge_type is required for variable per-defect hypergraphs"
+            )
+        hyperedge_type = hyperedge_type.to(
+            device=x.device,
+            dtype=torch.long,
+        ).view(-1)
+        num_hyperedges = int(hyperedge_type.numel())
+        if num_hyperedges < 1:
+            raise ValueError("At least one hyperedge is required")
+        hyperedge_index = hyperedge_index.to(device=x.device, dtype=torch.long)
+        if hyperedge_index.ndim != 2 or hyperedge_index.size(0) != 2:
+            raise ValueError(
+                "hyperedge_index must have shape [2, num_incident_pairs]"
             )
         if torch.any((hyperedge_type < 0) | (hyperedge_type >= self.NUM_REGION_TYPES)):
             raise ValueError("hyperedge_type values must be in [0, 2]")
+        node_ids, hyperedge_ids = hyperedge_index
+        if node_ids.numel() == 0:
+            raise ValueError("Every hypergraph must contain node-hyperedge incidences")
+        if torch.any((node_ids < 0) | (node_ids >= x.size(0))):
+            raise ValueError("hyperedge_index contains an invalid node index")
+        if torch.any((hyperedge_ids < 0) | (hyperedge_ids >= num_hyperedges)):
+            raise ValueError("hyperedge_index contains an invalid hyperedge index")
+        incidence_count = scatter(
+            torch.ones_like(hyperedge_ids),
+            hyperedge_ids,
+            dim=0,
+            dim_size=num_hyperedges,
+            reduce="sum",
+        )
+        if torch.any(incidence_count == 0):
+            raise ValueError("Empty hyperedges must be omitted from the variable layout")
 
         if region_type is None:
-            region_type = torch.full(
-                (x.size(0),),
-                -1,
-                dtype=torch.long,
-                device=x.device,
+            # Core incidences take priority over local and far incidences, so
+            # an overlapping local center remains marked as a defect node.
+            region_type = scatter(
+                hyperedge_type[hyperedge_ids],
+                node_ids,
+                dim=0,
+                dim_size=x.size(0),
+                reduce="min",
             )
-            region_type[hyperedge_index[0]] = hyperedge_type[hyperedge_index[1]]
         else:
             region_type = region_type.to(device=x.device, dtype=torch.long).view(-1)
         if region_type.numel() != x.size(0):
@@ -115,7 +135,13 @@ class RegionHypergraphInteraction(nn.Module):
             )
         if torch.any((region_type < 0) | (region_type >= self.NUM_REGION_TYPES)):
             raise ValueError("region_type values must be in [0, 2] for every node")
-        return num_graphs, num_hyperedges, hyperedge_type, region_type
+        return (
+            num_graphs,
+            num_hyperedges,
+            hyperedge_index,
+            hyperedge_type,
+            region_type,
+        )
 
     def add_region_features(self, x, region_type):
         return x + self.region_embedding(region_type)
@@ -128,28 +154,72 @@ class RegionHypergraphInteraction(nn.Module):
             num_hyperedges,
         )
 
-    def pool(self, x, hyperedge_index, num_graphs):
+    def pool(
+            self,
+            x,
+            hyperedge_index,
+            hyperedge_type,
+            batch,
+            num_graphs,
+            num_hyperedges,
+    ):
+        """Pool nodes per hyperedge, then hyperedges per semantic type."""
         node_ids, hyperedge_ids = hyperedge_index
-        return scatter(
+        hyperedge_pool = scatter(
             x[node_ids],
             hyperedge_ids,
             dim=0,
-            dim_size=num_graphs * self.NUM_REGION_TYPES,
+            dim_size=num_hyperedges,
             reduce="mean",
-        ).reshape(num_graphs, self.NUM_REGION_TYPES * self.hidden_dim)
+        )
+        incidence_graph = batch[node_ids]
+        hyperedge_graph_min = scatter(
+            incidence_graph,
+            hyperedge_ids,
+            dim=0,
+            dim_size=num_hyperedges,
+            reduce="min",
+        )
+        hyperedge_graph_max = scatter(
+            incidence_graph,
+            hyperedge_ids,
+            dim=0,
+            dim_size=num_hyperedges,
+            reduce="max",
+        )
+        if not torch.equal(hyperedge_graph_min, hyperedge_graph_max):
+            raise ValueError("A hyperedge cannot contain nodes from multiple graphs")
+
+        type_pools = []
+        for region_type in range(self.NUM_REGION_TYPES):
+            mask = hyperedge_type.eq(region_type)
+            if torch.any(mask):
+                pooled = scatter(
+                    hyperedge_pool[mask],
+                    hyperedge_graph_min[mask],
+                    dim=0,
+                    dim_size=num_graphs,
+                    reduce="mean",
+                )
+            else:
+                pooled = x.new_zeros((num_graphs, self.hidden_dim))
+            type_pools.append(pooled)
+        return torch.cat(type_pools, dim=-1)
 
 
 class RegionHypergraphNet(nn.Module):
-    """Hypergraph model with three fixed semantic hyperedges per crystal.
+    """Hypergraph model with independent per-defect neighborhoods.
 
-    The hyperedges represent, in order:
+    The variable hyperedges have three semantic types:
 
-    0. defect atoms;
-    1. pristine atoms within the configured defect-neighbor radius;
-    2. all remaining pristine atoms.
+    0. one singleton core hyperedge for every defect;
+    1. one local hyperedge per defect containing its center plus pristine atoms
+       within the configured defect-neighbor radius;
+    2. one optional far-field hyperedge containing remaining pristine atoms.
 
-    Every atom belongs to exactly one of the three hyperedges. Empty region
-    hyperedges are retained so batched graphs always have a stable layout.
+    Local hyperedges exclude other defects but may overlap on pristine atoms.
+    Variable hyperedge counts are reduced to three type-level representations
+    only at graph readout.
     """
 
     NUM_REGION_TYPES = RegionHypergraphInteraction.NUM_REGION_TYPES
@@ -199,7 +269,13 @@ class RegionHypergraphNet(nn.Module):
             hyperedge_type=None,
             region_type=None,
     ):
-        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+        (
+            num_graphs,
+            num_hyperedges,
+            hyperedge_index,
+            hyperedge_type,
+            region_type,
+        ) = (
             self.hypergraph.normalize_inputs(
                 x,
                 hyperedge_index,
@@ -218,7 +294,14 @@ class RegionHypergraphNet(nn.Module):
                 hyperedge_type,
                 num_hyperedges,
             )
-        region_pool = self.hypergraph.pool(x, hyperedge_index, num_graphs)
+        region_pool = self.hypergraph.pool(
+            x,
+            hyperedge_index,
+            hyperedge_type,
+            batch,
+            num_graphs,
+            num_hyperedges,
+        )
 
         if state is None:
             state = x.new_zeros((num_graphs, self.state_embedding[0].in_features))

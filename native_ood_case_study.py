@@ -65,12 +65,14 @@ MODE_DISPLAY = {
     "hetero": "Hetero",
     "attention": "Attention",
     "definet": "DeFiNet",
+    "hypergraph": "Hypergraph",
 }
 
 MODEL_COLORS = {
     "Full ALIGNN": "#3268a8",
     "Hetero ALIGNN": "#d4553f",
     "Hetero (LayerNorm) ALIGNN": "#d4553f",
+    "Hypergraph ALIGNN": "#d4553f",
     "Full CGCNN": "#5aa0c8",
     "Full + X CGCNN": "#4f7fb8",
     "Hetero CGCNN": "#e8896d",
@@ -320,6 +322,7 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    mode = mode.removesuffix("_per_defect_neighborhood_v2")
     normalization = None
     if "_norm_" in mode:
         mode, normalization = mode.rsplit("_norm_", 1)
@@ -351,7 +354,12 @@ def model_mode_display(model, mode):
 
 
 def color_for_label(label, fallback_idx):
-    return MODEL_COLORS.get(str(label), FALLBACK_COLORS[fallback_idx % len(FALLBACK_COLORS)])
+    label = str(label)
+    if label in MODEL_COLORS:
+        return MODEL_COLORS[label]
+    if label.startswith("Hypergraph") and label.endswith("ALIGNN"):
+        return MODEL_COLORS["Hypergraph ALIGNN"]
+    return FALLBACK_COLORS[fallback_idx % len(FALLBACK_COLORS)]
 
 
 def ground_state_set(df):

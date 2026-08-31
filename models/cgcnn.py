@@ -121,7 +121,13 @@ class HyperCGCNN(nn.Module):
             region_type=None,
     ):
         atom_fea = self.embedding(x.float())
-        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+        (
+            num_graphs,
+            num_hyperedges,
+            hyperedge_index,
+            hyperedge_type,
+            region_type,
+        ) = (
             self.hypergraph.normalize_inputs(
                 atom_fea,
                 hyperedge_index,
@@ -146,7 +152,14 @@ class HyperCGCNN(nn.Module):
             )
 
         global_pool = self.pooling(atom_fea, batch)
-        region_pool = self.hypergraph.pool(atom_fea, hyperedge_index, num_graphs)
+        region_pool = self.hypergraph.pool(
+            atom_fea,
+            hyperedge_index,
+            hyperedge_type,
+            batch,
+            num_graphs,
+            num_hyperedges,
+        )
         crys_fea = torch.cat([global_pool, region_pool], dim=-1)
         crys_fea = F.softplus(self.conv_to_fc(F.softplus(crys_fea)))
         if self.classification:

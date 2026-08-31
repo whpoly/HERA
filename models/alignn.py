@@ -843,7 +843,13 @@ class HyperALIGNN(nn.Module):
             region_type=None,
     ):
         x = self.node_embedding(x.float())
-        num_graphs, num_hyperedges, hyperedge_type, region_type = (
+        (
+            num_graphs,
+            num_hyperedges,
+            hyperedge_index,
+            hyperedge_type,
+            region_type,
+        ) = (
             self.hypergraph.normalize_inputs(
                 x,
                 hyperedge_index,
@@ -907,7 +913,14 @@ class HyperALIGNN(nn.Module):
             self.hidden_dim,
             x,
         )
-        region_pool = self.hypergraph.pool(x, hyperedge_index, num_graphs)
+        region_pool = self.hypergraph.pool(
+            x,
+            hyperedge_index,
+            hyperedge_type,
+            batch,
+            num_graphs,
+            num_hyperedges,
+        )
         return self.readout(torch.cat([global_pool, region_pool], dim=-1))
 
 

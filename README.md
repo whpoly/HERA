@@ -109,14 +109,18 @@ Common arguments:
   full-graph-only `was` mode is no longer exposed.
 - `hetero`, `hetero_fixed_pool`, and `hetero_was` use the `--r` values as the local/host boundary
   cutoff while keeping the full model graph and config graph cutoff.
-- `hypergraph` uses three semantic hyperedges per crystal: defect atoms,
-  pristine atoms within 3.0 A of any defect, and all remaining pristine atoms.
-  Distances use periodic minimum images. With `--model cgcnn`, `megnet`, or
-  `alignn`, the original physical bond (and ALIGNN angle) updates are
-  interleaved with hyperedge updates. `--model hypergraph` runs the pure
-  hypergraph baseline without a physical backbone. Override the threshold with
-  `--hypergraph-radius`.
-- `hypergraph_was` keeps the same physical graph and three hyperedges as
+- `hypergraph` keeps defect neighborhoods independent. Every defect gets a
+  singleton core hyperedge and a local hyperedge containing that center defect
+  plus pristine atoms within 3.0 A; other defect atoms are excluded. A
+  pristine atom may belong to multiple genuinely overlapping neighborhoods,
+  and pristine atoms outside every neighborhood share one optional far-field
+  hyperedge. Distances use periodic minimum images. The variable hyperedges are
+  pooled individually and combined by semantic type only at graph readout.
+  With `--model cgcnn`, `megnet`, or `alignn`, the original physical bond (and
+  ALIGNN angle) updates are interleaved with hyperedge updates. `--model
+  hypergraph` runs the pure hypergraph baseline without a physical backbone.
+  Override the threshold with `--hypergraph-radius`.
+- `hypergraph_was` keeps the same physical graph and per-defect hyperedges as
   `hypergraph`, but concatenates current and previous/reference (`was`) atom
   embeddings. It is available for CGCNN, MEGNet, and ALIGNN so the two modes
   form a controlled input-feature comparison.
@@ -207,6 +211,12 @@ python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 4 --alignn-grad-accum-steps 16 --alignn-amp
 ```
+
+On the configured Slurm cluster, `scripts/submit_hypergraph_benchmark.sbatch`
+runs the four standard hypergraph datasets in parallel, then reuses one GPU for
+the seed-123 native leave-one-material-out comparison between full ALIGNN and
+Hypergraph ALIGNN. Its LOO results are written under
+`HERA/hypergraph/four_gpu/native_leave_one_out/`.
 
 On Windows, the complete MEGNET_SPARSE benchmark is also packaged as:
 
@@ -301,11 +311,17 @@ its final relaxed structures, and compare against POSCAR0 one-shot transfer:
 python -m HERA.native_initial_relaxed_leave_one_out --seed 123 --model cgcnn megnet definet --mode full hetero attention --epochs 500 --device cuda:0 --run-dir HERA/logs/native_initial_relaxed_seed123 --atom-init HERA/atom_init.json
 ```
 
-For the controlled ordinary ALIGNN versus HeteroALIGNN + LayerNorm comparison:
+For the controlled ordinary full-graph ALIGNN versus Hypergraph ALIGNN
+comparison:
 
 ```bash
-python -m HERA.native_initial_relaxed_leave_one_out --seed all --model alignn --mode full hetero --alignn-hetero-node-norm layernorm --epochs 500 --device cuda:0 --run-dir HERA/logs/native_alignn_layernorm_loo --atom-init HERA/atom_init.json
+python -m HERA.native_initial_relaxed_leave_one_out --seed all --model alignn --mode full hypergraph --hypergraph-radius 3.0 --epochs 500 --device cuda:0 --run-dir HERA/logs/native_alignn_hypergraph_loo --atom-init HERA/atom_init.json
 ```
+
+This is also the runner's default model/mode pair, so `--model alignn --mode
+full hypergraph` may be omitted. The same ALIGNN physical backbone and native
+LOO splits are used in both runs; the hypergraph variant additionally applies
+the independent per-defect hyperedge updates.
 
 By default the script discovers all materials that have both POSCAR0 initial
 structures and non-POSCAR0 relaxed structures. Every CIF retains its own DFE
@@ -331,10 +347,10 @@ with plots in `<run-dir>/<material>/figures/`. When a fixed `--run-dir` is
 reused, existing checkpoints and prediction CSVs are loaded automatically, so
 `--resume` is no longer required.
 When both ALIGNN variants are selected, the runner also writes paired
-`alignn_layernorm_comparison.csv`, cross-material/seed
-`alignn_layernorm_aggregate.csv`, and
-`figures/alignn_layernorm_vs_alignn_loo_mae.png`. Positive relative MAE
-improvement means HeteroALIGNN + LayerNorm performs better than ALIGNN.
+`alignn_hypergraph_comparison.csv`, cross-material/seed
+`alignn_hypergraph_aggregate.csv`, and
+`figures/hypergraph_alignn_vs_alignn_loo_mae.png`. Positive relative MAE
+improvement means Hypergraph ALIGNN performs better than ordinary ALIGNN.
 
 ## ALIGNN / HeteroALIGNN
 
@@ -347,7 +363,7 @@ python -m HERA.main --model alignn --dataset native --mode hetero --r 0
 
 Supported ALIGNN modes are `full`, `full_x`, `hetero`, `hetero_fixed_pool`,
 `attention`, `was_x`, `hetero_was`, `attention_was`,
-`definet`, and `definet_was`. HeteroALIGNN uses the same
+`definet`, `definet_was`, `hypergraph`, and `hypergraph_was`. HeteroALIGNN uses the same
 `atom`/`defect` node split and `aa`/`dd`/`ad`/`da` edge split as the existing
 HERA hetero models, while dynamically building the ALIGNN bond-angle line graph
 from periodic edge vectors during each forward pass.
