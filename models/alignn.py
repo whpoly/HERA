@@ -478,7 +478,8 @@ class GraphConvLayer(nn.Module):
 class AtomTypeAttentionGatedGraphConv(MessagePassing):
     """Gated atom update with neighbor attention conditioned on atom type."""
 
-    def __init__(self, channels, edge_dim, n_heads=4, aggr="add"):
+    def __init__(self, channels, edge_dim, n_heads=4, aggr="add",
+                 normalization="layernorm", legacy_residual_norm=False):
         super().__init__(aggr=_normalize_aggr(aggr))
         self.channels = channels
         self.n_heads = n_heads
@@ -500,7 +501,8 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
             nn.Linear(channels, channels),
         )
         self.type_emb = nn.Embedding(2, channels)
-        self.norm = nn.LayerNorm(channels)
+        self.norm = _make_feature_norm(channels, normalization)
+        self.legacy_residual_norm = bool(legacy_residual_norm)
         self._edge_index = None
         self._type_emb = None
         self._attention_weights = None
@@ -519,6 +521,8 @@ class AtomTypeAttentionGatedGraphConv(MessagePassing):
             )
         out = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr, size=size)
         delta = self.update_nn(torch.cat([x_dst, out], dim=-1))
+        if self.legacy_residual_norm:
+            return self.norm(x_dst + delta)
         return x_dst + self.norm(delta)
 
     def message(self, x_i, x_j, edge_attr, index, ptr, size_i):
@@ -569,16 +573,23 @@ class ALIGNNLayer(nn.Module):
 class AttentionALIGNNLayer(nn.Module):
     """ALIGNN block with atom-type-aware attention on the atom graph."""
 
-    def __init__(self, hidden_dim, angle_dim, n_heads=4, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, angle_dim, n_heads=4,
+                 vertex_aggregation="add", normalization="layernorm",
+                 legacy_residual_norm=False):
         super().__init__()
         self.line_conv = GatedGraphConv(
             hidden_dim,
             hidden_dim,
             aggr=vertex_aggregation,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.atom_conv = AtomTypeAttentionGatedGraphConv(
-            hidden_dim, hidden_dim, n_heads=n_heads, aggr=vertex_aggregation
+            hidden_dim,
+            hidden_dim,
+            n_heads=n_heads,
+            aggr=vertex_aggregation,
+            normalization=normalization,
+            legacy_residual_norm=legacy_residual_norm,
         )
 
     def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr, node_type=None):
@@ -598,18 +609,22 @@ class AttentionALIGNNLayer(nn.Module):
 class DefiNetALIGNNLayer(nn.Module):
     """ALIGNN angle update followed by DeFiNet-style defect-aware atom update."""
 
-    def __init__(self, hidden_dim, angle_dim, n_marker_types=2, vertex_aggregation="add"):
+    def __init__(self, hidden_dim, angle_dim, n_marker_types=2,
+                 vertex_aggregation="add", normalization="layernorm",
+                 legacy_residual_norm=False):
         super().__init__()
         self.line_conv = GatedGraphConv(
             hidden_dim,
             hidden_dim,
             aggr=vertex_aggregation,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.atom_conv = DefectAwareGateConv(
             channels=hidden_dim,
             dim=hidden_dim,
             n_marker_types=n_marker_types,
+            normalization=normalization,
+            legacy_residual_norm=legacy_residual_norm,
         )
 
     def forward(self, x, edge_index, edge_attr, line_edge_index, angle_attr, defect_marker=None):
@@ -938,25 +953,27 @@ class AttentionALIGNN(nn.Module):
             n_heads=4,
             vertex_aggregation="add",
             cutoff=8.0,
+            normalization="layernorm",
+            legacy_residual_norm=False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.node_embedding = MLPLayer(
             node_input_shape,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = _official_feature_embedding(
             edge_input_shape,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(
             self.angle_expansion.out_features,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.layers = nn.ModuleList([
             AttentionALIGNNLayer(
@@ -964,6 +981,8 @@ class AttentionALIGNN(nn.Module):
                 self.angle_expansion.out_features,
                 n_heads=n_heads,
                 vertex_aggregation=vertex_aggregation,
+                normalization=normalization,
+                legacy_residual_norm=legacy_residual_norm,
             )
             for _ in range(n_blocks)
         ])
@@ -971,7 +990,7 @@ class AttentionALIGNN(nn.Module):
             GraphConvLayer(
                 hidden_dim,
                 vertex_aggregation=vertex_aggregation,
-                normalization="layernorm",
+                normalization=normalization,
             )
             for _ in range(gcn_blocks)
         ])
@@ -1038,25 +1057,27 @@ class DefiNetALIGNN(nn.Module):
             n_marker_types=2,
             vertex_aggregation="add",
             cutoff=8.0,
+            normalization="layernorm",
+            legacy_residual_norm=False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.node_embedding = MLPLayer(
             node_input_shape,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = _official_feature_embedding(
             edge_input_shape,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(
             self.angle_expansion.out_features,
             hidden_dim,
-            normalization="layernorm",
+            normalization=normalization,
         )
         self.layers = nn.ModuleList([
             DefiNetALIGNNLayer(
@@ -1064,6 +1085,8 @@ class DefiNetALIGNN(nn.Module):
                 self.angle_expansion.out_features,
                 n_marker_types=n_marker_types,
                 vertex_aggregation=vertex_aggregation,
+                normalization=normalization,
+                legacy_residual_norm=legacy_residual_norm,
             )
             for _ in range(n_blocks)
         ])
@@ -1071,7 +1094,7 @@ class DefiNetALIGNN(nn.Module):
             GraphConvLayer(
                 hidden_dim,
                 vertex_aggregation=vertex_aggregation,
-                normalization="layernorm",
+                normalization=normalization,
             )
             for _ in range(gcn_blocks)
         ])

@@ -187,6 +187,25 @@ def safe_variant_name(record):
     return re.sub(r'[^A-Za-z0-9_.-]+', '_', str(raw)).strip('._')
 
 
+def apply_checkpoint_model_compatibility(config, record):
+    """Recreate legacy normalization when its saved buffers identify it."""
+    state_dict = record['checkpoint']['model']
+    legacy_modes = {'attention', 'definet'}
+    has_batchnorm_buffers = any(
+        key.endswith('.running_mean') for key in state_dict
+    )
+    if (
+            record['model_name'] == 'alignn'
+            and record['mode'] in legacy_modes
+            and has_batchnorm_buffers
+    ):
+        model_config = config.setdefault('model', {})
+        model_config['alignn_feature_normalization'] = 'batchnorm'
+        model_config['alignn_legacy_residual_norm'] = True
+        return 'legacy_batchnorm'
+    return 'checkpoint_native'
+
+
 def write_material_summary(path, rows):
     fields = (
         'training_dataset',
@@ -198,6 +217,7 @@ def write_material_summary(path, rows):
         'seed',
         'n_test',
         'test_mae',
+        'model_compatibility',
         'checkpoint',
         'prediction_csv',
     )
@@ -219,6 +239,12 @@ def predict_checkpoint(record, material_key, output_root, device,
         config['model']['test_batch_size'] = int(test_batch_size)
     if amp:
         config.setdefault('optim', {})['amp'] = True
+    compatibility = apply_checkpoint_model_compatibility(config, record)
+
+    trainer = MEGNetTrainer(config, device, seed=record['seed'])
+    trainer.scaler.load_state_dict(checkpoint['scaler'])
+    # Validate architecture compatibility before converting hundreds of CIFs.
+    trainer.model.load_state_dict(checkpoint['model'])
 
     cache_key = (
         material_key,
@@ -238,8 +264,6 @@ def predict_checkpoint(record, material_key, output_root, device,
         if dataset_cache is not None:
             dataset_cache[cache_key] = (structures, targets)
 
-    trainer = MEGNetTrainer(config, device, seed=record['seed'])
-    trainer.scaler.load_state_dict(checkpoint['scaler'])
     mae, predictions = trainer.predict_structures(
         structures,
         targets,
@@ -271,6 +295,7 @@ def predict_checkpoint(record, material_key, output_root, device,
         'seed': record['seed'],
         'n_test': len(structures),
         'test_mae': f'{float(mae):.10g}',
+        'model_compatibility': compatibility,
         'checkpoint': str(record['path'].resolve()),
         'prediction_csv': str(Path(prediction_path).resolve()),
     }
@@ -413,7 +438,8 @@ def main():
             summary_rows.append(row)
             print(
                 f'  high-test MAE={row["test_mae"]} eV, '
-                f'n={row["n_test"]}'
+                f'n={row["n_test"]}, '
+                f'compatibility={row["model_compatibility"]}'
             )
         summary_path = write_material_summary(
             args.output_root / test_dataset / 'test_summary.csv',

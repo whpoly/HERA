@@ -601,7 +601,8 @@ class DefectAwareGateConv(MessagePassing):
     attention layers above, this layer does not apply neighbor softmax.
     """
 
-    def __init__(self, channels, dim, n_marker_types=2):
+    def __init__(self, channels, dim, n_marker_types=2,
+                 normalization="layernorm", legacy_residual_norm=False):
         super().__init__(aggr='add')
         self.channels = channels
         self.dim = dim
@@ -625,7 +626,30 @@ class DefectAwareGateConv(MessagePassing):
             nn.Linear(2 * channels, channels), ShiftedSoftplus(),
             nn.Linear(channels, channels),
         )
-        self.norm = nn.LayerNorm(channels)
+        normalization = str(normalization).lower()
+        if normalization not in {"layernorm", "batchnorm", "none"}:
+            raise ValueError(
+                "normalization must be one of: layernorm, batchnorm, none"
+            )
+        self.legacy_residual_norm = bool(legacy_residual_norm)
+        if self.legacy_residual_norm:
+            # Old DeFiNet checkpoints used this attribute name and normalized
+            # the complete residual output with BatchNorm.
+            self.bn = (
+                nn.BatchNorm1d(channels)
+                if normalization == "batchnorm"
+                else nn.LayerNorm(channels)
+                if normalization == "layernorm"
+                else nn.Identity()
+            )
+        else:
+            self.norm = (
+                nn.LayerNorm(channels)
+                if normalization == "layernorm"
+                else nn.BatchNorm1d(channels)
+                if normalization == "batchnorm"
+                else nn.Identity()
+            )
 
         self._edge_index = None
         self._markers = None
@@ -640,6 +664,8 @@ class DefectAwareGateConv(MessagePassing):
 
         msg = self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr)
         delta = self.update_nn(torch.cat([x, msg], dim=-1))
+        if self.legacy_residual_norm:
+            return self.bn(x + delta)
         return x + self.norm(delta)
 
     def message(self, x_j, edge_attr):

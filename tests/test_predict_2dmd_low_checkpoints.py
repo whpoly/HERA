@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,11 +7,14 @@ from unittest.mock import patch
 
 import torch
 
+from HERA.config.defaults import get_config
 from HERA.predict_2dmd_low_checkpoints import (
+    apply_checkpoint_model_compatibility,
     discover_low_checkpoints,
     load_material_high_test,
     parse_args,
 )
+from HERA.training.trainer import MEGNetTrainer
 
 
 def fake_checkpoint(model, mode, dataset='2dmd_low', seed=123):
@@ -95,6 +99,41 @@ class PredictLowCheckpointsTests(unittest.TestCase):
             args.output_root,
             root.resolve() / 'high_test_predictions',
         )
+
+    def test_legacy_alignn_batchnorm_checkpoint_is_reconstructed_strictly(self):
+        for mode in ('attention', 'definet'):
+            with self.subTest(mode=mode):
+                legacy_config = get_config('alignn', '2dmd_low', mode)
+                legacy_config['model']['alignn_feature_normalization'] = (
+                    'batchnorm'
+                )
+                legacy_config['model']['alignn_legacy_residual_norm'] = True
+                legacy_trainer = MEGNetTrainer(legacy_config, 'cpu', seed=123)
+                state_dict = legacy_trainer.model.state_dict()
+                checkpoint = fake_checkpoint('alignn', mode)
+                checkpoint['model'] = state_dict
+                checkpoint['config'] = get_config('alignn', '2dmd_low', mode)
+                record = {
+                    'model_name': 'alignn',
+                    'mode': mode,
+                    'checkpoint': checkpoint,
+                }
+                restored_config = copy.deepcopy(checkpoint['config'])
+
+                compatibility = apply_checkpoint_model_compatibility(
+                    restored_config,
+                    record,
+                )
+                restored_trainer = MEGNetTrainer(
+                    restored_config,
+                    'cpu',
+                    seed=123,
+                )
+                result = restored_trainer.model.load_state_dict(state_dict)
+
+                self.assertEqual(compatibility, 'legacy_batchnorm')
+                self.assertFalse(result.missing_keys)
+                self.assertFalse(result.unexpected_keys)
 
 
 if __name__ == '__main__':

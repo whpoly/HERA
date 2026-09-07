@@ -438,6 +438,14 @@ class MEGNetTrainer:
                 n_heads=self.config['model'].get('n_heads', 4),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 cutoff=self.config["model"]["cutoff"],
+                normalization=self.config['model'].get(
+                    'alignn_feature_normalization',
+                    'layernorm',
+                ),
+                legacy_residual_norm=self.config['model'].get(
+                    'alignn_legacy_residual_norm',
+                    False,
+                ),
             ).to(self.device)
         elif task in ALIGNN_DEFINET_TASKS:
             self.model = DefiNetALIGNN(
@@ -453,6 +461,14 @@ class MEGNetTrainer:
                 n_marker_types=self.config['model'].get('n_marker_types', 2),
                 vertex_aggregation=self.config["model"]["vertex_aggregation"],
                 cutoff=self.config["model"]["cutoff"],
+                normalization=self.config['model'].get(
+                    'alignn_feature_normalization',
+                    'layernorm',
+                ),
+                legacy_residual_norm=self.config['model'].get(
+                    'alignn_legacy_residual_norm',
+                    False,
+                ),
             ).to(self.device)
         elif task in MEGNET_ATTENTION_TASKS:
             self.model = AttentionMEGNet(
