@@ -43,8 +43,16 @@ def _pool_mean_or_zeros(features, batch, dim_size, width, reference):
 
     out = reference.new_zeros((dim_size, features.size(-1)))
     counts = reference.new_zeros((dim_size, 1))
-    out.index_add_(0, batch.long(), features)
-    counts.index_add_(0, batch.long(), torch.ones((features.size(0), 1), device=features.device, dtype=features.dtype))
+    out.index_add_(0, batch.long(), features.to(dtype=out.dtype))
+    counts.index_add_(
+        0,
+        batch.long(),
+        torch.ones(
+            (features.size(0), 1),
+            device=features.device,
+            dtype=counts.dtype,
+        ),
+    )
     return out / counts.clamp_min(1.0)
 
 
@@ -302,8 +310,11 @@ class GatedGraphConv(nn.Module):
         messages = self.dst_update(x_src)[src] * sigma
         out = x_dst.new_zeros((x_dst.size(0), self.channels))
         norm = x_dst.new_zeros((x_dst.size(0), self.channels))
-        out.index_add_(0, dst, messages)
-        norm.index_add_(0, dst, sigma)
+        # AMP may produce half-precision linear outputs while residual roots
+        # and their accumulation buffers remain float32. Keep accumulation in
+        # the buffer dtype for both compatibility and numerical stability.
+        out.index_add_(0, dst, messages.to(dtype=out.dtype))
+        norm.index_add_(0, dst, sigma.to(dtype=norm.dtype))
 
         node_update = self.src_update(x_dst) + out / (norm + 1e-6)
         node_update = F.silu(self.bn_nodes(node_update))
@@ -356,8 +367,12 @@ class HeteroRelationConv(nn.Module):
         )
         sigma = torch.sigmoid(edge_update)
         messages = self.message_update(x_src)[src] * sigma
-        message_sum.index_add_(0, dst, messages)
-        gate_sum.index_add_(0, dst, sigma)
+        message_sum.index_add_(
+            0,
+            dst,
+            messages.to(dtype=message_sum.dtype),
+        )
+        gate_sum.index_add_(0, dst, sigma.to(dtype=gate_sum.dtype))
 
         edge_update = F.silu(self.bn_edges(edge_update))
         if edge_attr.size(-1) == self.channels:

@@ -2,7 +2,13 @@ import unittest
 
 import torch
 
-from HERA.models.alignn import HeteroALIGNN, HeteroNodeUpdate
+from HERA.models.alignn import (
+    GatedGraphConv,
+    HeteroALIGNN,
+    HeteroNodeUpdate,
+    HeteroRelationConv,
+    _pool_mean_or_zeros,
+)
 
 
 METADATA = (
@@ -133,6 +139,57 @@ class HeteroAlignnRelationTests(unittest.TestCase):
             isinstance(update.layer_norm, torch.nn.Identity)
             for update in updates
         ))
+
+    def test_hetero_relation_amp_accumulates_in_root_dtype(self):
+        conv = HeteroRelationConv(channels=8, edge_dim=8).eval()
+        x = torch.randn(3, 8)
+        edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]])
+        edge_attr = torch.randn(3, 8)
+
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            message_sum, gate_sum, edge_update = conv(
+                (x, x), edge_index, edge_attr,
+            )
+
+        self.assertEqual(message_sum.dtype, x.dtype)
+        self.assertEqual(gate_sum.dtype, x.dtype)
+        self.assertTrue(torch.isfinite(message_sum).all())
+        self.assertTrue(torch.isfinite(gate_sum).all())
+        self.assertTrue(torch.isfinite(edge_update).all())
+
+    def test_homogeneous_gate_amp_accumulates_in_root_dtype(self):
+        conv = GatedGraphConv(channels=8, edge_dim=8).eval()
+        x = torch.randn(3, 8)
+        edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]])
+        edge_attr = torch.randn(3, 8)
+
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            node_update, edge_update = conv(
+                x,
+                edge_index,
+                edge_attr,
+                return_edge_attr=True,
+            )
+
+        self.assertEqual(node_update.dtype, x.dtype)
+        self.assertTrue(torch.isfinite(node_update).all())
+        self.assertTrue(torch.isfinite(edge_update).all())
+
+    def test_pooling_accepts_mixed_feature_and_reference_dtypes(self):
+        features = torch.randn(4, 8).to(torch.bfloat16)
+        batch = torch.tensor([0, 0, 1, 1])
+        reference = torch.randn(1, 8)
+
+        pooled = _pool_mean_or_zeros(
+            features,
+            batch,
+            dim_size=2,
+            width=8,
+            reference=reference,
+        )
+
+        self.assertEqual(pooled.dtype, reference.dtype)
+        self.assertTrue(torch.isfinite(pooled).all())
 
 
 if __name__ == "__main__":
