@@ -35,7 +35,12 @@ from .native_ood_case_study import (
     load_native_with_metadata,
     modes_for_model,
 )
-from .training.trainer import MEGNetTrainer, load_trusted_checkpoint, set_attr
+from .training.trainer import (
+    MEGNetTrainer,
+    attach_ranking_metadata,
+    load_trusted_checkpoint,
+    set_attr,
+)
 
 
 def subset(values, indices):
@@ -87,8 +92,19 @@ def reset_optimizer(trainer, lr):
     )
 
 
-def set_train_loader_keep_scaler(trainer, train_data, train_targets):
+def set_train_loader_keep_scaler(
+        trainer,
+        train_data,
+        train_targets,
+        ranking_groups=None,
+        ranking_items=None,
+):
     train_data = [set_attr(s, y, "y") for s, y in zip(train_data, train_targets)]
+    train_data = attach_ranking_metadata(
+        train_data,
+        ranking_groups,
+        ranking_items,
+    )
     trainer.train_structures = [
         trainer.converter.convert(s) for s in tqdm(train_data, desc="Converting fine-tune data")
     ]
@@ -102,8 +118,19 @@ def set_train_loader_keep_scaler(trainer, train_data, train_targets):
     )
 
 
-def set_train_loader_fit_scaler(trainer, train_data, train_targets):
+def set_train_loader_fit_scaler(
+        trainer,
+        train_data,
+        train_targets,
+        ranking_groups=None,
+        ranking_items=None,
+):
     train_data = [set_attr(s, y, "y") for s, y in zip(train_data, train_targets)]
+    train_data = attach_ranking_metadata(
+        train_data,
+        ranking_groups,
+        ranking_items,
+    )
     trainer.train_structures = [
         trainer.converter.convert(s) for s in tqdm(train_data, desc="Converting base train data")
     ]
@@ -131,6 +158,7 @@ def train_fixed_epochs(trainer, epochs, history_path, phase):
                 "epoch": epoch + 1,
                 "train_mae": f"{train_mae:.6f}",
                 "train_mse": f"{train_mse:.6f}",
+                "train_rank_loss": f"{getattr(trainer, 'last_train_rank_loss', 0.0):.6f}",
                 "lr": f"{cur_lr:.8g}",
             }
         )

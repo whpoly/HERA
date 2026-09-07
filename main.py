@@ -28,12 +28,14 @@ Supported combinations:
   Modes   : sparse, full, full_x, hetero, hetero_fixed_pool, attention,
             was_x, hetero_was, attention_was, definet, definet_was,
             hypergraph, hypergraph_was, all
-  Datasets: vacancy, 2dmd_low, 2dmd_high, native, och, imp2d, semi, all
+  Datasets: vacancy, vacancy_mos2, vacancy_wse2, 2dmd_low, 2dmd_high,
+            2dmd_mos2, 2dmd_wse2, native, och, imp2d, semi, all
 """
 
 import argparse
 import ast
 import copy
+import csv
 import os
 import random
 import warnings
@@ -98,10 +100,19 @@ ATTENTION_ABLATION_MODES = (
     'attention_was',
 )
 FULL_X_DISTINCT_DATASETS = frozenset(
-    ('vacancy', '2dmd_low', '2dmd_high', 'native')
+    (
+        'vacancy', 'vacancy_mos2', 'vacancy_wse2',
+        '2dmd_low', '2dmd_high', '2dmd_mos2', '2dmd_wse2', 'native',
+    )
 )
 MEGNET_SPARSE_DATASETS = frozenset(
-    ('vacancy', '2dmd_low', '2dmd_high')
+    (
+        'vacancy', 'vacancy_mos2', 'vacancy_wse2',
+        '2dmd_low', '2dmd_high', '2dmd_mos2', '2dmd_wse2',
+    )
+)
+CONCENTRATION_TRANSFER_DATASETS = frozenset(
+    ('vacancy_mos2', 'vacancy_wse2', '2dmd_mos2', '2dmd_wse2')
 )
 CGCNN_DEFAULT_MODES = [
     'full',
@@ -334,6 +345,82 @@ def iter_train_val_test_splits(data, targets, random_seeds, cv5=False):
         }
 
 
+def iter_concentration_transfer_splits(
+        data,
+        targets,
+        random_seeds,
+        cv5=False,
+):
+    """Split low-concentration samples into train/val and keep high fixed as test."""
+    concentrations = [getattr(structure, 'concentration', None) for structure in data]
+    unknown = [idx for idx, value in enumerate(concentrations) if value not in ('low', 'high')]
+    if unknown:
+        raise ValueError(
+            'Concentration-transfer datasets require every structure to be tagged '
+            f"as 'low' or 'high'; missing/invalid tags at indices {unknown[:5]}"
+        )
+
+    low_indices = np.asarray([
+        idx for idx, value in enumerate(concentrations) if value == 'low'
+    ], dtype=int)
+    high_indices = np.asarray([
+        idx for idx, value in enumerate(concentrations) if value == 'high'
+    ], dtype=int)
+    if len(low_indices) < 2:
+        raise ValueError('Concentration transfer requires at least 2 low-concentration samples')
+    if len(high_indices) == 0:
+        raise ValueError('Concentration transfer requires at least 1 high-concentration test sample')
+
+    fixed_test_X = subset_by_indices(data, high_indices)
+    fixed_test_y = subset_by_indices(targets, high_indices)
+    if cv5:
+        if len(random_seeds) != 1:
+            raise ValueError('5-fold cross validation requires exactly one --seed value')
+        if len(low_indices) < 5:
+            raise ValueError(
+                '5-fold concentration transfer requires at least 5 low-concentration samples'
+            )
+        random_state = random_seeds[0]
+        splitter = KFold(n_splits=5, shuffle=True, random_state=random_state)
+        for fold_idx, (train_positions, val_positions) in enumerate(
+                splitter.split(low_indices)
+        ):
+            train_indices = low_indices[train_positions]
+            val_indices = low_indices[val_positions]
+            yield {
+                'display': f'seed={random_state} fold={fold_idx + 1}/5',
+                'logger_id': f'{random_state}_fold{fold_idx + 1}',
+                'explain_id': f'seed_{random_state}_fold_{fold_idx + 1}',
+                'seed': int(random_state) + fold_idx,
+                'train_X': subset_by_indices(data, train_indices),
+                'train_y': subset_by_indices(targets, train_indices),
+                'val_X': subset_by_indices(data, val_indices),
+                'val_y': subset_by_indices(targets, val_indices),
+                'test_X': fixed_test_X,
+                'test_y': fixed_test_y,
+            }
+        return
+
+    for rs in random_seeds:
+        train_indices, val_indices = train_test_split(
+            low_indices,
+            test_size=0.2,
+            random_state=rs,
+        )
+        yield {
+            'display': f'seed={rs}',
+            'logger_id': rs,
+            'explain_id': f'seed_{rs}',
+            'seed': int(rs),
+            'train_X': subset_by_indices(data, train_indices),
+            'train_y': subset_by_indices(targets, train_indices),
+            'val_X': subset_by_indices(data, val_indices),
+            'val_y': subset_by_indices(targets, val_indices),
+            'test_X': fixed_test_X,
+            'test_y': fixed_test_y,
+        }
+
+
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
                       run_label=None, cv5=False, resume=False):
@@ -352,7 +439,35 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     skipped = 0
     trained = 0
 
-    for split in iter_train_val_test_splits(data, targets, random_seeds, cv5=cv5):
+    if dataset_name in CONCENTRATION_TRANSFER_DATASETS:
+        low_count = sum(
+            getattr(structure, 'concentration', None) == 'low'
+            for structure in data
+        )
+        high_count = sum(
+            getattr(structure, 'concentration', None) == 'high'
+            for structure in data
+        )
+        print(
+            '  Concentration transfer: '
+            f'low={low_count} (train/validation), '
+            f'high={high_count} (fixed test)'
+        )
+        splits = iter_concentration_transfer_splits(
+            data,
+            targets,
+            random_seeds,
+            cv5=cv5,
+        )
+    else:
+        splits = iter_train_val_test_splits(
+            data,
+            targets,
+            random_seeds,
+            cv5=cv5,
+        )
+
+    for split in splits:
         completed_loss = TrainingLogger.completed_test_mae(log_dir, split['logger_id']) if resume else None
         if completed_loss is not None:
             print(
@@ -421,7 +536,28 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                 )
                 break
 
-        loss_test = trainer.predict_structures(split['test_X'], split['test_y'], model_best)
+        if dataset_name in CONCENTRATION_TRANSFER_DATASETS:
+            loss_test, predictions = trainer.predict_structures(
+                split['test_X'],
+                split['test_y'],
+                model_best,
+                return_predictions=True,
+            )
+            prediction_path = write_test_predictions(
+                log_dir,
+                split['logger_id'],
+                split['test_X'],
+                split['test_y'],
+                predictions,
+            )
+            print(
+                f'  [{split["display"]}] High-concentration predictions saved: '
+                f'{prediction_path}'
+            )
+        else:
+            loss_test = trainer.predict_structures(
+                split['test_X'], split['test_y'], model_best
+            )
         logger.log_test_result(loss_test)
         checkpoint_path = split_checkpoint_path(log_dir, split['logger_id'])
         save_best_checkpoint(
@@ -488,12 +624,59 @@ def split_checkpoint_path(log_dir, logger_id):
     return os.path.join(log_dir, f'seed{_checkpoint_safe_id(logger_id)}_best_checkpoint.pth')
 
 
+def _scalar_float(value):
+    if isinstance(value, torch.Tensor):
+        return float(value.detach().cpu().reshape(-1)[0].item())
+    return float(value)
+
+
+def write_test_predictions(log_dir, logger_id, structures, targets, predictions):
+    """Write per-structure fixed-test predictions for concentration transfer."""
+    path = os.path.join(
+        log_dir,
+        f'seed{_checkpoint_safe_id(logger_id)}_test_predictions.csv',
+    )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fields = (
+        'source_id',
+        'source_name',
+        'source_path',
+        'material',
+        'concentration',
+        'defect_family',
+        'target',
+        'prediction',
+        'absolute_error',
+    )
+    with open(path, 'w', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for structure, target, prediction in zip(structures, targets, predictions):
+            target = _scalar_float(target)
+            prediction = _scalar_float(prediction)
+            writer.writerow({
+                'source_id': getattr(structure, 'source_id', ''),
+                'source_name': getattr(structure, 'source_name', ''),
+                'source_path': getattr(structure, 'source_path', ''),
+                'material': getattr(structure, 'material', ''),
+                'concentration': getattr(structure, 'concentration', ''),
+                'defect_family': getattr(structure, 'defect_family', ''),
+                'target': f'{target:.10g}',
+                'prediction': f'{prediction:.10g}',
+                'absolute_error': f'{abs(prediction - target):.10g}',
+            })
+    return path
+
+
 def _structure_source_metadata(structures):
     return [
         {
             'source_id': getattr(structure, 'source_id', ''),
             'source_name': getattr(structure, 'source_name', ''),
             'source_path': getattr(structure, 'source_path', ''),
+            'material': getattr(structure, 'material', ''),
+            'concentration': getattr(structure, 'concentration', ''),
+            'defect_family': getattr(structure, 'defect_family', ''),
         }
         for structure in structures
     ]
@@ -902,8 +1085,7 @@ def main():
             )
     ):
         parser.error(
-            'The sparse mode is only defined for vacancy, 2dmd_low, and '
-            '2dmd_high'
+            'The sparse mode is only defined for vacancy-family 2DMD datasets'
         )
 
     init_elem_embedding(args.atom_init)
@@ -956,8 +1138,8 @@ def main():
                 if 'sparse' in skipped_modes:
                     print(
                         '  Skipping SPARSE: the MEGNET_SPARSE '
-                        'representation is only defined for vacancy, '
-                        '2dmd_low, and 2dmd_high.'
+                        'representation is only defined for vacancy-family '
+                        '2DMD datasets.'
                     )
                 if 'full_x' in skipped_modes:
                     print(

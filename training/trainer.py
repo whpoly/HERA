@@ -31,7 +31,7 @@ from ..models.alignn import (
 )
 from ..models.hypergraph import RegionHypergraphNet
 from ..utils.scaler import Scaler
-from .losses import MAELoss
+from .losses import MAELoss, pairwise_rank_loss
 
 
 CGCNN_ATTENTION_TASKS = (
@@ -122,6 +122,28 @@ def load_trusted_checkpoint(path, map_location=None):
 def set_attr(structure, attr, name):
     setattr(structure, name, attr)
     return structure
+
+
+def attach_ranking_metadata(structures, ranking_groups=None, ranking_items=None):
+    """Attach optional graph-level IDs used by the pairwise ranking loss."""
+    if ranking_groups is None:
+        if ranking_items is not None:
+            raise ValueError("ranking_items require ranking_groups")
+        return structures
+    if len(structures) != len(ranking_groups):
+        raise ValueError("Expected one ranking group per structure")
+    if ranking_items is not None and len(structures) != len(ranking_items):
+        raise ValueError("Expected one ranking item per structure")
+
+    for idx, (structure, group) in enumerate(zip(structures, ranking_groups)):
+        set_attr(structure, torch.tensor([int(group)], dtype=torch.long), 'ranking_group')
+        if ranking_items is not None:
+            set_attr(
+                structure,
+                torch.tensor([int(ranking_items[idx])], dtype=torch.long),
+                'ranking_item',
+            )
+    return structures
 
 
 def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict=None):
@@ -521,10 +543,22 @@ class MEGNetTrainer:
     # -------------------------------------------------------------- #
 
     def prepare_data(self, train_data, train_targets, test_data, test_targets,
-                     target_name, train_weights=None, test_weights=None):
+                     target_name, train_weights=None, test_weights=None,
+                     train_ranking_groups=None, train_ranking_items=None,
+                     test_ranking_groups=None, test_ranking_items=None):
         print('adding targets to data')
         train_data = [set_attr(s, y, 'y') for s, y in zip(train_data, train_targets)]
         test_data = [set_attr(s, y, 'y') for s, y in zip(test_data, test_targets)]
+        train_data = attach_ranking_metadata(
+            train_data,
+            train_ranking_groups,
+            train_ranking_items,
+        )
+        test_data = attach_ranking_metadata(
+            test_data,
+            test_ranking_groups,
+            test_ranking_items,
+        )
         if test_weights is not None:
             test_data = [set_attr(s, w, 'weight') for s, w in zip(test_data, test_weights)]
 
@@ -684,7 +718,7 @@ class MEGNetTrainer:
     # -------------------------------------------------------------- #
 
     def train_one_epoch(self):
-        mses, maes = [], []
+        mses, maes, rank_losses = [], [], []
         self.model.train(True)
         self.optimizer.zero_grad(set_to_none=True)
         num_batches = len(self.trainloader)
@@ -693,7 +727,46 @@ class MEGNetTrainer:
             try:
                 with self._autocast():
                     preds = self._forward(batch)
-                    loss = F.mse_loss(self.scaler.transform(batch.y), preds, reduction='mean')
+                    scaled_targets = self.scaler.transform(batch.y)
+                    mse = F.mse_loss(scaled_targets, preds, reduction='mean')
+                    point_loss_name = str(
+                        self.config['optim'].get('point_loss', 'mse')
+                    ).lower()
+                    if point_loss_name == 'mse':
+                        point_loss = mse
+                    elif point_loss_name in ('huber', 'smooth_l1'):
+                        point_loss = F.smooth_l1_loss(
+                            preds,
+                            scaled_targets,
+                            reduction='mean',
+                        )
+                    else:
+                        raise ValueError(
+                            f"Unknown point loss: {point_loss_name!r}; "
+                            "choose 'mse' or 'smooth_l1'"
+                        )
+
+                    rank_weight = float(
+                        self.config['optim'].get('rank_loss_weight', 0.0)
+                    )
+                    if rank_weight > 0:
+                        ranking_groups = getattr(batch, 'ranking_group', None)
+                        if ranking_groups is None:
+                            raise ValueError(
+                                "rank_loss_weight > 0 requires ranking_group metadata"
+                            )
+                        rank_loss = pairwise_rank_loss(
+                            preds,
+                            batch.y,
+                            ranking_groups,
+                            ranking_items=getattr(batch, 'ranking_item', None),
+                            min_target_gap=float(
+                                self.config['optim'].get('rank_min_gap_ev', 0.1)
+                            ),
+                        )
+                    else:
+                        rank_loss = preds.sum() * 0.0
+                    loss = point_loss + rank_weight * rank_loss
                     backward_loss = loss / self.grad_accum_steps
             except RuntimeError as error:
                 self._raise_with_cuda_context(error, batch)
@@ -718,13 +791,15 @@ class MEGNetTrainer:
                 else:
                     self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none=True)
-            mses.append(loss.detach().to("cpu").numpy())
+            mses.append(mse.detach().to("cpu").numpy())
+            rank_losses.append(rank_loss.detach().to("cpu").numpy())
             with torch.no_grad():
                 maes.append(
                     MAELoss(self.scaler.inverse_transform(preds), batch.y,
                             weights=batch.weight, reduction='sum').to('cpu').numpy()
                 )
         train_mae = sum(maes) / len(self.train_structures)
+        self.last_train_rank_loss = float(np.mean(rank_losses)) if rank_losses else 0.0
         return train_mae, np.mean(mses)
 
     def step_scheduler(self, validation_loss):

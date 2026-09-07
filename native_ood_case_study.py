@@ -392,7 +392,110 @@ def ndcg_at_k(y_true, y_pred, k):
     return float(np.clip(dcg / ideal, 0.0, 1.0))
 
 
-def evaluate_case_metrics(y_true, y_pred, metadata):
+def _ordering_metrics_for_group(y_true, y_pred, min_gap_ev):
+    """Return rank metrics for one material/domain."""
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    n = len(y_true)
+    if n == 0:
+        return None
+    if n == 1:
+        return {
+            "spearman": 1.0,
+            "kendall_tau": 1.0,
+            "pairwise_accuracy": 1.0,
+            "rank_pair_count": 0,
+            "global_top1_accuracy": 1.0,
+        }
+
+    true_rank = pd.Series(y_true).rank(method="average").to_numpy(dtype=float)
+    pred_rank = pd.Series(y_pred).rank(method="average").to_numpy(dtype=float)
+    if np.std(true_rank) <= 1e-12:
+        spearman = float("nan")
+    elif np.std(pred_rank) <= 1e-12:
+        spearman = 0.0
+    else:
+        spearman = float(np.corrcoef(true_rank, pred_rank)[0, 1])
+
+    row_idx, col_idx = np.triu_indices(n, 1)
+    true_diff = y_true[row_idx] - y_true[col_idx]
+    pred_diff = y_pred[row_idx] - y_pred[col_idx]
+    valid = np.abs(true_diff) >= float(min_gap_ev)
+    pair_count = int(np.sum(valid))
+    if pair_count:
+        true_direction = np.sign(true_diff[valid])
+        pred_direction = np.sign(pred_diff[valid])
+        pairwise_accuracy = float(np.mean(true_direction == pred_direction))
+        # Thresholded tau-a: predicted ties contribute zero rather than being
+        # counted as correctly ordered.
+        kendall_tau = float(np.mean(true_direction * pred_direction))
+    else:
+        pairwise_accuracy = float("nan")
+        kendall_tau = float("nan")
+
+    return {
+        "spearman": spearman,
+        "kendall_tau": kendall_tau,
+        "pairwise_accuracy": pairwise_accuracy,
+        "rank_pair_count": pair_count,
+        "global_top1_accuracy": float(np.argmin(y_true) == np.argmin(y_pred)),
+    }
+
+
+def ordering_metrics(eval_df, min_gap_ev=0.1):
+    """Aggregate ordering metrics within materials, never across hosts."""
+    if eval_df.empty:
+        return {
+            "spearman": float("nan"),
+            "kendall_tau": float("nan"),
+            "pairwise_accuracy": float("nan"),
+            "rank_pair_count": 0.0,
+            "global_top1_accuracy": float("nan"),
+        }
+
+    groups = (
+        eval_df.groupby("material", sort=False)
+        if "material" in eval_df.columns
+        else [(None, eval_df)]
+    )
+    rows = []
+    for _, group in groups:
+        metrics = _ordering_metrics_for_group(
+            group["target"],
+            group["prediction"],
+            min_gap_ev,
+        )
+        if metrics is not None:
+            rows.append(metrics)
+    if not rows:
+        return ordering_metrics(pd.DataFrame())
+
+    pair_count = int(sum(row["rank_pair_count"] for row in rows))
+    if pair_count:
+        pairwise_accuracy = float(
+            sum(row["pairwise_accuracy"] * row["rank_pair_count"] for row in rows)
+            / pair_count
+        )
+        kendall_tau = float(
+            sum(row["kendall_tau"] * row["rank_pair_count"] for row in rows)
+            / pair_count
+        )
+    else:
+        pairwise_accuracy = float("nan")
+        kendall_tau = float("nan")
+    spearman_values = [row["spearman"] for row in rows if np.isfinite(row["spearman"])]
+    return {
+        "spearman": float(np.mean(spearman_values)) if spearman_values else float("nan"),
+        "kendall_tau": kendall_tau,
+        "pairwise_accuracy": pairwise_accuracy,
+        "rank_pair_count": float(pair_count),
+        "global_top1_accuracy": float(
+            np.mean([row["global_top1_accuracy"] for row in rows])
+        ),
+    }
+
+
+def evaluate_case_metrics(y_true, y_pred, metadata, ranking_min_gap_ev=0.1):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     abs_err = np.abs(y_pred - y_true)
@@ -400,6 +503,7 @@ def evaluate_case_metrics(y_true, y_pred, metadata):
     eval_df["target"] = y_true
     eval_df["prediction"] = y_pred
     gs_df = ground_state_set(eval_df)
+    rank_metrics = ordering_metrics(gs_df, min_gap_ev=ranking_min_gap_ev)
     ndcg_values = {
         f"ndcg_at_{k}": ndcg_at_k(gs_df["target"], gs_df["prediction"], k)
         for k in range(1, 6)
@@ -408,7 +512,7 @@ def evaluate_case_metrics(y_true, y_pred, metadata):
     gs_errors = []
     top1_hits = []
     swaps = []
-    for _, group in metadata.groupby("defect_group", sort=False):
+    for _, group in eval_df.groupby("defect_group", sort=False):
         idx = group.index.to_numpy()
         true_group = y_true[idx]
         pred_group = y_pred[idx]
@@ -425,8 +529,10 @@ def evaluate_case_metrics(y_true, y_pred, metadata):
         "rmse": float(np.sqrt(np.mean((y_pred - y_true) ** 2))),
         "ground_state_mae": float(np.mean(gs_errors)),
         "top1_accuracy": float(np.mean(top1_hits)),
+        "within_group_top1_accuracy": float(np.mean(top1_hits)),
         "min_swaps_to_correct": float(np.mean(swaps)),
         "ndcg": ndcg_values["ndcg_at_5"],
+        **rank_metrics,
         **ndcg_values,
     }
 

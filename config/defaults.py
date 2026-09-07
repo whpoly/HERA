@@ -37,7 +37,7 @@ def _hetero_was_task(task_prefix):
 
 
 def get_configs_2dmd(task_prefix):
-    """Configs for vacancy, 2dmd_low, and 2dmd_high datasets."""
+    """Configs for vacancy-family 2DMD datasets."""
     config_sparse = {
         'task': f'{task_prefix}_sparse',
         'model': {
@@ -192,8 +192,12 @@ def get_configs_default(task_prefix):
 # Maps dataset name -> config generator
 _CONFIG_REGISTRY = {
     'vacancy': get_configs_2dmd,
+    'vacancy_mos2': get_configs_2dmd,
+    'vacancy_wse2': get_configs_2dmd,
     '2dmd_low': get_configs_2dmd,
     '2dmd_high': get_configs_2dmd,
+    '2dmd_mos2': get_configs_2dmd,
+    '2dmd_wse2': get_configs_2dmd,
     'native': get_configs_default,
     'och': get_configs_default,
     'imp2d': get_configs_default,
@@ -295,7 +299,10 @@ def _finalize_config(config, model, dataset):
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
         config['model']['hetero_node_norm'] = ALIGNN_HETERO_NODE_NORM
-    if dataset in ('vacancy', '2dmd_low'):
+    if dataset in (
+            'vacancy', 'vacancy_mos2', 'vacancy_wse2',
+            '2dmd_low', '2dmd_mos2', '2dmd_wse2',
+    ):
         config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
     elif dataset in ('2dmd_high', 'native'):
         config['model']['train_batch_size'] = MEMORY_LIMITED_TRAIN_BATCH_SIZE
@@ -306,7 +313,10 @@ def _finalize_sparse_config(config, dataset):
     """Apply the current training protocol without changing sparse architecture."""
     config = copy.deepcopy(config)
     config['model']['test_batch_size'] = DEFAULT_TEST_BATCH_SIZE
-    if dataset in ('vacancy', '2dmd_low'):
+    if dataset in (
+            'vacancy', 'vacancy_mos2', 'vacancy_wse2',
+            '2dmd_low', '2dmd_mos2', '2dmd_wse2',
+    ):
         config['model']['train_batch_size'] = VACANCY_TRAIN_BATCH_SIZE
     else:
         config['model']['train_batch_size'] = MEMORY_LIMITED_TRAIN_BATCH_SIZE
@@ -346,11 +356,14 @@ def get_config(model: str, dataset: str, mode: str):
         )
     if mode == 'sparse' and (
             model != 'megnet'
-            or dataset not in ('vacancy', '2dmd_low', '2dmd_high')
+            or dataset not in (
+                'vacancy', 'vacancy_mos2', 'vacancy_wse2',
+                '2dmd_low', '2dmd_high', '2dmd_mos2', '2dmd_wse2',
+            )
     ):
         raise ValueError(
             "The sparse mode is the MEGNET_SPARSE reproduction and is only "
-            "supported for --model megnet on vacancy, 2dmd_low, or 2dmd_high"
+            "supported for --model megnet on vacancy-family 2DMD datasets"
         )
     if mode in CGCNN_DEFINET_MODES and model not in ('cgcnn', 'alignn'):
         raise ValueError("The definet modes are run under --model cgcnn or --model alignn")

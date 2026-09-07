@@ -206,18 +206,31 @@ class SimpleCrystalConverter:
 
     @staticmethod
     def _copy_structure_metadata(source, target):
-        for attr in ("source_id", "source_name", "source_path", "state", "y", "weight"):
+        for attr in (
+                "source_id",
+                "source_name",
+                "source_path",
+                "state",
+                "y",
+                "weight",
+                "ranking_group",
+                "ranking_item",
+        ):
             if hasattr(source, attr):
                 setattr(target, attr, getattr(source, attr))
         return target
 
     @staticmethod
     def _source_metadata_kwargs(structure):
-        return {
+        metadata = {
             "source_id": getattr(structure, "source_id", ""),
             "source_name": getattr(structure, "source_name", ""),
             "source_path": getattr(structure, "source_path", ""),
         }
+        for attr in ("ranking_group", "ranking_item"):
+            if hasattr(structure, attr):
+                metadata[attr] = getattr(structure, attr)
+        return metadata
 
     def _local_radius_structure(self, structure):
         defect_indices = [

@@ -40,7 +40,14 @@ def copy_source_metadata(source, target):
     """Preserve original CIF identity through structure transformations."""
     if target is None:
         return None
-    for attr in ("source_id", "source_name", "source_path"):
+    for attr in (
+        "source_id",
+        "source_name",
+        "source_path",
+        "concentration",
+        "material",
+        "defect_family",
+    ):
         if hasattr(source, attr):
             setattr(target, attr, getattr(source, attr))
     return target

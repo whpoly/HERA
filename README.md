@@ -8,7 +8,7 @@ This repository contains research code for defect-property prediction on crystal
 | --- | --- |
 | Models | `megnet`, `cgcnn`, `definet`, `alignn`, `hypergraph`, `all` |
 | Modes | `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`, `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `hypergraph_was`, `all` |
-| Datasets | `vacancy`, `2dmd_low`, `2dmd_high`, `native`, `och`, `imp2d`, `semi`, `all` |
+| Datasets | `vacancy`, `vacancy_mos2`, `vacancy_wse2`, `2dmd_low`, `2dmd_high`, `2dmd_mos2`, `2dmd_wse2`, `native`, `och`, `imp2d`, `semi`, `all` |
 
 ## Repository Layout
 
@@ -51,13 +51,35 @@ This repository does not include the raw datasets or `atom_init.json`.
 Before training, make sure the following resources are available in the paths expected by the code:
 
 - `atom_init.json`
-- `2d-materials-point-defects-all/...` for `vacancy`, `2dmd_low`, and `2dmd_high`
+- `2d-materials-point-defects-all/...` for `vacancy`, `vacancy_mos2`,
+  `vacancy_wse2`, `2dmd_low`, `2dmd_high`, `2dmd_mos2`, and `2dmd_wse2`
 - `Dataset_1/...` for `native` and `semi`
 - `../autodl-tmp/rs2re_h_ads/...` for `och`
 - `imp2d/imp2d/...` for `imp2d`
 
 `2dmd_low` is the standalone low-density 2DMD benchmark and loads only the
 `low_density_defects/MoS2` and `low_density_defects/WSe2` subsets.
+
+`vacancy_mos2` and `vacancy_wse2` are material-specific concentration-transfer
+datasets. They select descriptors containing only vacancies (no substitution
+or mixed-defect descriptors), use the low-density samples only for
+training/validation, and reserve every matching high-density sample as the
+fixed test set. For each seed, the low-density subset is randomly split 80/20
+for training/validation; the high-density test set never changes and never
+enters model fitting or checkpoint selection. The current local data contain
+779 low-density samples for each material and fixed high-density test sets of
+4 MoS2 and 3 WSe2 samples. Each completed seed writes the individual
+high-density predictions to `seed<seed>_test_predictions.csv` in its mode
+directory, including the CIF source, DFT target, prediction, and absolute
+error.
+
+`2dmd_mos2` and `2dmd_wse2` are the larger material-specific transfer tasks.
+They do not apply the pure-vacancy filter: all 5,933 low-density point-defect
+samples of the selected material are used for training/validation, and all 500
+corresponding high-density samples form the fixed test set. Consequently these
+datasets include vacancy, substitution, and mixed-defect configurations. The
+same 80/20 low-density train/validation split and per-test-sample prediction
+CSV described above are used.
 
 If `atom_init.json` is stored elsewhere, pass it with `--atom-init`.
 
@@ -84,9 +106,9 @@ Common arguments:
   is completed for one seed before the next seed starts. Each mode still writes
   to its own `<run-dir>/alignn/<dataset>/<mode>/` directory, so histories,
   checkpoints, summaries, and `--resume` remain mode-specific.
-- MEGNet runs `sparse` first for the `vacancy`, `2dmd_low`, and `2dmd_high`
-  benchmarks, including when `sparse` appears later in an explicit `--mode`
-  list. Other datasets do not run the sparse representation.
+- MEGNet runs `sparse` first for the vacancy-family 2DMD benchmarks, including
+  `vacancy_mos2` and `vacancy_wse2`, even when `sparse` appears later in an
+  explicit `--mode` list. Other datasets do not run the sparse representation.
 - `--dataset`: one or more dataset names, or `all` to run every dataset
 - `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `hypergraph_was`, or `all`
@@ -94,12 +116,13 @@ Common arguments:
   `0 3 4 5 6 7` or `all`. The graph edge cutoff remains the config value,
   currently `6`; no reduced/cropped graph modes are exposed.
 - `full_x` is the old full-graph-with-X comparison: vacancy-style datasets
-  such as `vacancy`, `2dmd_low`, and `2dmd_high` add DummySpecies/X vacancy sites to the
-  full graph; datasets without an X site use the same graph as `full`. When a
+  such as `vacancy`, `vacancy_mos2`, `vacancy_wse2`, `2dmd_low`, `2dmd_high`,
+  `2dmd_mos2`, and `2dmd_wse2` add DummySpecies/X vacancy sites to the full graph; datasets
+  without an X site use the same graph as `full`. When a
   benchmark requests both modes, `full_x` is therefore skipped for datasets
   that contain no vacancy samples (`och`, `imp2d`, and `semi`).
 - `sparse` reproduces the legacy `MEGNET_SPARSE` representation/model and is only
-  available for `--model megnet` on `vacancy`, `2dmd_low`, and `2dmd_high`. It retains only
+  available for `--model megnet` on vacancy-family 2DMD datasets. It retains only
   defect sites and restores the original two-value current/reference species
   features, 12 Å cutoff, max/max aggregation, hidden size 64, and 3 MEGNet
   blocks. Its training follows the current common benchmark protocol: AdamW,
@@ -132,9 +155,10 @@ Common arguments:
 - `--device`: for example `cpu`, `cuda:0`
 - `--epochs`: number of epochs per seed or CV fold
 - All training protocols use AdamW with a default weight decay of `1e-4`.
-- The `vacancy` dataset defaults to a training batch size of `8` for every
-  model. All other datasets default to `64` for training, and every model uses
-  `1` for validation/test.
+- The low-density vacancy datasets (`vacancy`, `vacancy_mos2`,
+  `vacancy_wse2`, `2dmd_low`, `2dmd_mos2`, and `2dmd_wse2`) default to a
+  training batch size of `8` for every model. Every model uses `1` for
+  validation/test.
 - `--batch-size` / `--train-batch-size`: override training batch size for every
   selected run. `--test-batch-size` overrides validation/test batch size.
 - `--alignn-train-batch-size` / `--alignn-test-batch-size`: override batch size
@@ -179,7 +203,10 @@ Common arguments:
   standard 10-seed benchmark. With `--cv5`, pass exactly one seed.
 - `--cv5` / `--five-fold-cv`: use 5-fold cross validation. Each run uses one
   fold for test, the next fold for validation, and the remaining three folds
-  for training, so the train/val/test split is roughly 60/20/20.
+  for training, so the train/val/test split is roughly 60/20/20. For
+  `vacancy_mos2`, `vacancy_wse2`, `2dmd_mos2`, and `2dmd_wse2`, all five folds
+  are formed only from the low-density subset (four train, one validation),
+  while the high-density test set remains fixed for every fold.
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
@@ -193,6 +220,9 @@ Example training commands:
 
 ```bash
 python -m HERA.main --model megnet --dataset vacancy
+python -m HERA.main --model cgcnn --dataset vacancy_mos2 --mode full hetero --r 0 --epochs 500 --seed 123 --device cuda:0
+python -m HERA.main --model cgcnn --dataset vacancy_wse2 --mode full hetero --r 0 --epochs 500 --seed 123 --device cuda:0
+python -m HERA.main --model megnet --dataset 2dmd_mos2 2dmd_wse2 --mode sparse --epochs 500 --seed 123 --device cuda:0
 python -m HERA.main --model all --dataset 2dmd_low --mode all --r 0
 python -m HERA.main --model megnet --dataset vacancy 2dmd_high --mode sparse --epochs 500 --seed 123 --run-dir HERA/logs/megnet_sparse_reproduction --resume
 python -m HERA.main --model megnet --dataset semi --mode hetero --r 0
@@ -211,6 +241,71 @@ python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-amp
 python -m HERA.main --model alignn --dataset 2dmd_high --mode all --r 0 --alignn-train-batch-size 4 --alignn-grad-accum-steps 16 --alignn-amp
 ```
+
+For this Windows checkout, the two material-specific low-to-high vacancy runs
+can be started directly in PowerShell without activating Conda first:
+
+```powershell
+Set-Location 'C:\Users\User\Desktop'
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.main --model cgcnn --dataset vacancy_mos2 --mode full hetero --r 0 --epochs 500 --seed 123 --device cuda:0 --run-dir HERA/logs/vacancy_mos2_low_to_high
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.main --model cgcnn --dataset vacancy_wse2 --mode full hetero --r 0 --epochs 500 --seed 123 --device cuda:0 --run-dir HERA/logs/vacancy_wse2_low_to_high
+```
+
+Add `--resume` to either command to continue an interrupted run in the same
+`--run-dir`. To launch both datasets sequentially into one run directory, pass
+`--dataset vacancy_mos2 vacancy_wse2` in a single command.
+
+For the larger full low-to-high datasets with only Sparse MEGNet:
+
+```powershell
+Set-Location 'C:\Users\User\Desktop'
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.main --model megnet --dataset 2dmd_mos2 --mode sparse --epochs 500 --seed 123 --device cuda:0 --run-dir HERA/logs/2dmd_mos2_low_to_high_sparse
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.main --model megnet --dataset 2dmd_wse2 --mode sparse --epochs 500 --seed 123 --device cuda:0 --run-dir HERA/logs/2dmd_wse2_low_to_high_sparse
+```
+
+To run only Sparse MEGNet plus your selected/configured ALIGNN modes, use one
+command and one output directory per material:
+
+```powershell
+Set-Location 'C:\Users\User\Desktop'
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.sparse_megnet_alignn --dataset 2dmd_mos2 --alignn-mode all --alignn-r 0 --epochs 500 --seed 123 --device cuda:0 --alignn-amp --alignn-train-batch-size 1 --run-dir HERA/logs/2dmd_mos2_sparse_megnet_alignn
+
+& 'C:\Users\User\.conda\envs\hera\python.exe' -m HERA.sparse_megnet_alignn --dataset 2dmd_wse2 --alignn-mode all --alignn-r 0 --epochs 500 --seed 123 --device cuda:0 --alignn-amp --alignn-train-batch-size 1 --run-dir HERA/logs/2dmd_wse2_sparse_megnet_alignn
+```
+
+The separate model-comparison files are
+`HERA/logs/2dmd_mos2_sparse_megnet_alignn/model_comparison_predictions.csv` and
+`HERA/logs/2dmd_wse2_sparse_megnet_alignn/model_comparison_predictions.csv`.
+Each contains only one material, with the shared DFT target plus the prediction,
+absolute error, and test MAE from MEGNet Sparse and the requested ALIGNN modes.
+Replace `--alignn-mode all` with an explicit list such as `--alignn-mode full
+hetero hypergraph` to run only those modes; their existing settings continue to
+come from `config/defaults.py`. At `--alignn-r 0`, `hetero_fixed_pool` is skipped
+because it is identical to `hetero_r0`. Add `--resume` to continue in the same
+run directory.
+
+If the joint `2dmd_low` training is already complete, its saved checkpoints can
+be evaluated directly on the separate MoS2 and WSe2 high-concentration sets
+without retraining:
+
+```powershell
+python -m HERA.predict_2dmd_low_checkpoints --checkpoint-root HERA/logs/YOUR_2DMD_LOW_RUN --alignn-mode available --seed 123 --device cuda:0 --test-batch-size 1 --amp
+```
+
+The command automatically selects the `2dmd_low` MEGNet Sparse checkpoint and
+all available non-WAS ALIGNN checkpoints. It restores each checkpoint's saved
+configuration and target scaler, and loads only the 500 high-concentration test
+structures per material. Results remain separate under
+`<checkpoint-root>/high_test_predictions/2dmd_mos2/` and
+`<checkpoint-root>/high_test_predictions/2dmd_wse2/`; each directory contains
+its own `test_summary.csv` plus per-checkpoint prediction CSVs. Pass an explicit
+list such as `--alignn-mode full full_x hetero definet attention hypergraph`
+to restrict the ALIGNN checkpoints.
 
 On the configured Slurm cluster, `scripts/submit_hypergraph_benchmark.sbatch`
 runs the four standard hypergraph datasets in parallel, then reuses one GPU for
@@ -329,8 +424,23 @@ from the native CSV; labels are never replaced by a group minimum. For each
 held-out material the script trains a source model on all rows from the other
 materials and evaluates two protocols on the same final structures (the
 lowest-DFE non-POSCAR0 CIF in each defect group): direct prediction, and a copy
-of the source model fine-tuned using only the held-out POSCAR0 rows. Use
+of the source model fine-tuned using only the held-out POSCAR0 rows. A third
+IS2RE-style protocol trains only on other-material POSCAR0 structures, labels
+each one with its defect group's lowest relaxed DFE, and predicts that final DFE
+directly from the held-out material's POSCAR0 geometry. It uses an isolated
+checkpoint and never sees held-out final labels. Use
 `--finetune-epochs` and `--finetune-lr` to control adaptation. This LOO runner
+uses a material-grouped inner validation split, so no validation host occurs in
+the source-training rows. Its default objective is Smooth L1 plus a `0.2`
+same-material, cross-defect pairwise ranking loss; DFT gaps below `0.1 eV` are
+treated as near ties. Override these settings with `--point-loss`,
+`--rank-loss-weight`, `--rank-min-gap-ev`, and `--validation-rank-weight`.
+Checkpoint selection uses validation MAE plus the weighted within-material
+pairwise rank error. The result tables report Spearman correlation, thresholded
+pairwise ordering accuracy, and global lowest-defect accuracy in addition to
+MAE/RMSE/NDCG.
+
+The LOO runner
 updates the full model for 20 epochs by default, using discriminative learning
 rates of `1e-5` for the GNN backbone and `1e-4` for the prediction head. This
 allows representation adaptation while limiting catastrophic forgetting. Use
@@ -345,7 +455,8 @@ DFT-ordered energy-comparison figure. Outputs are organized as
 `<run-dir>/<material>/<model>/<mode>/` for checkpoints and prediction CSVs,
 with plots in `<run-dir>/<material>/figures/`. When a fixed `--run-dir` is
 reused, existing checkpoints and prediction CSVs are loaded automatically, so
-`--resume` is no longer required.
+`--resume` is no longer required. Outputs made with an older validation/loss
+scheme are detected as incompatible and recomputed.
 When both ALIGNN variants are selected, the runner also writes paired
 `alignn_hypergraph_comparison.csv`, cross-material/seed
 `alignn_hypergraph_aggregate.csv`, and

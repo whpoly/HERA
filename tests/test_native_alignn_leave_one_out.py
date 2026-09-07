@@ -16,12 +16,113 @@ from HERA.native_initial_relaxed_leave_one_out import (
     expand_leave_one_out_runs,
     masks_for_material,
     reset_discriminative_optimizer,
+    split_train_val,
+    training_scheme,
 )
-from HERA.native_ood_case_study import color_for_label, model_mode_display
+from HERA.native_ood_case_study import (
+    color_for_label,
+    evaluate_case_metrics,
+    model_mode_display,
+)
+from HERA.training.losses import pairwise_rank_loss
 from HERA.training.trainer import load_trusted_checkpoint
 
 
 class NativeAlignnLeaveOneOutTests(unittest.TestCase):
+    def test_material_grouped_validation_has_no_host_overlap(self):
+        metadata = pd.DataFrame(
+            {
+                "material": np.repeat(["A", "B", "C", "D", "E"], 4),
+                "defect_group": [f"g{i}" for i in range(20)],
+            }
+        )
+        indices = np.arange(len(metadata))
+
+        train_idx, val_idx = split_train_val(indices, metadata, 0.2, seed=123)
+
+        train_materials = set(metadata.iloc[train_idx]["material"])
+        val_materials = set(metadata.iloc[val_idx]["material"])
+        self.assertFalse(train_materials & val_materials)
+        self.assertEqual(set(train_idx) | set(val_idx), set(indices))
+
+    def test_training_scheme_changes_with_rank_configuration(self):
+        config = {
+            "optim": {
+                "point_loss": "smooth_l1",
+                "rank_loss_weight": 0.2,
+                "rank_min_gap_ev": 0.1,
+                "validation_rank_weight": 0.2,
+            }
+        }
+        changed = {"optim": {**config["optim"], "rank_loss_weight": 0.0}}
+
+        self.assertNotEqual(training_scheme(config), training_scheme(changed))
+
+    def test_order_metrics_measure_global_defect_ranking(self):
+        metadata = pd.DataFrame(
+            {
+                "material": ["A"] * 4,
+                "defect_group": ["g1", "g2", "g3", "g4"],
+                "file": ["f1", "f2", "f3", "f4"],
+            }
+        )
+
+        metrics = evaluate_case_metrics(
+            [1.0, 2.0, 3.0, 4.0],
+            [1.0, 3.0, 2.0, 4.0],
+            metadata,
+            ranking_min_gap_ev=0.1,
+        )
+
+        self.assertAlmostEqual(metrics["spearman"], 0.8)
+        self.assertAlmostEqual(metrics["pairwise_accuracy"], 5 / 6)
+        self.assertEqual(metrics["rank_pair_count"], 6.0)
+        self.assertEqual(metrics["global_top1_accuracy"], 1.0)
+        # The legacy within-group metric remains trivially one for singleton
+        # final-state groups and is no longer used as the global ranking score.
+        self.assertEqual(metrics["within_group_top1_accuracy"], 1.0)
+
+    def test_pairwise_rank_loss_uses_same_material_cross_defect_pairs(self):
+        target = torch.tensor([1.0, 2.0, 10.0, 9.0])
+        groups = torch.tensor([0, 0, 1, 1])
+        items = torch.tensor([0, 1, 2, 3])
+        correct = torch.tensor([0.0, 1.0, 1.0, 0.0], requires_grad=True)
+        reversed_pred = torch.tensor([1.0, 0.0, 0.0, 1.0], requires_grad=True)
+
+        correct_loss = pairwise_rank_loss(
+            correct, target, groups, items, min_target_gap=0.1
+        )
+        reversed_loss = pairwise_rank_loss(
+            reversed_pred, target, groups, items, min_target_gap=0.1
+        )
+
+        self.assertLess(
+            correct_loss.detach().item(),
+            reversed_loss.detach().item(),
+        )
+        correct_loss.backward()
+        self.assertIsNotNone(correct.grad)
+
+    def test_order_metrics_do_not_compare_different_materials(self):
+        metadata = pd.DataFrame(
+            {
+                "material": ["A", "A", "B", "B"],
+                "defect_group": ["a1", "a2", "b1", "b2"],
+                "file": ["a1", "a2", "b1", "b2"],
+            }
+        )
+
+        metrics = evaluate_case_metrics(
+            [1.0, 2.0, 100.0, 99.0],
+            [10.0, 20.0, -10.0, -20.0],
+            metadata,
+            ranking_min_gap_ev=0.1,
+        )
+
+        self.assertEqual(metrics["rank_pair_count"], 2.0)
+        self.assertEqual(metrics["pairwise_accuracy"], 1.0)
+        self.assertEqual(metrics["global_top1_accuracy"], 1.0)
+
     def test_trusted_checkpoint_loader_accepts_numpy_scaler_values(self):
         with TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "checkpoint.pth"
@@ -73,17 +174,25 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
         attached = add_native_targets(metadata, targets)
 
         np.testing.assert_allclose(attached["raw_target"], targets)
+        np.testing.assert_allclose(
+            attached["final_target"].to_numpy(),
+            [3.0, 3.0, 3.0, np.nan, 7.0, 7.0],
+            equal_nan=True,
+        )
         self.assertEqual(attached.index[attached["is_final_relaxed"]].tolist(), [2, 5])
         masks = masks_for_material(attached, "A")
         self.assertEqual(masks["train_other"].tolist(), [4, 5])
         self.assertEqual(masks["finetune_poscar0"].tolist(), [0, 3])
         self.assertEqual(masks["test_final"].tolist(), [2])
+        self.assertEqual(masks["train_other_initial_final"].tolist(), [4])
+        self.assertEqual(masks["test_initial_final"].tolist(), [0])
 
         materials, table = eligible_materials(attached)
         self.assertEqual(materials, ["A", "B"])
         a_row = table[table["material"].eq("A")].iloc[0]
         self.assertEqual(int(a_row["n_initial"]), 2)
         self.assertEqual(int(a_row["n_final_structures"]), 1)
+        self.assertEqual(int(a_row["n_initial_final_pairs"]), 1)
 
     def test_overall_mae_is_weighted_by_final_structure_count(self):
         summary = pd.DataFrame(

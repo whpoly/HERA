@@ -3,12 +3,15 @@
 
 Every CIF keeps its own DFE from the native ``id_prop_A_rich.csv`` file. The
 lowest-DFE non-POSCAR0 row in each defect group is the final structure used for
-evaluation and plotting. Two protocols are run for every eligible material:
+evaluation and plotting. Three protocols are run for every eligible material:
 
 1. Train on every row from the other materials, then directly predict the
    held-out final structures.
 2. Fine-tune a copy of that source model using only the held-out POSCAR0 rows,
    then predict the same held-out final structures.
+3. Train on POSCAR0 structures from the other materials using each defect
+   group's final relaxed DFE as its label, then predict final DFE directly from
+   the held-out material's POSCAR0 structures.
 
 By default, the runner makes a controlled comparison between ordinary
 full-graph ALIGNN and Hypergraph ALIGNN. Both variants use the same native
@@ -29,7 +32,7 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 from .config.defaults import VALID_MODES
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
@@ -69,12 +72,18 @@ PROTOCOLS = {
         "train_pool": "other_then_poscar0",
         "test_pool": "final",
     },
+    "initial__final_dfe_test": {
+        "display": "Initial structure -> final DFE",
+        "train_pool": "other_initial_with_final_labels",
+        "test_pool": "heldout_initial_with_final_labels",
+    },
 }
 
 PROTOCOL_ORDER = list(PROTOCOLS)
 PROTOCOL_COLORS = {
     "direct__final_test": "#3b82f6",
     "poscar0_transfer__final_test": "#0f766e",
+    "initial__final_dfe_test": "#b45309",
 }
 
 ALIGNN_BASELINE_LABEL = "ALIGNN (ordinary GNN)"
@@ -83,11 +92,23 @@ COMPARISON_METRICS = (
     "mae",
     "rmse",
     "ground_state_mae",
-    "top1_accuracy",
+    "spearman",
+    "kendall_tau",
+    "pairwise_accuracy",
+    "global_top1_accuracy",
     "ndcg",
 )
 TARGET_SCHEME = "native_raw_dfe_final_structure_v1"
+INITIAL_TO_FINAL_TARGET_SCHEME = "native_poscar0_to_final_dfe_v1"
+TARGET_SCHEMES = frozenset((TARGET_SCHEME, INITIAL_TO_FINAL_TARGET_SCHEME))
+PROTOCOL_TARGET_SCHEMES = {
+    "direct__final_test": TARGET_SCHEME,
+    "poscar0_transfer__final_test": TARGET_SCHEME,
+    "initial__final_dfe_test": INITIAL_TO_FINAL_TARGET_SCHEME,
+}
 TRANSFER_SCHEME = "full_model_discriminative_lr_v1"
+VALIDATION_SCHEME = "leave_materials_out_v1"
+RANKING_SCHEME = "same_material_cross_defect_pairwise_logistic_v1"
 PREDICTION_HEAD_ATTRIBUTES = ("fc_out", "fc", "readout", "hiddens")
 
 
@@ -113,6 +134,7 @@ def add_native_targets(metadata, targets):
     out["is_final_relaxed"] = False
     out["final_file"] = None
     out["final_configuration"] = None
+    out["final_target"] = np.nan
 
     for _, group in out.groupby("defect_group", sort=False):
         relaxed = group[group["is_relaxed"]].sort_values(
@@ -123,6 +145,7 @@ def add_native_targets(metadata, targets):
         final_row = relaxed.iloc[0]
         out.loc[group.index, "final_file"] = final_row["file"]
         out.loc[group.index, "final_configuration"] = final_row["configuration"]
+        out.loc[group.index, "final_target"] = float(final_row["raw_target"])
         out.loc[final_row.name, "is_final_relaxed"] = True
     return out
 
@@ -179,30 +202,52 @@ def eligible_materials(metadata):
     rows = []
     initial = metadata["is_initial"].to_numpy()
     final_relaxed = metadata["is_final_relaxed"].to_numpy()
+    has_final_target = metadata["final_target"].notna().to_numpy()
     for material, group in metadata.groupby("material", sort=True):
         idx = group.index.to_numpy()
         n_initial = int(np.sum(initial[idx]))
         n_final = int(np.sum(final_relaxed[idx]))
+        n_initial_final_pairs = int(np.sum(initial[idx] & has_final_target[idx]))
         rows.append(
             {
                 "material": material,
                 "n_initial": n_initial,
                 "n_final_structures": n_final,
-                "eligible": n_initial > 0 and n_final > 0,
+                "n_initial_final_pairs": n_initial_final_pairs,
+                "eligible": n_initial > 0 and n_final > 0 and n_initial_final_pairs > 0,
             }
         )
     table = pd.DataFrame(rows)
     return table[table["eligible"]]["material"].astype(str).tolist(), table
 
 
-def split_train_val(train_idx, val_fraction, seed):
+def split_train_val(train_idx, metadata, val_fraction, seed):
+    """Split the outer-training pool by host material for OOD validation."""
     if len(train_idx) < 2:
         raise ValueError("Need at least two training samples for train/validation split.")
-    return train_test_split(
-        np.asarray(train_idx, dtype=int),
+    train_idx = np.asarray(train_idx, dtype=int)
+    materials = metadata.iloc[train_idx]["material"].astype(str).to_numpy()
+    if len(np.unique(materials)) < 2:
+        raise ValueError("Need at least two materials for material-grouped validation.")
+    splitter = GroupShuffleSplit(
+        n_splits=1,
         test_size=val_fraction,
         random_state=seed,
-        shuffle=True,
+    )
+    train_rel, val_rel = next(splitter.split(train_idx, groups=materials))
+    return train_idx[train_rel], train_idx[val_rel]
+
+
+def training_scheme(config):
+    """Stable identifier used to reject stale checkpoints/predictions."""
+    optim = config["optim"]
+    return (
+        f"{VALIDATION_SCHEME}__{RANKING_SCHEME}__"
+        f"point-{str(optim.get('point_loss', 'mse')).lower()}__"
+        f"rank-w{float(optim.get('rank_loss_weight', 0.0)):g}__"
+        f"gap-{float(optim.get('rank_min_gap_ev', 0.1)):g}__"
+        f"val-frac-{float(optim.get('validation_fraction', 0.2)):g}__"
+        f"val-rank-w{float(optim.get('validation_rank_weight', 0.0)):g}"
     )
 
 
@@ -211,26 +256,43 @@ def save_history(path, rows):
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
-def save_checkpoint(path, trainer, model_state_dict, transfer_scheme=None):
+def save_checkpoint(
+        path,
+        trainer,
+        model_state_dict,
+        transfer_scheme=None,
+        target_scheme=TARGET_SCHEME,
+):
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "model": model_state_dict,
             "scaler": trainer.scaler.state_dict(),
-            "target_scheme": TARGET_SCHEME,
+            "target_scheme": target_scheme,
             "transfer_scheme": transfer_scheme,
+            "training_scheme": training_scheme(trainer.config),
+            "best_val_mae": getattr(trainer, "best_val_mae", float("nan")),
+            "best_val_score": getattr(trainer, "best_val_score", float("nan")),
         },
         path,
     )
 
 
-def load_checkpoint(path, config, device, seed, expected_transfer_scheme=None):
+def load_checkpoint(
+        path,
+        config,
+        device,
+        seed,
+        expected_transfer_scheme=None,
+        expected_target_scheme=TARGET_SCHEME,
+):
     trainer = MEGNetTrainer(config, device, seed=seed)
     checkpoint = load_trusted_checkpoint(path, map_location=device)
-    if checkpoint.get("target_scheme") != TARGET_SCHEME:
+    if checkpoint.get("target_scheme") != expected_target_scheme:
         raise ValueError(
-            f"Checkpoint {path} predates the {TARGET_SCHEME} target scheme. "
-            "It cannot be reused for native raw-DFE evaluation."
+            f"Checkpoint {path} uses target scheme "
+            f"{checkpoint.get('target_scheme')!r}, expected "
+            f"{expected_target_scheme!r}."
         )
     if checkpoint.get("transfer_scheme") != expected_transfer_scheme:
         raise ValueError(
@@ -238,8 +300,17 @@ def load_checkpoint(path, config, device, seed, expected_transfer_scheme=None):
             f"{checkpoint.get('transfer_scheme')!r}, expected "
             f"{expected_transfer_scheme!r}."
         )
+    expected_training_scheme = training_scheme(config)
+    if checkpoint.get("training_scheme") != expected_training_scheme:
+        raise ValueError(
+            f"Checkpoint {path} uses training scheme "
+            f"{checkpoint.get('training_scheme')!r}, expected "
+            f"{expected_training_scheme!r}."
+        )
     trainer.model.load_state_dict(checkpoint["model"])
     trainer.scaler.load_state_dict(checkpoint["scaler"])
+    trainer.best_val_mae = float(checkpoint.get("best_val_mae", float("nan")))
+    trainer.best_val_score = float(checkpoint.get("best_val_score", float("nan")))
     return trainer, copy.deepcopy(checkpoint["model"])
 
 
@@ -247,6 +318,7 @@ def train_with_validation(
     config,
     data,
     targets,
+    metadata,
     train_idx,
     val_idx,
     epochs,
@@ -256,15 +328,22 @@ def train_with_validation(
 ):
     set_seed(seed)
     trainer = MEGNetTrainer(config, device, seed=seed)
+    material_codes = pd.Categorical(metadata["material"].astype(str)).codes
+    defect_codes = pd.Categorical(metadata["defect_group"].astype(str)).codes
     trainer.prepare_data(
         subset(data, train_idx),
         tensor_subset(targets, train_idx),
         subset(data, val_idx),
         tensor_subset(targets, val_idx),
         "formation_energy",
+        train_ranking_groups=material_codes[train_idx],
+        train_ranking_items=defect_codes[train_idx],
+        test_ranking_groups=material_codes[val_idx],
+        test_ranking_items=defect_codes[val_idx],
     )
 
     best_val = float("inf")
+    best_val_score = float("inf")
     best_state = copy.deepcopy(trainer.model.state_dict())
     early_stopping_patience = int(config["optim"].get("early_stopping_patience", 0))
     early_stopping_min_delta_percent = float(
@@ -273,20 +352,40 @@ def train_with_validation(
     early_stopping_best = float("inf")
     epochs_without_improvement = 0
     rows = []
+    val_targets = tensor_subset(targets, val_idx).numpy()
+    val_metadata = metadata.iloc[val_idx].reset_index(drop=True)
+    val_target_scale = max(float(np.std(val_targets)), 1e-8)
+    validation_rank_weight = float(
+        config["optim"].get("validation_rank_weight", 0.0)
+    )
+    ranking_min_gap_ev = float(config["optim"].get("rank_min_gap_ev", 0.1))
     for epoch in range(epochs):
         train_mae, train_mse = trainer.train_one_epoch()
-        val_mae = trainer.evaluate_on_test()
-        trainer.step_scheduler(val_mae)
+        val_mae, val_predictions = trainer.evaluate_on_test(return_predictions=True)
+        val_predictions = val_predictions.numpy().reshape(-1)
+        val_metrics = evaluate_case_metrics(
+            val_targets,
+            val_predictions,
+            val_metadata,
+            ranking_min_gap_ev=ranking_min_gap_ev,
+        )
+        val_pairwise = float(val_metrics["pairwise_accuracy"])
+        val_rank_error = 1.0 - val_pairwise if np.isfinite(val_pairwise) else 1.0
+        val_score = float(
+            val_mae + validation_rank_weight * val_target_scale * val_rank_error
+        )
+        trainer.step_scheduler(val_score)
         cur_lr = trainer.optimizer.param_groups[0]["lr"]
-        if val_mae < best_val:
+        if val_score < best_val_score:
             best_val = float(val_mae)
+            best_val_score = val_score
             best_state = copy.deepcopy(trainer.model.state_dict())
         if is_meaningful_relative_improvement(
-            val_mae,
+            val_score,
             early_stopping_best,
             early_stopping_min_delta_percent,
         ):
-            early_stopping_best = val_mae
+            early_stopping_best = val_score
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
@@ -295,14 +394,20 @@ def train_with_validation(
                 "epoch": epoch + 1,
                 "train_mae": f"{train_mae:.6f}",
                 "train_mse": f"{train_mse:.6f}",
+                "train_rank_loss": f"{getattr(trainer, 'last_train_rank_loss', 0.0):.6f}",
                 "val_mae": f"{val_mae:.6f}",
+                "val_spearman": f"{val_metrics['spearman']:.6f}",
+                "val_pairwise_accuracy": f"{val_pairwise:.6f}",
+                "val_score": f"{val_score:.6f}",
                 "best_val_mae": f"{best_val:.6f}",
+                "best_val_score": f"{best_val_score:.6f}",
                 "lr": f"{cur_lr:.8g}",
             }
         )
         print(
             f"  epoch {epoch + 1}/{epochs} "
-            f"train_mae={train_mae:.4f} val_mae={val_mae:.4f}"
+            f"train_mae={train_mae:.4f} val_mae={val_mae:.4f} "
+            f"val_pairwise={val_pairwise:.3f} val_score={val_score:.4f}"
         )
         if (
             early_stopping_patience > 0
@@ -310,13 +415,15 @@ def train_with_validation(
         ):
             print(
                 f"  Early stopping at epoch {epoch + 1}/{epochs}: no validation "
-                f"MAE improvement > {early_stopping_min_delta_percent:g}% for "
+                f"score improvement > {early_stopping_min_delta_percent:g}% for "
                 f"{early_stopping_patience} epochs."
             )
             break
 
     save_history(history_path, rows)
-    return trainer, best_state, best_val
+    trainer.best_val_mae = best_val
+    trainer.best_val_score = best_val_score
+    return trainer, best_state, best_val, best_val_score
 
 
 def predict_dataframe(trainer, data, targets, metadata, indices, model_state_dict):
@@ -333,7 +440,14 @@ def predict_dataframe(trainer, data, targets, metadata, indices, model_state_dic
     out["target"] = tensor_subset(targets, indices).numpy()
     out["prediction"] = predictions
     out["abs_error"] = np.abs(out["prediction"] - out["target"])
-    metrics = evaluate_case_metrics(out["target"], out["prediction"], out)
+    metrics = evaluate_case_metrics(
+        out["target"],
+        out["prediction"],
+        out,
+        ranking_min_gap_ev=float(
+            trainer.config["optim"].get("rank_min_gap_ev", 0.1)
+        ),
+    )
     metrics["test_mae_from_trainer"] = float(mae)
     return out, metrics
 
@@ -349,6 +463,9 @@ def metric_row(
     n_val,
     n_test,
     best_val,
+    best_val_score,
+    training_scheme_label,
+    target_scheme=TARGET_SCHEME,
     node_normalization=None,
     n_finetune=0,
 ):
@@ -365,8 +482,10 @@ def metric_row(
         "n_finetune_poscar0": int(n_finetune),
         "n_test": int(n_test),
         "best_val_mae": float(best_val),
+        "best_val_score": float(best_val_score),
         "node_normalization": node_normalization or "",
-        "target_scheme": TARGET_SCHEME,
+        "target_scheme": target_scheme,
+        "training_scheme": training_scheme_label,
         "transfer_scheme": TRANSFER_SCHEME if n_finetune else "",
     }
     row.update({key: float(value) for key, value in metrics.items()})
@@ -377,12 +496,15 @@ def masks_for_material(metadata, material):
     material_mask = metadata["material"].astype(str).eq(str(material)).to_numpy()
     initial = metadata["is_initial"].to_numpy()
     final_relaxed = metadata["is_final_relaxed"].to_numpy()
+    has_final_target = metadata["final_target"].notna().to_numpy()
     other = ~material_mask
 
     return {
         "train_other": np.where(other)[0],
         "finetune_poscar0": np.where(material_mask & initial)[0],
         "test_final": np.where(material_mask & final_relaxed)[0],
+        "train_other_initial_final": np.where(other & initial & has_final_target)[0],
+        "test_initial_final": np.where(material_mask & initial & has_final_target)[0],
     }
 
 
@@ -390,7 +512,14 @@ def prediction_path(out_dir, protocol, material):
     return out_dir / "predictions" / protocol / f"{material}.csv"
 
 
-def load_compatible_prediction(path, expected_indices, expected_targets):
+def load_compatible_prediction(
+        path,
+        expected_indices,
+        expected_targets,
+        expected_training_scheme,
+        ranking_min_gap_ev,
+        expected_target_scheme=TARGET_SCHEME,
+):
     if not path.exists():
         return None, None
     pred_df = pd.read_csv(path)
@@ -400,8 +529,17 @@ def load_compatible_prediction(path, expected_indices, expected_targets):
             f"  Existing prediction has {len(pred_df)} rows, expected {expected_n}; recomputing: {path}"
         )
         return None, None
-    if "target_scheme" not in pred_df or not pred_df["target_scheme"].eq(TARGET_SCHEME).all():
+    if (
+        "target_scheme" not in pred_df
+        or not pred_df["target_scheme"].eq(expected_target_scheme).all()
+    ):
         print(f"  Existing prediction uses an incompatible target scheme; recomputing: {path}")
+        return None, None
+    if (
+        "training_scheme" not in pred_df
+        or not pred_df["training_scheme"].eq(expected_training_scheme).all()
+    ):
+        print(f"  Existing prediction uses an incompatible training scheme; recomputing: {path}")
         return None, None
     if "target" not in pred_df.columns or "prediction" not in pred_df.columns:
         print(f"  Existing prediction is missing required columns; recomputing: {path}")
@@ -411,7 +549,12 @@ def load_compatible_prediction(path, expected_indices, expected_targets):
         print(f"  Existing prediction targets differ from native raw DFE; recomputing: {path}")
         return None, None
     print(f"  Resume prediction: {path}")
-    metrics = evaluate_case_metrics(pred_df["target"], pred_df["prediction"], pred_df)
+    metrics = evaluate_case_metrics(
+        pred_df["target"],
+        pred_df["prediction"],
+        pred_df,
+        ranking_min_gap_ev=ranking_min_gap_ev,
+    )
     return pred_df, metrics
 
 
@@ -425,8 +568,14 @@ def run_training_group(
     train_kind,
     train_idx,
     group_dir,
+    target_scheme=TARGET_SCHEME,
 ):
-    train_idx, val_idx = split_train_val(train_idx, args.val_fraction, args.seed)
+    train_idx, val_idx = split_train_val(
+        train_idx,
+        metadata,
+        args.val_fraction,
+        args.seed,
+    )
     checkpoint_path = group_dir / f"{train_kind}_checkpoint.pth"
     history_path = group_dir / f"{train_kind}_history.csv"
 
@@ -434,10 +583,15 @@ def run_training_group(
     if checkpoint_path.exists():
         try:
             trainer, state = load_checkpoint(
-                checkpoint_path, run["config"], args.device, args.seed
+                checkpoint_path,
+                run["config"],
+                args.device,
+                args.seed,
+                expected_target_scheme=target_scheme,
             )
             print(f"  Resume {train_kind} checkpoint: {checkpoint_path}")
-            best_val = float("nan")
+            best_val = trainer.best_val_mae
+            best_val_score = trainer.best_val_score
         except ValueError as exc:
             print(f"  Ignore incompatible checkpoint: {exc}")
 
@@ -446,10 +600,11 @@ def run_training_group(
             f"  Train {train_kind} model for held-out {material} "
             f"(train={len(train_idx)}, val={len(val_idx)})"
         )
-        trainer, state, best_val = train_with_validation(
+        trainer, state, best_val, best_val_score = train_with_validation(
             run["config"],
             data,
             targets,
+            metadata,
             train_idx,
             val_idx,
             args.epochs,
@@ -457,12 +612,27 @@ def run_training_group(
             args.seed,
             history_path,
         )
-        save_checkpoint(checkpoint_path, trainer, state)
+        save_checkpoint(
+            checkpoint_path,
+            trainer,
+            state,
+            target_scheme=target_scheme,
+        )
 
-    return trainer, state, best_val, train_idx, val_idx
+    return trainer, state, best_val, best_val_score, train_idx, val_idx
 
 
-def finetune_on_poscar0(args, run, base_trainer, base_state, data, targets, indices, out_dir):
+def finetune_on_poscar0(
+        args,
+        run,
+        base_trainer,
+        base_state,
+        data,
+        targets,
+        metadata,
+        indices,
+        out_dir,
+):
     """Fine-tune a copy of the source model using only held-out POSCAR0 rows."""
     checkpoint_path = out_dir / "poscar0_transfer_checkpoint.pth"
     history_path = out_dir / "poscar0_transfer_history.csv"
@@ -499,6 +669,10 @@ def finetune_on_poscar0(args, run, base_trainer, base_state, data, targets, indi
         trainer,
         subset(data, indices),
         tensor_subset(targets, indices),
+        ranking_groups=np.zeros(len(indices), dtype=int),
+        ranking_items=pd.Categorical(
+            metadata.iloc[indices]["defect_group"].astype(str)
+        ).codes,
     )
     train_fixed_epochs(
         trainer,
@@ -526,7 +700,14 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
 
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
-    base_trainer, base_state, best_val, train_idx, val_idx = run_training_group(
+    (
+        base_trainer,
+        base_state,
+        best_val,
+        best_val_score,
+        train_idx,
+        val_idx,
+    ) = run_training_group(
         args,
         run,
         data,
@@ -537,6 +718,8 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
         idx["train_other"],
         out_dir,
     )
+    run_training_scheme = training_scheme(run["config"])
+    ranking_min_gap_ev = float(run["config"]["optim"].get("rank_min_gap_ev", 0.1))
     node_normalization = (
         run["config"]["model"].get("hetero_node_norm")
         if model_name == "alignn" and run["mode"] in ALIGNN_NODE_NORM_MODES
@@ -546,7 +729,11 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
     protocol = "direct__final_test"
     pred_path = prediction_path(out_dir, protocol, material)
     pred_df, metrics = load_compatible_prediction(
-        pred_path, idx["test_final"], targets
+        pred_path,
+        idx["test_final"],
+        targets,
+        run_training_scheme,
+        ranking_min_gap_ev,
     )
     if pred_df is None:
         pred_df, metrics = predict_dataframe(
@@ -560,6 +747,7 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
         pred_df.insert(0, "seed", args.seed)
         pred_df.insert(1, "protocol", protocol)
         pred_df.insert(2, "target_scheme", TARGET_SCHEME)
+        pred_df.insert(3, "training_scheme", run_training_scheme)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
         pred_df.to_csv(pred_path, index=False)
     rows.append(
@@ -574,14 +762,20 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
             len(val_idx),
             len(idx["test_final"]),
             best_val,
-            node_normalization,
+            best_val_score,
+            run_training_scheme,
+            node_normalization=node_normalization,
         )
     )
 
     protocol = "poscar0_transfer__final_test"
     pred_path = prediction_path(out_dir, protocol, material)
     pred_df, metrics = load_compatible_prediction(
-        pred_path, idx["test_final"], targets
+        pred_path,
+        idx["test_final"],
+        targets,
+        run_training_scheme,
+        ranking_min_gap_ev,
     )
     if pred_df is None:
         transfer_trainer, transfer_state = finetune_on_poscar0(
@@ -591,6 +785,7 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
             base_state,
             data,
             targets,
+            metadata,
             idx["finetune_poscar0"],
             out_dir,
         )
@@ -605,6 +800,7 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
         pred_df.insert(0, "seed", args.seed)
         pred_df.insert(1, "protocol", protocol)
         pred_df.insert(2, "target_scheme", TARGET_SCHEME)
+        pred_df.insert(3, "training_scheme", run_training_scheme)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
         pred_df.to_csv(pred_path, index=False)
     rows.append(
@@ -619,8 +815,79 @@ def run_material(args, model_name, run, data, targets, metadata, material, out_d
             len(val_idx),
             len(idx["test_final"]),
             best_val,
-            node_normalization,
+            best_val_score,
+            run_training_scheme,
+            node_normalization=node_normalization,
             n_finetune=len(idx["finetune_poscar0"]),
+        )
+    )
+
+    # Train and evaluate an IS2RE-style model: POSCAR0 geometry is the input,
+    # while the label is the lowest relaxed DFE from the same defect group.
+    initial_final_targets = torch.as_tensor(
+        metadata["final_target"].to_numpy(dtype=float),
+        dtype=targets.dtype,
+    )
+    (
+        initial_trainer,
+        initial_state,
+        initial_best_val,
+        initial_best_val_score,
+        initial_train_idx,
+        initial_val_idx,
+    ) = run_training_group(
+        args,
+        run,
+        data,
+        initial_final_targets,
+        metadata,
+        material,
+        "other_initial_to_final_train",
+        idx["train_other_initial_final"],
+        out_dir,
+        target_scheme=INITIAL_TO_FINAL_TARGET_SCHEME,
+    )
+    protocol = "initial__final_dfe_test"
+    pred_path = prediction_path(out_dir, protocol, material)
+    pred_df, metrics = load_compatible_prediction(
+        pred_path,
+        idx["test_initial_final"],
+        initial_final_targets,
+        run_training_scheme,
+        ranking_min_gap_ev,
+        expected_target_scheme=INITIAL_TO_FINAL_TARGET_SCHEME,
+    )
+    if pred_df is None:
+        pred_df, metrics = predict_dataframe(
+            initial_trainer,
+            data,
+            initial_final_targets,
+            metadata,
+            idx["test_initial_final"],
+            initial_state,
+        )
+        pred_df.insert(0, "seed", args.seed)
+        pred_df.insert(1, "protocol", protocol)
+        pred_df.insert(2, "target_scheme", INITIAL_TO_FINAL_TARGET_SCHEME)
+        pred_df.insert(3, "training_scheme", run_training_scheme)
+        pred_path.parent.mkdir(parents=True, exist_ok=True)
+        pred_df.to_csv(pred_path, index=False)
+    rows.append(
+        metric_row(
+            material,
+            model_name,
+            run["label"],
+            protocol,
+            args.seed,
+            metrics,
+            len(initial_train_idx),
+            len(initial_val_idx),
+            len(idx["test_initial_final"]),
+            initial_best_val,
+            initial_best_val_score,
+            run_training_scheme,
+            target_scheme=INITIAL_TO_FINAL_TARGET_SCHEME,
+            node_normalization=node_normalization,
         )
     )
 
@@ -807,7 +1074,10 @@ def write_settings(run_dir, args, materials):
     settings["materials"] = list(materials)
     settings["run_dir"] = str(run_dir)
     settings["target_scheme"] = TARGET_SCHEME
+    settings["target_schemes"] = sorted(TARGET_SCHEMES)
     settings["transfer_scheme"] = TRANSFER_SCHEME
+    settings["validation_scheme"] = VALIDATION_SCHEME
+    settings["ranking_scheme"] = RANKING_SCHEME
     settings["protocols"] = list(PROTOCOLS)
     (run_dir / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
@@ -905,7 +1175,9 @@ def plot_material_model_performance(summary_df, run_dir, material=None):
     outputs = []
     metric_specs = [
         ("mae", "MAE (eV)"),
-        ("ground_state_mae", "Ground-State MAE (eV)"),
+        ("spearman", "Spearman rank correlation"),
+        ("pairwise_accuracy", "Pairwise ordering accuracy"),
+        ("global_top1_accuracy", "Global lowest-defect accuracy"),
         ("ndcg", "NDCG"),
     ]
     metric_specs = [spec for spec in metric_specs if spec[0] in summary_df.columns]
@@ -935,9 +1207,12 @@ def plot_material_model_performance(summary_df, run_dir, material=None):
             finite_values = values[np.isfinite(values)]
             value_max = float(np.max(finite_values)) if len(finite_values) else 1.0
             value_min = float(np.min(finite_values)) if len(finite_values) else 0.0
-            if metric == "ndcg":
+            if metric in {"ndcg", "pairwise_accuracy", "global_top1_accuracy"}:
                 ax.set_ylim(0, 1.14)
                 label_offset = 0.018
+            elif metric == "spearman":
+                ax.set_ylim(-1.08, 1.12)
+                label_offset = 0.035
             else:
                 span = max(value_max - min(0.0, value_min), 1e-9)
                 ax.set_ylim(0, value_max + max(0.14 * span, 0.18))
@@ -983,10 +1258,13 @@ def load_prediction_outputs(run_dir, material=None, model=None, mode=None):
             continue
         if (
             "target_scheme" not in df
-            or not df["target_scheme"].eq(TARGET_SCHEME).all()
+            or not df["target_scheme"].isin(TARGET_SCHEMES).all()
             or "protocol" not in df
             or not df["protocol"].isin(PROTOCOLS).all()
         ):
+            continue
+        expected_target_schemes = df["protocol"].map(PROTOCOL_TARGET_SCHEMES)
+        if not df["target_scheme"].eq(expected_target_schemes).all():
             continue
         parts = path.relative_to(run_dir).parts
         if len(parts) < 6:
@@ -1520,7 +1798,11 @@ def aggregate_overall_mae(summary_df):
                 "overall_mae": float(
                     np.sum(group["mae"].to_numpy(dtype=float) * n_test) / total
                 ),
-                "target_scheme": TARGET_SCHEME,
+                "target_scheme": (
+                    str(group["target_scheme"].iloc[0])
+                    if "target_scheme" in group
+                    else TARGET_SCHEME
+                ),
             }
         )
         rows.append(row)
@@ -1529,16 +1811,17 @@ def aggregate_overall_mae(summary_df):
 
 def write_summary_markdown(summary_df, skipped_df, run_dir):
     lines = [
-        "# Native Final-Structure Leave-One-Out and POSCAR0 Transfer",
+        "# Native Final-Structure Leave-One-Out, POSCAR0 Transfer, and Initial-to-Final DFE",
         "",
-        "| Material | Model | Mode | Protocol | N test | MAE | RMSE | GS MAE | Top-1 |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Material | Model | Mode | Protocol | N test | MAE | RMSE | Spearman | Pair acc. | Global top-1 | NDCG |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     if not summary_df.empty:
         for row in summary_df.sort_values(["material", "model", "mode", "protocol"]).itertuples():
             lines.append(
                 "| {material} | {model} | {mode} | {protocol} | {n_test} | "
-                "{mae:.3f} | {rmse:.3f} | {gs:.3f} | {top1:.3f} |".format(
+                "{mae:.3f} | {rmse:.3f} | {spearman:.3f} | {pairwise:.3f} | "
+                "{global_top1:.3f} | {ndcg:.3f} |".format(
                     material=row.material,
                     model=row.model,
                     mode=mode_display_name(row.mode),
@@ -1546,12 +1829,14 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
                     n_test=row.n_test,
                     mae=row.mae,
                     rmse=row.rmse,
-                    gs=row.ground_state_mae,
-                    top1=row.top1_accuracy,
+                    spearman=getattr(row, "spearman", float("nan")),
+                    pairwise=getattr(row, "pairwise_accuracy", float("nan")),
+                    global_top1=getattr(row, "global_top1_accuracy", float("nan")),
+                    ndcg=getattr(row, "ndcg", float("nan")),
                 )
             )
     else:
-        lines.append("|  |  |  |  | 0 |  |  |  |  |")
+        lines.append("|  |  |  |  | 0 |  |  |  |  |  |  |")
 
     overall_df = aggregate_overall_mae(summary_df)
     if not overall_df.empty:
@@ -1644,6 +1929,15 @@ def run_single_seed(args, run_dir, radii):
             hypergraph_radius=args.hypergraph_radius,
         )
         for run in runs:
+            run["config"]["optim"].update(
+                {
+                    "point_loss": args.point_loss,
+                    "rank_loss_weight": args.rank_loss_weight,
+                    "rank_min_gap_ev": args.rank_min_gap_ev,
+                    "validation_fraction": args.val_fraction,
+                    "validation_rank_weight": args.validation_rank_weight,
+                }
+            )
             run_specs.append((model_name, run))
 
     if not run_specs:
@@ -1741,8 +2035,8 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "Compare ordinary ALIGNN and Hypergraph ALIGNN with direct native-"
-            "defect prediction and POSCAR0 one-shot transfer learning on held-"
-            "out final structures."
+            "defect prediction, POSCAR0 one-shot transfer, and initial-structure "
+            "to final-DFE prediction under leave-one-material-out evaluation."
         )
     )
     parser.add_argument(
@@ -1759,6 +2053,30 @@ def main():
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--val-fraction", type=float, default=0.2)
+    parser.add_argument(
+        "--point-loss",
+        choices=("mse", "smooth_l1"),
+        default="smooth_l1",
+        help="Pointwise regression loss used together with the rank loss.",
+    )
+    parser.add_argument(
+        "--rank-loss-weight",
+        type=float,
+        default=0.2,
+        help="Weight of same-material, cross-defect pairwise ranking loss.",
+    )
+    parser.add_argument(
+        "--rank-min-gap-ev",
+        type=float,
+        default=0.1,
+        help="Ignore ordering pairs whose DFT energy gap is below this threshold.",
+    )
+    parser.add_argument(
+        "--validation-rank-weight",
+        type=float,
+        default=0.2,
+        help="Rank-error weight in the material-OOD validation checkpoint score.",
+    )
     parser.add_argument("--finetune-epochs", type=int, default=20)
     parser.add_argument(
         "--finetune-lr",
@@ -1841,6 +2159,12 @@ def main():
 
     if not 0 < args.val_fraction < 1:
         parser.error("--val-fraction must be between 0 and 1.")
+    if args.rank_loss_weight < 0:
+        parser.error("--rank-loss-weight must be non-negative.")
+    if args.rank_min_gap_ev < 0:
+        parser.error("--rank-min-gap-ev must be non-negative.")
+    if args.validation_rank_weight < 0:
+        parser.error("--validation-rank-weight must be non-negative.")
     if args.finetune_epochs < 1:
         parser.error("--finetune-epochs must be at least 1.")
     if args.finetune_lr <= 0:
@@ -1883,7 +2207,10 @@ def main():
         settings = vars(args).copy()
         settings["seeds"] = requested_seeds
         settings["target_scheme"] = TARGET_SCHEME
+        settings["target_schemes"] = sorted(TARGET_SCHEMES)
         settings["transfer_scheme"] = TRANSFER_SCHEME
+        settings["validation_scheme"] = VALIDATION_SCHEME
+        settings["ranking_scheme"] = RANKING_SCHEME
         settings["protocols"] = list(PROTOCOLS)
         (run_dir / "settings.json").write_text(
             json.dumps(settings, indent=2), encoding="utf-8"

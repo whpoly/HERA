@@ -6,6 +6,7 @@ Pass ``representations`` or ``modes`` to build only the graph variants needed
 for a training run.
 """
 
+import ast
 import json
 from pathlib import Path
 import numpy as np
@@ -115,12 +116,25 @@ def _filter_invalid_datasets(datasets, targets):
     return (*filtered, targets)
 
 
-def tag_structure_source(structure, source_path, source_id=None):
+def tag_structure_source(
+        structure,
+        source_path,
+        source_id=None,
+        concentration=None,
+        material=None,
+        defect_family=None,
+):
     """Attach source-file metadata so downstream explanations can use CIF names."""
     source_path = str(source_path)
     structure.source_path = source_path
     structure.source_name = Path(source_path).stem
     structure.source_id = str(source_id if source_id is not None else structure.source_name)
+    if concentration is not None:
+        structure.concentration = concentration
+    if material is not None:
+        structure.material = material
+    if defect_family is not None:
+        structure.defect_family = defect_family
     return structure
 
 
@@ -189,9 +203,38 @@ def init_elem_embedding(path='atom_init.json'):
 #  Helper used by vacancy / 2dmd_low / 2dmd_high
 # ------------------------------------------------------------------ #
 
-def get_prepared(path, prepared, is_high=False):
+def is_pure_vacancy_descriptor(defects):
+    """Return whether a descriptor contains vacancies and no other defect type."""
+    if isinstance(defects, str):
+        try:
+            defects = ast.literal_eval(defects)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError(f'Cannot parse defect descriptor: {defects!r}') from exc
+    return bool(defects) and all(
+        isinstance(defect, dict) and defect.get('type') == 'vacancy'
+        for defect in defects
+    )
+
+
+def get_prepared(
+        path,
+        prepared,
+        is_high=False,
+        pure_vacancy=False,
+        concentration=None,
+        material=None,
+):
     df_descriptors = pd.read_csv(f"{path}/descriptors.csv", index_col=0)
     df_targets = pd.read_csv(f"{path}/targets.csv.gz", index_col=0)
+    if pure_vacancy:
+        vacancy_descriptor_ids = {
+            str(descriptor_id)
+            for descriptor_id, row in df_descriptors.iterrows()
+            if is_pure_vacancy_descriptor(row['defects'])
+        }
+        df_targets = df_targets[
+            df_targets['descriptor_id'].astype(str).isin(vacancy_descriptor_ids)
+        ]
     missing_files = []
     for index, row in tqdm(df_targets.iterrows()):
         file = Path(path) / 'initial' / f'{index}.cif'
@@ -199,12 +242,20 @@ def get_prepared(path, prepared, is_high=False):
             missing_files.append(str(index))
             continue
         structure = Structure.from_file(file)
-        tag_structure_source(structure, file, index)
+        descriptor_base = df_descriptors.loc[row['descriptor_id']]['base']
+        tag_structure_source(
+            structure,
+            file,
+            index,
+            concentration=concentration,
+            material=material or descriptor_base,
+            defect_family='vacancy' if pure_vacancy else None,
+        )
         if is_high:
-            base = df_descriptors.loc[row['descriptor_id']]['base'] + '_500'
+            base = descriptor_base + '_500'
             weight = 0.3132058
         else:
-            base = df_descriptors.loc[row['descriptor_id']]['base']
+            base = descriptor_base
             weight = 3.7165
         cell = df_descriptors.loc[row['descriptor_id']]['cell']
         prepared['target'].append(row['formation_energy_per_site'])
@@ -247,7 +298,7 @@ def load_data_vacancy(task_prefix, local_cutoff=None, representations=None):
         'InSe_500': CifParser("dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
-    prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    prep = [[p[0], p[1], ast.literal_eval(p[2])] for p in prep]
     skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
 
     dataset_full = None
@@ -303,7 +354,7 @@ def load_data_2dmd_high(task_prefix, local_cutoff=None, representations=None):
         'InSe_500': CifParser("dataset/2d-materials-point-defects-all/InSe.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
-    prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    prep = [[p[0], p[1], ast.literal_eval(p[2])] for p in prep]
     skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
 
     dataset_full = None
@@ -350,7 +401,7 @@ def load_data_2dmd_low(task_prefix, local_cutoff=None, representations=None):
         'WSe2': CifParser("dataset/2d-materials-point-defects-all/low_density_defects/WSe2/unit_cells/WSe2.cif").get_structures(primitive=False)[0],
     }
     prep = df.values.tolist()
-    prep = [[p[0], p[1], eval(p[2])] for p in prep]
+    prep = [[p[0], p[1], ast.literal_eval(p[2])] for p in prep]
     skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
 
     dataset_full = None
@@ -381,6 +432,141 @@ def load_data_2dmd_low(task_prefix, local_cutoff=None, representations=None):
     return _filter_invalid_datasets(
         (dataset_full, dataset_hetero, dataset_attn, dataset_sparse),
         df['target'].values,
+    )
+
+
+def _load_data_2dmd_material_transfer(
+        material,
+        task_prefix,
+        local_cutoff=None,
+        representations=None,
+        pure_vacancy=False,
+        include_low=True,
+):
+    """Load one material's low/high transfer data or its high test data only."""
+    if material not in ('MoS2', 'WSe2'):
+        raise ValueError("material must be 'MoS2' or 'WSe2'")
+
+    representations = _normalize_representations(representations)
+    prepared = {
+        'id': [],
+        'structure': [],
+        'base': [],
+        'cell': [],
+        'target': [],
+        'weight': [],
+    }
+    dataset_root = 'dataset/2d-materials-point-defects-all'
+    if include_low:
+        get_prepared(
+            f'{dataset_root}/low_density_defects/{material}',
+            prepared,
+            pure_vacancy=pure_vacancy,
+            concentration='low',
+            material=material,
+        )
+    get_prepared(
+        f'{dataset_root}/high_density_defects/{material}_500',
+        prepared,
+        is_high=True,
+        pure_vacancy=pure_vacancy,
+        concentration='high',
+        material=material,
+    )
+    if not pure_vacancy:
+        for structure in prepared['structure']:
+            structure.defect_family = 'point_defect'
+    df = pd.DataFrame(prepared)
+    df.set_index(['id'], inplace=True)
+    unit_cells = {
+        material: CifParser(
+            f'{dataset_root}/low_density_defects/{material}/unit_cells/{material}.cif'
+        ).get_structures(primitive=False)[0],
+        f'{material}_500': CifParser(
+            f'{dataset_root}/{material}.cif'
+        ).get_structures(primitive=False)[0],
+    }
+    prep = df.values.tolist()
+    prep = [[p[0], p[1], ast.literal_eval(p[2])] for p in prep]
+    skip_full_was = task_prefix not in ('cgcnn', 'megnet', 'definet', 'alignn')
+
+    dataset_full = None
+    if 'full' in representations or 'full_x' in representations:
+        full_task = (
+            f'{task_prefix}_full_x'
+            if 'full_x' in representations
+            else f'{task_prefix}_full'
+        )
+        dataset_full = [
+            convert_to_sparse_2dmd_high(
+                p[0], unit_cells[p[1]], p[2], full_task,
+                None, skip_full_was, False,
+            )
+            for p in tqdm(prep)
+        ]
+    dataset_hetero = None
+    if 'hetero' in representations:
+        dataset_hetero = [
+            convert_to_sparse_2dmd_high(
+                p[0], unit_cells[p[1]], p[2], f'{task_prefix}_hetero',
+                None, skip_full_was, False, local_cutoff=local_cutoff,
+            )
+            for p in tqdm(prep)
+        ]
+    dataset_attn = None
+    if 'attention' in representations:
+        dataset_attn = [
+            convert_to_sparse_2dmd_high(
+                p[0], unit_cells[p[1]], p[2], f'{task_prefix}_attention',
+                None, skip_full_was, False, local_cutoff=local_cutoff,
+            )
+            for p in tqdm(prep)
+        ]
+    dataset_sparse = None
+    if 'sparse' in representations:
+        dataset_sparse = [
+            convert_to_sparse_2dmd_high(
+                p[0], unit_cells[p[1]], p[2], f'{task_prefix}_sparse',
+                [1], False, False,
+            )
+            for p in tqdm(prep)
+        ]
+
+    return _filter_invalid_datasets(
+        (dataset_full, dataset_hetero, dataset_attn, dataset_sparse),
+        df['target'].values,
+    )
+
+
+def load_data_vacancy_mos2(task_prefix, local_cutoff=None, representations=None):
+    """Load the MoS2 low-to-high concentration pure-vacancy transfer task."""
+    return _load_data_2dmd_material_transfer(
+        'MoS2', task_prefix, local_cutoff, representations,
+        pure_vacancy=True,
+    )
+
+
+def load_data_vacancy_wse2(task_prefix, local_cutoff=None, representations=None):
+    """Load the WSe2 low-to-high concentration pure-vacancy transfer task."""
+    return _load_data_2dmd_material_transfer(
+        'WSe2', task_prefix, local_cutoff, representations,
+        pure_vacancy=True,
+    )
+
+
+def load_data_2dmd_mos2(task_prefix, local_cutoff=None, representations=None):
+    """Load every MoS2 low-density defect and test on all high-density defects."""
+    return _load_data_2dmd_material_transfer(
+        'MoS2', task_prefix, local_cutoff, representations,
+        pure_vacancy=False,
+    )
+
+
+def load_data_2dmd_wse2(task_prefix, local_cutoff=None, representations=None):
+    """Load every WSe2 low-density defect and test on all high-density defects."""
+    return _load_data_2dmd_material_transfer(
+        'WSe2', task_prefix, local_cutoff, representations,
+        pure_vacancy=False,
     )
 
 
@@ -516,8 +702,12 @@ def load_data_semi(task_prefix, local_cutoff=None, representations=None):
 
 _LOADER_REGISTRY = {
     'vacancy': load_data_vacancy,
+    'vacancy_mos2': load_data_vacancy_mos2,
+    'vacancy_wse2': load_data_vacancy_wse2,
     '2dmd_low': load_data_2dmd_low,
     '2dmd_high': load_data_2dmd_high,
+    '2dmd_mos2': load_data_2dmd_mos2,
+    '2dmd_wse2': load_data_2dmd_wse2,
     'native': load_data_native,
     'och': load_data_och,
     'imp2d': load_data_imp2d,
@@ -535,8 +725,8 @@ def load_dataset(
     """Load and return the graph representations for a dataset.
 
     Args:
-        dataset_name: one of vacancy, 2dmd_low, 2dmd_high, native, och, imp2d,
-            semi
+        dataset_name: one of vacancy, vacancy_mos2, vacancy_wse2, 2dmd_low,
+            2dmd_high, 2dmd_mos2, 2dmd_wse2, native, och, imp2d, semi
         model_name: 'megnet', 'cgcnn', 'definet', 'alignn', or 'hypergraph'
             (used as task prefix)
         local_cutoff: optional local/host boundary radius for hetero and attention structures
