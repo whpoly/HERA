@@ -25,7 +25,10 @@ from pymatgen.core import Structure
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from .config.defaults import CGCNN_DEFINET_MODES, DEFINET_MODES, VALID_MODES, get_config
+from .config.defaults import (
+    CGCNN_DEFINET_MODES, DEFINET_MODES, VALID_MODES, get_config,
+    apply_alignn_hetero_options, alignn_hetero_run_components,
+)
 from .data.datasets import (
     DATASET_REPRESENTATIONS,
     DEFAULT_DATASET_REPRESENTATIONS,
@@ -223,7 +226,7 @@ def load_native_with_metadata(
     )
 
 
-def expand_mode_runs(model_name, modes, radii):
+def expand_mode_runs(model_name, modes, radii, hetero_feature_norm=None, hetero_pooling=None):
     runs = []
     for mode in modes:
         if mode not in VALID_MODES:
@@ -259,6 +262,12 @@ def expand_mode_runs(model_name, modes, radii):
                     "local_cutoff": None,
                 }
             )
+    if model_name == 'alignn':
+        for run in runs:
+            apply_alignn_hetero_options(run['config'], hetero_feature_norm, hetero_pooling)
+            parts = alignn_hetero_run_components(run['config']['model'])
+            if parts:
+                run['label'] += '_' + '_'.join(parts)
     return runs
 
 
@@ -322,7 +331,14 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    if '_features_layernorm' in mode:
+        return mode_display_name(mode.replace('_features_layernorm', '')) + ' (feature LayerNorm)'
+    if '_pool_defect_mean' in mode and not mode.endswith('_pool_defect_mean'):
+        return mode_display_name(mode.replace('_pool_defect_mean', '')) + ' (defect mean)'
+    if mode.endswith('_pool_defect_mean'):
+        return mode_display_name(mode.removesuffix('_pool_defect_mean')) + ' (defect mean)'
     mode = mode.removesuffix("_per_defect_neighborhood_v2")
+    mode = mode.removesuffix("_defect_global_attention_v3")
     normalization = None
     if "_norm_" in mode:
         mode, normalization = mode.rsplit("_norm_", 1)

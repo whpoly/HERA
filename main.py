@@ -47,7 +47,12 @@ import numpy as np
 import torch
 from sklearn.model_selection import KFold, train_test_split
 
-from .config.defaults import get_config, VALID_DATASETS, VALID_MODELS, VALID_MODES
+from .config.defaults import (
+    get_config, VALID_DATASETS, VALID_MODELS, VALID_MODES, HYPERGRAPH_POOLING_MODES,
+    apply_hypergraph_options, hypergraph_run_components, resolve_hypergraph_pooling,
+    ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
+    apply_alignn_hetero_options, alignn_hetero_run_components,
+)
 from .data.datasets import (
     dataset_index_for_mode,
     load_dataset,
@@ -261,8 +266,15 @@ def apply_training_overrides(config, args, model_name):
                 config['model']['hetero_node_norm'] = norm_values[0]
         if args.alignn_amp:
             config['optim']['amp'] = True
+        apply_alignn_hetero_options(
+            config, getattr(args, 'alignn_hetero_feature_norm', None),
+            getattr(args, 'alignn_hetero_pooling', None),
+        )
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
+    if config['task'].endswith(('_hypergraph', '_hypergraph_was')):
+        apply_hypergraph_options(config, getattr(args, 'hypergraph_schema', None),
+                                 getattr(args, 'hypergraph_pooling', None))
     return config
 
 
@@ -777,10 +789,17 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
         mode_summary.insert(
             1,
             f'Hypergraph defect-neighbor radius: '
-            f'{config["model"]["hypergraph_radius"]} A',
+            f'{config["model"]["hypergraph_radius"]} A; pooling: '
+            f'{resolve_hypergraph_pooling(config["model"]["hypergraph_schema"], config["model"].get("hypergraph_pooling"))}',
         )
     elif radius_label is not None:
         mode_summary.insert(1, radius_summary(run_label.rsplit('_r', 1)[0], config))
+    if config['task'] in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
+        mode_summary.insert(
+            1, f'Hetero feature norm: {config["model"].get("hetero_feature_norm", "batchnorm")}; '
+            f'node delta norm: {config["model"].get("hetero_node_norm", "layernorm")}; '
+            f'pooling: {config["model"].get("hetero_pooling", "type_mean")}',
+        )
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
 
@@ -961,6 +980,14 @@ def main():
     parser.add_argument('--alignn-grad-accum-steps', type=int, default=None,
                         help='Accumulate ALIGNN gradients over this many micro-batches')
     parser.add_argument(
+        '--alignn-hetero-feature-norm', choices=ALIGNN_HETERO_FEATURE_NORMS,
+        default=None, help='HeteroALIGNN embedding, bond and angle normalization (default: layernorm)',
+    )
+    parser.add_argument(
+        '--alignn-hetero-pooling', choices=ALIGNN_HETERO_POOLING_MODES,
+        default=None, help='HeteroALIGNN readout: actual defect mean or concatenated type means (default: defect_mean)',
+    )
+    parser.add_argument(
         '--alignn-hetero-node-norm',
         nargs='+',
         choices=('layernorm', 'batchnorm', 'none'),
@@ -984,6 +1011,15 @@ def main():
         type=float,
         default=None,
         help='Defect-neighbor radius for hypergraph regions in angstrom (default: 3.0)',
+    )
+    from .config.defaults import HYPERGRAPH_SCHEMAS
+    parser.add_argument(
+        '--hypergraph-schema', choices=HYPERGRAPH_SCHEMAS, default=None,
+        help='Hypergraph version (default: defect_global_attention_v3; v2 remains reproducible)',
+    )
+    parser.add_argument(
+        '--hypergraph-pooling', choices=HYPERGRAPH_POOLING_MODES, default=None,
+        help='V3: defect_mean (default) or hierarchical_attention; v2: region_mean',
     )
     parser.add_argument(
         '--seed',
@@ -1058,6 +1094,11 @@ def main():
         parser.error('--alignn-cutoff must be > 0')
     if args.hypergraph_radius is not None and args.hypergraph_radius < 0:
         parser.error('--hypergraph-radius must be >= 0')
+    try:
+        resolve_hypergraph_pooling(args.hypergraph_schema or HYPERGRAPH_SCHEMAS[-1],
+                                  args.hypergraph_pooling)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.seeds = parse_seed_values(args.seeds, parser)
     if args.alignn_hetero_node_norm is not None:
         args.alignn_hetero_node_norm = list(dict.fromkeys(
@@ -1222,17 +1263,21 @@ def main():
                 )
 
                 for run in mode_runs:
+                    if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
+                        parts = alignn_hetero_run_components(run['config']['model'])
+                        if parts:
+                            run['label'] += '_' + '_'.join(parts)
                     run_label = run['label']
                     train_mode = run['mode']
                     mode_parts = [dataset_dir, train_mode]
                     if train_mode in HYPERGRAPH_MODES:
-                        mode_parts.append(
-                            run['config']['model']['hypergraph_schema']
-                        )
+                        mode_parts.extend(hypergraph_run_components(run['config']['model']))
                     if run['radius_label'] is not None:
                         mode_parts.append(run['radius_label'])
                     if run.get('norm_label') is not None:
                         mode_parts.append(run['norm_label'])
+                    if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
+                        mode_parts.extend(alignn_hetero_run_components(run['config']['model']))
                     mode_dir = os.path.join(*mode_parts)
                     os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
@@ -1265,6 +1310,7 @@ def main():
                     )
                     print(
                         '  Hypergraph/model: '
+                        f'pooling={config["model"]["hypergraph_pooling"]}, '
                         f'{physical_summary}'
                         'hyperedges=per-defect core + centered local + optional far, '
                         f'schema={config["model"]["hypergraph_schema"]}, '
@@ -1283,6 +1329,8 @@ def main():
                         f'gcn_blocks={config["model"].get("gcn_blocks", 0)}, '
                         f'angle_embed={config["model"].get("angle_embed_size", config["model"]["edge_embed_size"])}, '
                         f'hetero_node_norm={config["model"].get("hetero_node_norm", "layernorm")}, '
+                        f'hetero_feature_norm={config["model"].get("hetero_feature_norm", "n/a")}, '
+                        f'hetero_pooling={config["model"].get("hetero_pooling", "n/a")}, '
                         f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )

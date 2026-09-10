@@ -132,17 +132,32 @@ Common arguments:
   full-graph-only `was` mode is no longer exposed.
 - `hetero`, `hetero_fixed_pool`, and `hetero_was` use the `--r` values as the local/host boundary
   cutoff while keeping the full model graph and config graph cutoff.
-- `hypergraph` keeps defect neighborhoods independent. Every defect gets a
-  singleton core hyperedge and a local hyperedge containing that center defect
-  plus pristine atoms within 3.0 A; other defect atoms are excluded. A
-  pristine atom may belong to multiple genuinely overlapping neighborhoods,
-  and pristine atoms outside every neighborhood share one optional far-field
-  hyperedge. Distances use periodic minimum images. The variable hyperedges are
-  pooled individually and combined by semantic type only at graph readout.
-  With `--model cgcnn`, `megnet`, or `alignn`, the original physical bond (and
-  ALIGNN angle) updates are interleaved with hyperedge updates. `--model
-  hypergraph` runs the pure hypergraph baseline without a physical backbone.
-  Override the threshold with `--hypergraph-radius`.
+- `hypergraph` defaults to `defect_global_attention_v3`: one hyperedge joins
+  all defects, and each defect retains a separate local edge containing its
+  center and pristine neighbors within 3.0 A (periodic minimum images). Local
+  edges can overlap through pristine atoms. There is no far-pristine global
+  edge; those atoms remain in the physical graph.
+  Dynamic attention normalizes node-to-edge and edge-to-node messages
+  separately, with gated residual updates. CGCNN, MEGNet and ALIGNN use their
+  atom-type attention physical updates; HyperALIGNN uses LayerNorm throughout.
+  Readout defaults to `--hypergraph-pooling defect_mean`: average the final
+  defect node representations once per graph, then apply the prediction MLP.
+  There are no additional global/local/pristine readout branches in this mode;
+  host and other-defect information enter through message passing. This is a
+  mean of representations before the MLP, not a mean of individual energy
+  predictions. Use `--hypergraph-pooling hierarchical_attention` for the prior
+  defect/local/pristine attention readout with concentration/overlap fractions.
+  `--model hypergraph` has no physical backbone; far pristine nodes therefore
+  have no path to the prediction when using defect mean readout.
+  Override the radius with `--hypergraph-radius`; select
+  `--hypergraph-schema per_defect_neighborhood_v2` to reproduce the old
+  singleton-core, far-field, mean-pooling model. Saved old configs (including
+  those missing a schema) still load as v2. Saved v3 configs missing a pooling
+  field retain hierarchical attention. New defect mean outputs use
+  `hypergraph/defect_global_attention_v3/pool_defect_mean/`; hierarchical
+  outputs retain the previous schema directory. Prediction heads differ, so
+  changing pooling requires a fresh training run.
+  See [the low-to-high analysis and commands](docs/hypergraph_low2high_v3.md).
 - `hypergraph_was` keeps the same physical graph and per-defect hyperedges as
   `hypergraph`, but concatenates current and previous/reference (`was`) atom
   embeddings. It is available for CGCNN, MEGNet, and ALIGNN so the two modes
@@ -178,7 +193,16 @@ Common arguments:
 - `--alignn-grad-accum-steps`: keep an effective large batch while using a
   smaller memory-resident micro-batch, e.g. `--alignn-train-batch-size 4
   --alignn-grad-accum-steps 16` gives an effective ALIGNN training batch of 64.
-- HeteroALIGNN applies LayerNorm only to each residual delta by default. Use
+- New HeteroALIGNN runs use LayerNorm for node/bond/angle embeddings, line-graph
+  updates, relation-edge updates, and node residual deltas. The default readout
+  averages only actual defect-node features, then applies the prediction MLP.
+  Use `--alignn-hetero-feature-norm batchnorm` and
+  `--alignn-hetero-pooling type_mean` together to reproduce the previous
+  architecture. Either flag alone provides an ablation of the new defaults.
+  New results have `features_layernorm/pool_defect_mean` subdirectories;
+  saved configs missing these options still restore the legacy architecture.
+  See [the low-to-high change and commands](docs/hetero_alignn_low2high.md).
+- Use
   `--alignn-hetero-node-norm layernorm`, `batchnorm`, or `none` to compare
   normalization choices while preserving the residual identity path. Pass
   multiple values in one command, for example `--alignn-hetero-node-norm
@@ -414,9 +438,11 @@ python -m HERA.native_initial_relaxed_leave_one_out --seed all --model alignn --
 ```
 
 This is also the runner's default model/mode pair, so `--model alignn --mode
-full hypergraph` may be omitted. The same ALIGNN physical backbone and native
-LOO splits are used in both runs; the hypergraph variant additionally applies
-the independent per-defect hyperedge updates.
+full hypergraph` may be omitted. Both runs use the same native LOO splits.
+The default v3 hypergraph also changes physical message weighting and
+normalization to the attention variant. Use `--hypergraph-schema
+per_defect_neighborhood_v2` to reproduce the original physical-backbone
+comparison with independent per-defect hyperedges.
 
 By default the script discovers all materials that have both POSCAR0 initial
 structures and non-POSCAR0 relaxed structures. Every CIF retains its own DFE
@@ -508,14 +534,24 @@ relation's accumulated gate weights. This preserves relation identity and
 avoids cross-graph leakage from relation types that occur elsewhere in a mixed
 batch.
 
-For a controlled comparison with DefiNetALIGNN, HeteroALIGNN has no learned
-global graph feature and does not pool edge embeddings into its prediction
-head. It concatenates only the separate atom and defect node pools, while
-DefiNetALIGNN uses its homogeneous node pool.
+HeteroALIGNN has no learned global graph feature and does not pool edge
+embeddings into its prediction head. New configs average the final features
+of actual defects and apply the MLP (`defect_mean`). Pristine sites continue
+to affect these features through physical message passing. The preserved
+`pool_type` marker excludes pristine sites promoted into the defect region
+when `r > 0`. A graph without any actual defects is rejected by this readout.
+The `type_mean` ablation concatenates the separate atom and defect node pools;
+with `hetero_fixed_pool`, these two pools use the original `pool_type` markers.
+For `defect_mean`, `hetero` and `hetero_fixed_pool` have the same readout.
+CGCNN/MEGNet hetero defaults are unchanged by these ALIGNN options.
 
 ## Smoke Check
 
-There is currently no built-in automated test suite such as `pytest` or `unittest`.
+Run the regression suite from the directory containing `HERA`:
+
+```bash
+python -m unittest discover -s HERA/tests
+```
 
 For a quick manual validation:
 

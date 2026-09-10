@@ -235,7 +235,7 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
 
         self.assertEqual(
             [run["label"] for run in runs],
-            ["full", "hetero_r0_norm_layernorm"],
+            ["full", "hetero_r0_features_layernorm_pool_defect_mean_norm_layernorm"],
         )
         self.assertEqual(runs[1]["config"]["model"]["hetero_node_norm"], "layernorm")
         self.assertEqual(runs[0]["config"]["task"], "alignn_full")
@@ -251,7 +251,7 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
 
         self.assertEqual(
             [run["label"] for run in runs],
-            ["full", "hypergraph_r4.5_per_defect_neighborhood_v2"],
+            ["full", "hypergraph_r4.5_defect_global_attention_v3_pool_defect_mean"],
         )
         self.assertEqual(runs[0]["config"]["task"], "alignn_full")
         self.assertEqual(runs[1]["config"]["task"], "alignn_hypergraph")
@@ -261,6 +261,22 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
         self.assertEqual(
             model_mode_display("alignn", "hetero_r0_norm_layernorm"),
             "Hetero (LayerNorm) ALIGNN",
+        )
+
+    def test_pooling_ablation_has_an_isolated_label_and_legacy_option(self):
+        for schema, pooling, suffix in (
+            ('defect_global_attention_v3', 'defect_mean', '_pool_defect_mean'),
+            ('defect_global_attention_v3', 'hierarchical_attention', ''),
+            ('per_defect_neighborhood_v2', None, ''),
+        ):
+            run = expand_leave_one_out_runs(
+                'alignn', ['hypergraph'], radii=None, hypergraph_radius=3,
+                hypergraph_schema=schema, hypergraph_pooling=pooling,
+            )[0]
+            self.assertEqual(run['label'], f'hypergraph_r3_{schema}{suffix}')
+        self.assertEqual(
+            model_mode_display('alignn', 'hypergraph_r3_defect_global_attention_v3_pool_defect_mean'),
+            'Hypergraph r3 (defect mean) ALIGNN',
         )
 
     def test_hypergraph_radius_label_uses_hypergraph_color(self):
@@ -331,6 +347,19 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
             ]
         )
         self.assertTrue(build_alignn_hypergraph_comparison(frame).empty)
+
+    def test_pooling_variants_are_not_averaged_into_one_comparison(self):
+        hierarchical = 'hypergraph_r3_defect_global_attention_v3'
+        mean = hierarchical + '_pool_defect_mean'
+        rows = [dict(material='MoS2', model='alignn', protocol='p', seed=123, mode=mode, mae=mae)
+                for mode, mae in [('full', .4), (hierarchical, .3), (mean, .1)]]
+        comparison = build_alignn_hypergraph_comparison(pd.DataFrame(rows))
+        result = aggregate_alignn_hypergraph_comparison(comparison).set_index('hypergraph_mode')
+        self.assertEqual(len(result), 2)
+        self.assertAlmostEqual(result.loc[hierarchical, 'hypergraph_alignn_mae_mean'], .3)
+        self.assertAlmostEqual(result.loc[mean, 'hypergraph_alignn_mae_mean'], .1)
+        with self.assertRaisesRegex(ValueError, 'Duplicate hypergraph measurements'):
+            build_alignn_hypergraph_comparison(pd.DataFrame(rows + [rows[-1]]))
 
 
 if __name__ == "__main__":

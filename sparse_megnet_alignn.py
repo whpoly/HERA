@@ -14,7 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .config.defaults import HYPERGRAPH_SCHEMA
+from .config.defaults import get_config, hypergraph_run_components, alignn_hetero_run_components
 from .main import (
     ALIGNN_DEFAULT_MODES,
     ALL_BENCHMARK_SEEDS,
@@ -51,8 +51,10 @@ def prediction_file_path(run_dir, model, dataset, mode, seed):
     mode_parts = [Path(run_dir), model, dataset, mode]
     if mode == 'hetero':
         mode_parts.append(Path('r0'))
-    elif mode == 'hypergraph':
-        mode_parts.append(Path(HYPERGRAPH_SCHEMA))
+        if model == 'alignn':
+            mode_parts.extend(alignn_hetero_run_components(get_config(model, dataset, mode)['model']))
+    elif mode in ('hypergraph', 'hypergraph_was'):
+        mode_parts.extend(hypergraph_run_components(get_config(model, dataset, mode)['model']))
     return Path(*mode_parts) / f'seed{seed}_test_predictions.csv'
 
 
@@ -74,7 +76,7 @@ def alignn_result_prefix(dataset_root, prediction_path):
     mode = parts[0]
     suffixes = [
         part for part in parts[1:]
-        if part.startswith('r') or part.startswith('norm_')
+        if part.startswith(('r', 'norm_', 'pool_', 'features_'))
     ]
     return '_'.join(('alignn', mode, *suffixes))
 

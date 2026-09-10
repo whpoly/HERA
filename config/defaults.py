@@ -5,7 +5,73 @@ import copy
 
 EARLY_STOPPING_PATIENCE = 50
 EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
-HYPERGRAPH_SCHEMA = 'per_defect_neighborhood_v2'
+LEGACY_HYPERGRAPH_SCHEMA = 'per_defect_neighborhood_v2'
+HYPERGRAPH_SCHEMA = 'defect_global_attention_v3'
+HYPERGRAPH_SCHEMAS = (LEGACY_HYPERGRAPH_SCHEMA, HYPERGRAPH_SCHEMA)
+HYPERGRAPH_POOLING = 'defect_mean'
+HYPERGRAPH_POOLING_MODES = ('defect_mean', 'hierarchical_attention', 'region_mean')
+ALIGNN_HETERO_FEATURE_NORMS = ('layernorm', 'batchnorm')
+ALIGNN_HETERO_POOLING_MODES = ('defect_mean', 'type_mean')
+
+
+def apply_alignn_hetero_options(config, feature_norm=None, pooling=None):
+    """Override ALIGNN hetero only; omitted saved fields retain legacy behavior."""
+    if config['task'] not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
+        return config
+    model = config['model']
+    if feature_norm is not None:
+        model['hetero_feature_norm'] = feature_norm
+    if pooling is not None:
+        model['hetero_pooling'] = pooling
+    if model.get('hetero_feature_norm', 'batchnorm') not in ALIGNN_HETERO_FEATURE_NORMS:
+        raise ValueError('Unknown ALIGNN hetero feature normalization')
+    if model.get('hetero_pooling', 'type_mean') not in ALIGNN_HETERO_POOLING_MODES:
+        raise ValueError('Unknown ALIGNN hetero pooling')
+    return config
+
+
+def alignn_hetero_run_components(model_config):
+    """Separate new architectures and ablations from the legacy result paths."""
+    parts = []
+    if model_config.get('hetero_feature_norm', 'batchnorm') == 'layernorm':
+        parts.append('features_layernorm')
+    if model_config.get('hetero_pooling', 'type_mean') == 'defect_mean':
+        parts.append('pool_defect_mean')
+    return parts
+
+
+def resolve_hypergraph_pooling(schema, pooling=None):
+    """Missing fields retain the readout of already-saved v2/v3 configs."""
+    if schema not in HYPERGRAPH_SCHEMAS:
+        raise ValueError(f'Unknown hypergraph schema: {schema}')
+    if pooling is None:
+        return 'region_mean' if schema == LEGACY_HYPERGRAPH_SCHEMA else 'hierarchical_attention'
+    allowed = ('region_mean',) if schema == LEGACY_HYPERGRAPH_SCHEMA else HYPERGRAPH_POOLING_MODES[:2]
+    if pooling not in allowed:
+        raise ValueError(f'Hypergraph schema {schema} supports pooling {allowed}, got {pooling!r}')
+    return pooling
+
+
+def apply_hypergraph_options(config, schema=None, pooling=None):
+    """Set explicit run options while retaining omitted checkpoint options."""
+    model = config['model']
+    if schema is not None:
+        model['hypergraph_schema'] = schema
+        model['hypergraph_pooling'] = (
+            HYPERGRAPH_POOLING if schema == HYPERGRAPH_SCHEMA else 'region_mean'
+        )
+    selected_schema = model.get('hypergraph_schema', LEGACY_HYPERGRAPH_SCHEMA)
+    model['hypergraph_pooling'] = resolve_hypergraph_pooling(
+        selected_schema, pooling if pooling is not None else model.get('hypergraph_pooling'),
+    )
+    return config
+
+
+def hypergraph_run_components(model_config):
+    """New readouts get isolated paths; existing checkpoint paths stay valid."""
+    schema = model_config.get('hypergraph_schema', LEGACY_HYPERGRAPH_SCHEMA)
+    pooling = resolve_hypergraph_pooling(schema, model_config.get('hypergraph_pooling'))
+    return [schema, 'pool_defect_mean'] if pooling == 'defect_mean' else [schema]
 
 
 def _base_optim():
@@ -299,6 +365,9 @@ def _finalize_config(config, model, dataset):
         config['model']['gcn_blocks'] = ALIGNN_GCN_BLOCKS
         config['model']['max_neighbors'] = ALIGNN_MAX_NEIGHBORS
         config['model']['hetero_node_norm'] = ALIGNN_HETERO_NODE_NORM
+        if config['task'] in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
+            config['model']['hetero_feature_norm'] = 'layernorm'
+            config['model']['hetero_pooling'] = 'defect_mean'
     if dataset in (
             'vacancy', 'vacancy_mos2', 'vacancy_wse2',
             '2dmd_low', '2dmd_mos2', '2dmd_wse2',
@@ -401,6 +470,7 @@ def get_config(model: str, dataset: str, mode: str):
         config['task'] = f'{model}_{mode}'
         config['model']['hypergraph_radius'] = 3.0
         config['model']['hypergraph_schema'] = HYPERGRAPH_SCHEMA
+        config['model']['hypergraph_pooling'] = HYPERGRAPH_POOLING
         config['model']['n_heads'] = 4
         config['model']['dropout'] = 0.0
         return _finalize_config(config, model, dataset)

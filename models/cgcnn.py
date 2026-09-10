@@ -74,12 +74,16 @@ class HyperCGCNN(nn.Module):
             n_heads=4,
             dropout=0.0,
             classification=False,
+            hypergraph_schema='per_defect_neighborhood_v2',
+            hypergraph_pooling=None,
     ):
         super().__init__()
         self.classification = classification
+        self.is_v3 = hypergraph_schema == 'defect_global_attention_v3'
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
         self.convs = nn.ModuleList([
-            CGConv(
+            AttentionCGConv(atom_fea_len, nbr_fea_len, n_heads=n_heads)
+            if self.is_v3 else CGConv(
                 channels=(atom_fea_len, atom_fea_len),
                 dim=nbr_fea_len,
                 batch_norm=True,
@@ -91,9 +95,14 @@ class HyperCGCNN(nn.Module):
             n_steps=n_conv,
             heads=n_heads,
             dropout=dropout,
+            schema=hypergraph_schema,
+            pooling=hypergraph_pooling,
         )
-        self.pooling = MeanAggregation()
-        self.conv_to_fc = nn.Linear(4 * atom_fea_len, h_fea_len)
+        if not self.hypergraph.defect_mean:
+            self.pooling = (AtomTypeGlobalAttentionReadout(atom_fea_len)
+                            if self.is_v3 else MeanAggregation())
+        readout_dim = atom_fea_len if self.hypergraph.defect_mean else 4 * atom_fea_len
+        self.conv_to_fc = nn.Linear(readout_dim, h_fea_len)
 
         if n_h > 1:
             self.fcs = nn.ModuleList([
@@ -138,10 +147,12 @@ class HyperCGCNN(nn.Module):
         )
         atom_fea = self.hypergraph.add_region_features(atom_fea, region_type)
         for step, conv_func in enumerate(self.convs):
+            kwargs = {'node_type': region_type.eq(0).long()} if self.is_v3 else {}
             atom_fea = conv_func(
                 x=atom_fea,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
+                **kwargs,
             )
             atom_fea = self.hypergraph.update(
                 step,
@@ -151,7 +162,6 @@ class HyperCGCNN(nn.Module):
                 num_hyperedges,
             )
 
-        global_pool = self.pooling(atom_fea, batch)
         region_pool = self.hypergraph.pool(
             atom_fea,
             hyperedge_index,
@@ -160,7 +170,12 @@ class HyperCGCNN(nn.Module):
             num_graphs,
             num_hyperedges,
         )
-        crys_fea = torch.cat([global_pool, region_pool], dim=-1)
+        if self.hypergraph.defect_mean:
+            crys_fea = region_pool
+        else:
+            kwargs = {'node_type': region_type.eq(0).long()} if self.is_v3 else {}
+            global_pool = self.pooling(atom_fea, batch, **kwargs)
+            crys_fea = torch.cat([global_pool, region_pool], dim=-1)
         crys_fea = F.softplus(self.conv_to_fc(F.softplus(crys_fea)))
         if self.classification:
             crys_fea = self.dropout(crys_fea)

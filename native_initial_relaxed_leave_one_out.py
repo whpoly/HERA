@@ -34,7 +34,11 @@ import pandas as pd
 import torch
 from sklearn.model_selection import GroupShuffleSplit
 
-from .config.defaults import VALID_MODES
+from .config.defaults import (
+    VALID_MODES, HYPERGRAPH_POOLING_MODES, apply_hypergraph_options, hypergraph_run_components,
+    resolve_hypergraph_pooling,
+    ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
+)
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
 from .main import (
     ALIGNN_NODE_NORM_MODES,
@@ -900,20 +904,27 @@ def expand_leave_one_out_runs(
     radii,
     norm_values=None,
     hypergraph_radius=None,
+    hypergraph_schema=None,
+    hypergraph_pooling=None,
+    hetero_feature_norm=None,
+    hetero_pooling=None,
 ):
     """Build isolated LOO run specs and apply hypergraph-region settings."""
     model_modes = modes_for_model(model_name, requested_modes)
-    runs = expand_mode_runs(model_name, model_modes, radii)
+    runs = expand_mode_runs(
+        model_name, model_modes, radii,
+        hetero_feature_norm=hetero_feature_norm, hetero_pooling=hetero_pooling,
+    )
     expanded = []
     for run in runs:
-        if (
-            run["mode"] in {"hypergraph", "hypergraph_was"}
-            and hypergraph_radius is not None
-        ):
-            radius = float(hypergraph_radius)
-            run["config"]["model"]["hypergraph_radius"] = radius
-            schema = run["config"]["model"]["hypergraph_schema"]
-            run["label"] = f'{run["label"]}_r{radius:g}_{schema}'
+        if run['mode'] in {'hypergraph', 'hypergraph_was'}:
+            apply_hypergraph_options(run['config'], hypergraph_schema, hypergraph_pooling)
+            if hypergraph_radius is not None:
+                radius = float(hypergraph_radius)
+                run['config']['model']['hypergraph_radius'] = radius
+                run['label'] = f'{run["label"]}_r{radius:g}'
+            components = hypergraph_run_components(run['config']['model'])
+            run['label'] += '_' + '_'.join(components)
         expanded.extend(
             expand_alignn_node_norm_runs(
                 [run],
@@ -936,7 +947,7 @@ def build_alignn_hypergraph_comparison(summary_df):
     baseline = alignn[mode.eq("full")].copy()
     hypergraph = alignn[
         mode.str.match(
-            r"^hypergraph(?:_r[^_]+)?(?:_per_defect_neighborhood_v2)?$"
+            r"^hypergraph(?:_r[^_]+)?(?:_(?:per_defect_neighborhood_v2|defect_global_attention_v3))?(?:_pool_defect_mean)?$"
         )
     ].copy()
     if baseline.empty or hypergraph.empty:
@@ -954,11 +965,13 @@ def build_alignn_hypergraph_comparison(summary_df):
             **{metric: f"hypergraph_alignn_{metric}" for metric in keep_metrics},
         }
     )
+    if hypergraph.duplicated(keys + ['hypergraph_mode']).any():
+        raise ValueError('Duplicate hypergraph measurements for the same material, protocol, seed and mode')
     paired = baseline.merge(
         hypergraph,
         on=keys,
         how="inner",
-        validate="one_to_one",
+        validate="one_to_many",
     )
     if paired.empty:
         return paired
@@ -990,8 +1003,12 @@ def aggregate_alignn_hypergraph_comparison(comparison_df):
     if comparison_df.empty:
         return pd.DataFrame()
     rows = []
-    for protocol, group in comparison_df.groupby("protocol", sort=False):
-        row = {"protocol": protocol, "n_pairs": len(group)}
+    group_keys = ['protocol']
+    if 'hypergraph_mode' in comparison_df:
+        group_keys.append('hypergraph_mode')
+    for key, group in comparison_df.groupby(group_keys, sort=False):
+        key = key if isinstance(key, tuple) else (key,)
+        row = {**dict(zip(group_keys, key)), 'n_pairs': len(group)}
         for metric in COMPARISON_METRICS:
             baseline_col = f"alignn_{metric}"
             hypergraph_col = f"hypergraph_alignn_{metric}"
@@ -1022,6 +1039,9 @@ def plot_alignn_hypergraph_comparison(aggregate_df, run_dir):
     import matplotlib.pyplot as plt
 
     labels = [PROTOCOLS.get(p, {"display": p})["display"] for p in aggregate_df["protocol"]]
+    if 'hypergraph_mode' in aggregate_df:
+        labels = [f'{label}\n{mode_display_name(mode)}'
+                  for label, mode in zip(labels, aggregate_df['hypergraph_mode'])]
     x = np.arange(len(labels), dtype=float)
     width = 0.36
     fig, ax = plt.subplots(figsize=(max(7.2, 2.7 * len(labels)), 5.2))
@@ -1870,6 +1890,8 @@ def write_summary_markdown(summary_df, skipped_df, run_dir):
         )
         for row in aggregate_df.itertuples():
             protocol = PROTOCOLS.get(row.protocol, {"display": row.protocol})["display"]
+            if hasattr(row, 'hypergraph_mode'):
+                protocol += f' / {mode_display_name(row.hypergraph_mode)}'
             lines.append(
                 "| {protocol} | {pairs} | {baseline:.3f} | {hetero:.3f} | "
                 "{delta:+.3f} | {win_rate:.1%} |".format(
@@ -1927,6 +1949,10 @@ def run_single_seed(args, run_dir, radii):
             radii,
             norm_values=args.alignn_hetero_node_norm,
             hypergraph_radius=args.hypergraph_radius,
+            hypergraph_schema=getattr(args, 'hypergraph_schema', None),
+            hypergraph_pooling=getattr(args, 'hypergraph_pooling', None),
+            hetero_feature_norm=getattr(args, 'alignn_hetero_feature_norm', None),
+            hetero_pooling=getattr(args, 'alignn_hetero_pooling', None),
         )
         for run in runs:
             run["config"]["optim"].update(
@@ -2124,6 +2150,9 @@ def main():
             "(default: 3.0)."
         ),
     )
+    from .config.defaults import HYPERGRAPH_SCHEMAS
+    parser.add_argument('--hypergraph-schema', choices=HYPERGRAPH_SCHEMAS, default=None)
+    parser.add_argument('--hypergraph-pooling', choices=HYPERGRAPH_POOLING_MODES, default=None)
     parser.add_argument(
         "--materials",
         "--material",
@@ -2152,6 +2181,14 @@ def main():
             "isolated checkpoint directory."
         ),
     )
+    parser.add_argument(
+        '--alignn-hetero-feature-norm', choices=ALIGNN_HETERO_FEATURE_NORMS,
+        default=None, help='HeteroALIGNN feature normalization (default: layernorm)',
+    )
+    parser.add_argument(
+        '--alignn-hetero-pooling', choices=ALIGNN_HETERO_POOLING_MODES,
+        default=None, help='HeteroALIGNN pooling (default: defect_mean)',
+    )
     args = parser.parse_args()
     args.seeds = parse_seed_values(args.seeds, parser)
     if args.alignn_hetero_node_norm is not None:
@@ -2173,6 +2210,11 @@ def main():
         parser.error("--finetune-backbone-lr must be positive.")
     if args.hypergraph_radius < 0:
         parser.error("--hypergraph-radius must be non-negative.")
+    try:
+        resolve_hypergraph_pooling(args.hypergraph_schema or HYPERGRAPH_SCHEMAS[-1],
+                                  args.hypergraph_pooling)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     radii = parse_radius_values(args.r, parser)
     init_elem_embedding(args.atom_init)

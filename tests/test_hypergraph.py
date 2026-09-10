@@ -248,7 +248,7 @@ class HypergraphModelTests(unittest.TestCase):
             self.assertEqual(config["model"]["hypergraph_radius"], 3.0)
             self.assertEqual(
                 config["model"]["hypergraph_schema"],
-                "per_defect_neighborhood_v2",
+                "defect_global_attention_v3",
             )
         self.assertEqual(representation_for_mode("hypergraph"), "hetero")
         self.assertEqual(dataset_index_for_mode("hypergraph"), 1)

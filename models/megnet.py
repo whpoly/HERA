@@ -90,13 +90,18 @@ class HyperMEGNet(nn.Module):
             dropout=0.0,
             vertex_aggregation="mean",
             global_aggregation="mean",
+            hypergraph_schema='per_defect_neighborhood_v2',
+            hypergraph_pooling=None,
     ):
         super().__init__()
+        self.is_v3 = hypergraph_schema == 'defect_global_attention_v3'
+        physical_module = AtomTypeAttentionMegnetModule if self.is_v3 else MegnetModule
+        attention_kwargs = {'n_heads': n_heads} if self.is_v3 else {}
         self.embedded = node_input_shape is None
         if self.embedded:
             node_input_shape = node_embedding_size
             self.emb = nn.Embedding(ATOMIC_NUMBERS, node_embedding_size)
-        self.m1 = MegnetModule(
+        self.m1 = physical_module(
             edge_input_shape,
             node_input_shape,
             state_input_shape,
@@ -104,15 +109,17 @@ class HyperMEGNet(nn.Module):
             embed_size=embedding_size,
             vertex_aggregation=vertex_aggregation,
             global_aggregation=global_aggregation,
+            **attention_kwargs,
         )
         self.blocks = nn.ModuleList([
-            MegnetModule(
+            physical_module(
                 embedding_size,
                 embedding_size,
                 embedding_size,
                 embed_size=embedding_size,
                 vertex_aggregation=vertex_aggregation,
                 global_aggregation=global_aggregation,
+                **attention_kwargs,
             )
             for _ in range(n_blocks - 1)
         ])
@@ -121,11 +128,15 @@ class HyperMEGNet(nn.Module):
             n_steps=n_blocks,
             heads=n_heads,
             dropout=dropout,
+            schema=hypergraph_schema,
+            pooling=hypergraph_pooling,
         )
-        self.se = Set2Set(embedding_size, 1)
-        self.sv = Set2Set(embedding_size, 1)
+        if not self.hypergraph.defect_mean:
+            self.se = Set2Set(embedding_size, 1)
+            self.sv = Set2Set(embedding_size, 1)
+        readout_dim = embedding_size if self.hypergraph.defect_mean else 8 * embedding_size
         self.hiddens = nn.Sequential(
-            nn.Linear(8 * embedding_size, 2 * embedding_size), ShiftedSoftplus(),
+            nn.Linear(readout_dim, 2 * embedding_size), ShiftedSoftplus(),
             nn.Linear(2 * embedding_size, embedding_size), ShiftedSoftplus(),
             nn.Linear(embedding_size, 1),
         )
@@ -147,6 +158,13 @@ class HyperMEGNet(nn.Module):
         else:
             x = x.float()
 
+        if self.is_v3:
+            # Types are needed before the first physical attention block.
+            _, _, hyperedge_index, hyperedge_type, region_type = self.hypergraph.normalize_inputs(
+                x, hyperedge_index, batch=batch, state=state,
+                hyperedge_type=hyperedge_type, region_type=region_type,
+            )
+        attention_kwargs = {'node_type': region_type.eq(0).long()} if self.is_v3 else {}
         x, edge_attr, state = self.m1(
             x,
             edge_index,
@@ -154,6 +172,7 @@ class HyperMEGNet(nn.Module):
             state,
             batch,
             bond_batch,
+            **attention_kwargs,
         )
         (
             num_graphs,
@@ -187,6 +206,7 @@ class HyperMEGNet(nn.Module):
                 state,
                 batch,
                 bond_batch,
+                **attention_kwargs,
             )
             x = self.hypergraph.update(
                 step,
@@ -196,7 +216,6 @@ class HyperMEGNet(nn.Module):
                 num_hyperedges,
             )
 
-        node_pool = self.sv(x, batch, dim_size=num_graphs)
         region_pool = self.hypergraph.pool(
             x,
             hyperedge_index,
@@ -205,6 +224,9 @@ class HyperMEGNet(nn.Module):
             num_graphs,
             num_hyperedges,
         )
+        if self.hypergraph.defect_mean:
+            return self.hiddens(region_pool)
+        node_pool = self.sv(x, batch, dim_size=num_graphs)
         if edge_attr.size(0) == 0:
             edge_pool = x.new_zeros((num_graphs, 2 * x.size(-1)))
         else:

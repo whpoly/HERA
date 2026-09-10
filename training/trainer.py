@@ -274,6 +274,10 @@ class MEGNetTrainer:
                 centers=np.linspace(0, self.config['model']['cutoff'], self.config['model']['edge_embed_size'])
             )
         atom_converter = AtomFeaturesExtractor(self.config["model"]["atom_features"], self.config['task'])
+        hypergraph_schema = self.config['model'].get(
+            'hypergraph_schema', 'per_defect_neighborhood_v2',
+        )
+        hypergraph_pooling = self.config['model'].get('hypergraph_pooling')
         self.converter = SimpleCrystalConverter(
             self.config['task'],
             bond_converter=bond_converter,
@@ -282,6 +286,7 @@ class MEGNetTrainer:
             local_radius=self.config["model"].get("local_radius", self.config["model"]["cutoff"]),
             max_neighbors=self.config["model"].get("max_neighbors"),
             hypergraph_radius=self.config["model"].get("hypergraph_radius", 3.0),
+            hypergraph_schema=hypergraph_schema,
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
         )
@@ -291,6 +296,8 @@ class MEGNetTrainer:
         # Build model based on task string:  {model}_{mode}
         if task in PURE_HYPERGRAPH_TASKS:
             self.model = RegionHypergraphNet(
+                hypergraph_schema=hypergraph_schema,
+                hypergraph_pooling=hypergraph_pooling,
                 node_input_shape=atom_converter.get_shape(),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
@@ -300,6 +307,8 @@ class MEGNetTrainer:
             ).to(self.device)
         elif task in MEGNET_HYPERGRAPH_TASKS:
             self.model = HyperMEGNet(
+                hypergraph_schema=hypergraph_schema,
+                hypergraph_pooling=hypergraph_pooling,
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 node_input_shape=atom_converter.get_shape(),
                 state_input_shape=self.config['model']['state_input_shape'],
@@ -312,6 +321,8 @@ class MEGNetTrainer:
             ).to(self.device)
         elif task in CGCNN_HYPERGRAPH_TASKS:
             self.model = HyperCGCNN(
+                hypergraph_schema=hypergraph_schema,
+                hypergraph_pooling=hypergraph_pooling,
                 orig_atom_fea_len=atom_converter.get_shape(),
                 nbr_fea_len=bond_converter.get_shape(eos=use_eos),
                 atom_fea_len=self.config['model']['embedding_size'],
@@ -322,6 +333,8 @@ class MEGNetTrainer:
             ).to(self.device)
         elif task in ALIGNN_HYPERGRAPH_TASKS:
             self.model = HyperALIGNN(
+                hypergraph_schema=hypergraph_schema,
+                hypergraph_pooling=hypergraph_pooling,
                 node_input_shape=atom_converter.get_shape(),
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 hidden_dim=self.config['model']['embedding_size'],
@@ -423,6 +436,8 @@ class MEGNetTrainer:
                     "layernorm",
                 ),
                 cutoff=self.config["model"]["cutoff"],
+                feature_norm=self.config['model'].get('hetero_feature_norm', 'batchnorm'),
+                pooling=self.config['model'].get('hetero_pooling', 'type_mean'),
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(

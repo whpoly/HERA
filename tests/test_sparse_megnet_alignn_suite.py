@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from HERA.config.defaults import HYPERGRAPH_SCHEMA
+from HERA.config.defaults import HYPERGRAPH_SCHEMA, get_config, hypergraph_run_components
 from HERA.sparse_megnet_alignn import (
     VALID_ALIGNN_MODES,
     alignn_result_prefix,
@@ -46,7 +46,7 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
         if mode in ('hetero', 'hetero_fixed_pool', 'hetero_was'):
             path /= f'r{radius}'
         elif mode in ('hypergraph', 'hypergraph_was'):
-            path /= HYPERGRAPH_SCHEMA
+            path = path.joinpath(*hypergraph_run_components(get_config('alignn', dataset, mode)['model']))
         return path / f'seed{seed}_test_predictions.csv'
 
     def test_mode_paths_match_main_output_layout(self):
@@ -57,13 +57,13 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
         )
         self.assertEqual(
             prediction_file_path(root, 'alignn', '2dmd_mos2', 'hetero', 123),
-            root / 'alignn/2dmd_mos2/hetero/r0/seed123_test_predictions.csv',
+            root / 'alignn/2dmd_mos2/hetero/r0/features_layernorm/pool_defect_mean/seed123_test_predictions.csv',
         )
         self.assertEqual(
             prediction_file_path(root, 'alignn', '2dmd_mos2', 'hypergraph', 123),
             root / (
                 'alignn/2dmd_mos2/hypergraph/'
-                'per_defect_neighborhood_v2/seed123_test_predictions.csv'
+                'defect_global_attention_v3/pool_defect_mean/seed123_test_predictions.csv'
             ),
         )
 
@@ -100,15 +100,15 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
             [
                 'megnet_sparse',
                 'alignn_full',
-                'alignn_hetero_r0',
-                'alignn_hypergraph',
+                'alignn_hetero_r0_features_layernorm_pool_defect_mean',
+                'alignn_hypergraph_pool_defect_mean',
             ],
         )
         self.assertEqual(written_rows[0]['source_id'], 'a')
         self.assertEqual(float(written_rows[0]['megnet_sparse_prediction']), 1.1)
         self.assertEqual(float(written_rows[0]['alignn_full_prediction']), 0.9)
-        self.assertEqual(float(written_rows[0]['alignn_hetero_r0_prediction']), 1.0)
-        self.assertEqual(float(written_rows[0]['alignn_hypergraph_prediction']), 1.2)
+        self.assertEqual(float(written_rows[0]['alignn_hetero_r0_features_layernorm_pool_defect_mean_prediction']), 1.0)
+        self.assertEqual(float(written_rows[0]['alignn_hypergraph_pool_defect_mean_prediction']), 1.2)
         self.assertAlmostEqual(float(written_rows[0]['megnet_sparse_test_mae']), 0.15)
         self.assertAlmostEqual(float(written_rows[0]['alignn_full_test_mae']), 0.1)
 
@@ -158,6 +158,20 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
         self.assertEqual(args.dataset, ['2dmd_mos2'])
         self.assertEqual(args.alignn_mode, list(VALID_ALIGNN_MODES))
         self.assertEqual(args.alignn_r, ['0'])
+
+    def test_pooling_variants_keep_distinct_prediction_columns(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            schema_dir = root / 'alignn/2dmd_mos2/hypergraph' / HYPERGRAPH_SCHEMA
+            for folder, prediction in [(schema_dir, 1.2), (schema_dir / 'pool_defect_mean', 1.1)]:
+                self.write_predictions(folder / 'seed123_test_predictions.csv', [('a', 1., prediction)])
+            self.write_predictions(prediction_file_path(root, 'megnet', '2dmd_mos2', 'sparse', 123),
+                                   [('a', 1., 1.3)])
+            _, rows, prefixes = merge_prediction_files(root, ['2dmd_mos2'], [123], ['hypergraph'])
+        self.assertIn('alignn_hypergraph', prefixes)
+        self.assertIn('alignn_hypergraph_pool_defect_mean', prefixes)
+        self.assertEqual(float(rows[0]['alignn_hypergraph_prediction']), 1.2)
+        self.assertEqual(float(rows[0]['alignn_hypergraph_pool_defect_mean_prediction']), 1.1)
 
     def test_all_alignn_modes_and_only_selected_radius_are_merged(self):
         dataset = '2dmd_mos2'

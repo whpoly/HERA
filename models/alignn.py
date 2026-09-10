@@ -337,14 +337,14 @@ class HeteroRelationConv(nn.Module):
     the result in a separate slot for the node-type-specific fusion FFN.
     """
 
-    def __init__(self, channels, edge_dim):
+    def __init__(self, channels, edge_dim, normalization="batchnorm"):
         super().__init__()
         self.channels = channels
         self.src_gate = nn.Linear(channels, channels)
         self.dst_gate = nn.Linear(channels, channels)
         self.edge_gate = nn.Linear(edge_dim, channels)
         self.message_update = nn.Linear(channels, channels)
-        self.bn_edges = SafeBatchNorm1d(channels)
+        self.bn_edges = _make_feature_norm(channels, normalization)
 
     @staticmethod
     def _split_nodes(x):
@@ -660,13 +660,19 @@ class HeteroALIGNNLayer(nn.Module):
     """Heterogeneous ALIGNN block for atom/defect node and edge types."""
 
     def __init__(self, hidden_dim, angle_dim, metadata,
-                 vertex_aggregation="add", node_delta_norm="layernorm"):
+                 vertex_aggregation="add", node_delta_norm="layernorm",
+                 feature_norm="batchnorm"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
-        self.line_conv = GatedGraphConv(hidden_dim, hidden_dim, aggr=vertex_aggregation)
+        self.line_conv = GatedGraphConv(
+            hidden_dim, hidden_dim, aggr=vertex_aggregation,
+            normalization=feature_norm,
+        )
         self.atom_convs = nn.ModuleDict({
-            parameter_key: HeteroRelationConv(hidden_dim, hidden_dim)
+            parameter_key: HeteroRelationConv(
+                hidden_dim, hidden_dim, normalization=feature_norm,
+            )
             for parameter_key in dict.fromkeys(
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
@@ -715,12 +721,14 @@ class HeteroGraphConvLayer(nn.Module):
     """Heterogeneous graph-conv block after ALIGNN line-graph blocks."""
 
     def __init__(self, hidden_dim, metadata, vertex_aggregation="add",
-                 node_delta_norm="layernorm"):
+                 node_delta_norm="layernorm", feature_norm="batchnorm"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = nn.ModuleDict({
-            parameter_key: HeteroRelationConv(hidden_dim, hidden_dim)
+            parameter_key: HeteroRelationConv(
+                hidden_dim, hidden_dim, normalization=feature_norm,
+            )
             for parameter_key in dict.fromkeys(
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
@@ -827,26 +835,36 @@ class HyperALIGNN(nn.Module):
             dropout=0.0,
             vertex_aggregation="add",
             cutoff=8.0,
+            hypergraph_schema='per_defect_neighborhood_v2',
+            hypergraph_pooling=None,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.node_embedding = MLPLayer(node_input_shape, hidden_dim)
+        self.is_v3 = hypergraph_schema == 'defect_global_attention_v3'
+        normalization = 'layernorm' if self.is_v3 else 'batchnorm'
+        self.node_embedding = MLPLayer(node_input_shape, hidden_dim, normalization=normalization)
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = _official_feature_embedding(
             edge_input_shape,
             hidden_dim,
+            normalization=normalization,
         )
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(
             self.angle_expansion.out_features,
             hidden_dim,
+            normalization=normalization,
         )
         self.layers = nn.ModuleList([
-            ALIGNNLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            AttentionALIGNNLayer(hidden_dim, self.angle_expansion.out_features,
+                                n_heads=n_heads, vertex_aggregation=vertex_aggregation,
+                                normalization=normalization)
+            if self.is_v3 else ALIGNNLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
             for _ in range(n_blocks)
         ])
         self.gcn_layers = nn.ModuleList([
-            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation)
+            GraphConvLayer(hidden_dim, vertex_aggregation=vertex_aggregation,
+                           normalization=normalization)
             for _ in range(gcn_blocks)
         ])
         self.hypergraph = RegionHypergraphInteraction(
@@ -854,9 +872,14 @@ class HyperALIGNN(nn.Module):
             n_steps=n_blocks + gcn_blocks,
             heads=n_heads,
             dropout=dropout,
+            schema=hypergraph_schema,
+            pooling=hypergraph_pooling,
         )
+        if self.is_v3 and not self.hypergraph.defect_mean:
+            self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
+        readout_dim = hidden_dim if self.hypergraph.defect_mean else 4 * hidden_dim
         self.readout = nn.Sequential(
-            nn.Linear(4 * hidden_dim, 2 * hidden_dim), nn.SiLU(),
+            nn.Linear(readout_dim, 2 * hidden_dim), nn.SiLU(),
             nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, 1),
         )
@@ -910,12 +933,14 @@ class HyperALIGNN(nn.Module):
 
         step = 0
         for layer in self.layers:
+            kwargs = {'node_type': region_type.eq(0).long()} if self.is_v3 else {}
             x, edge_attr, angle_attr = layer(
                 x,
                 edge_index,
                 edge_attr,
                 line_edge_index,
                 angle_attr,
+                **kwargs,
             )
             x = self.hypergraph.update(
                 step,
@@ -936,13 +961,6 @@ class HyperALIGNN(nn.Module):
             )
             step += 1
 
-        global_pool = _pool_mean_or_zeros(
-            x,
-            batch,
-            num_graphs,
-            self.hidden_dim,
-            x,
-        )
         region_pool = self.hypergraph.pool(
             x,
             hyperedge_index,
@@ -951,6 +969,12 @@ class HyperALIGNN(nn.Module):
             num_graphs,
             num_hyperedges,
         )
+        if self.hypergraph.defect_mean:
+            return self.readout(region_pool)
+        if self.is_v3:
+            global_pool = self.node_readout(x, batch, node_type=region_type.eq(0).long())
+        else:
+            global_pool = _pool_mean_or_zeros(x, batch, num_graphs, self.hidden_dim, x)
         return self.readout(torch.cat([global_pool, region_pool], dim=-1))
 
 
@@ -1161,7 +1185,11 @@ class DefiNetALIGNN(nn.Module):
 
 
 class HeteroALIGNN(nn.Module):
-    """Heterogeneous ALIGNN with atom/defect node pooling."""
+    """Heterogeneous ALIGNN with configurable feature norms and defect pooling.
+
+    Constructor defaults preserve pre-existing checkpoints. New training
+    configs select LayerNorm throughout and mean pooling over actual defects.
+    """
 
     def __init__(
             self,
@@ -1176,6 +1204,8 @@ class HeteroALIGNN(nn.Module):
             fixed_pooling=False,
             node_delta_norm="layernorm",
             cutoff=8.0,
+            feature_norm="batchnorm",
+            pooling="type_mean",
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
@@ -1183,20 +1213,28 @@ class HeteroALIGNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.fixed_pooling = fixed_pooling
         self.node_delta_norm = node_delta_norm
+        if feature_norm not in {"batchnorm", "layernorm"}:
+            raise ValueError("feature_norm must be batchnorm or layernorm")
+        if pooling not in {"type_mean", "defect_mean"}:
+            raise ValueError("pooling must be type_mean or defect_mean")
+        self.feature_norm = feature_norm
+        self.pooling = pooling
         self.node_embedding = nn.ModuleDict({
-            node_type: MLPLayer(node_input_shape, hidden_dim)
+            node_type: MLPLayer(node_input_shape, hidden_dim, normalization=feature_norm)
             for node_type in self.node_types
         })
         self.distance_expansion = RBFExpansion(0.0, cutoff, edge_input_shape)
         self.edge_embedding = nn.ModuleDict({
-            parameter_key: _official_feature_embedding(edge_input_shape, hidden_dim)
+            parameter_key: _official_feature_embedding(
+                edge_input_shape, hidden_dim, normalization=feature_norm,
+            )
             for parameter_key in dict.fromkeys(
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
         })
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(
-            self.angle_expansion.out_features, hidden_dim
+            self.angle_expansion.out_features, hidden_dim, normalization=feature_norm,
         )
         self.layers = nn.ModuleList([
             HeteroALIGNNLayer(
@@ -1205,6 +1243,7 @@ class HeteroALIGNN(nn.Module):
                 metadata,
                 vertex_aggregation=vertex_aggregation,
                 node_delta_norm=node_delta_norm,
+                feature_norm=feature_norm,
             )
             for _ in range(n_blocks)
         ])
@@ -1214,11 +1253,12 @@ class HeteroALIGNN(nn.Module):
                 metadata,
                 vertex_aggregation=vertex_aggregation,
                 node_delta_norm=node_delta_norm,
+                feature_norm=feature_norm,
             )
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim if pooling == "defect_mean" else 2 * hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -1263,7 +1303,8 @@ class HeteroALIGNN(nn.Module):
         default_value = 1 if node_type == "defect" else 0
         return torch.full((x.size(0),), default_value, dtype=torch.long, device=x.device)
 
-    def _pool_fixed_type(self, x_dict, batch_dict, pool_type_dict, target_type, num_graphs, reference):
+    def _pool_fixed_type(self, x_dict, batch_dict, pool_type_dict, target_type,
+                         num_graphs, reference, require_nonempty=False):
         features = []
         batches = []
         pool_type_dict = {} if pool_type_dict is None else pool_type_dict
@@ -1276,16 +1317,23 @@ class HeteroALIGNN(nn.Module):
             pool_type = self._pool_type_for_node_store(
                 pool_type_dict.get(node_type), node_type, x
             )
+            if pool_type.numel() != x.size(0) or not torch.all((pool_type == 0) | (pool_type == 1)):
+                raise ValueError("pool_type must contain one binary marker per node")
             mask = pool_type.eq(target_type)
             if torch.count_nonzero(mask) == 0:
                 continue
             features.append(x[mask])
             batches.append(batch[mask])
         if not features:
+            if require_nonempty:
+                raise ValueError("defect_mean pooling requires at least one defect per graph")
             return _pool_mean_or_zeros(None, None, num_graphs, self.hidden_dim, reference)
+        pooled_batch = torch.cat(batches, dim=0)
+        if require_nonempty and torch.any(torch.bincount(pooled_batch, minlength=num_graphs) == 0):
+            raise ValueError("defect_mean pooling requires at least one defect per graph")
         return _pool_mean_or_zeros(
             torch.cat(features, dim=0),
-            torch.cat(batches, dim=0),
+            pooled_batch,
             num_graphs,
             self.hidden_dim,
             reference,
@@ -1327,6 +1375,14 @@ class HeteroALIGNN(nn.Module):
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)
+        if self.pooling == "defect_mean":
+            # pool_type retains the actual defects when r > 0 also marks
+            # surrounding pristine sites as members of the defect node store.
+            defect_pool = self._pool_fixed_type(
+                x_dict, batch_dict, pool_type, 1, num_graphs, reference,
+                require_nonempty=True,
+            )
+            return self.readout(defect_pool)
         if self.fixed_pooling:
             atom_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 0, num_graphs, reference)
             defect_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 1, num_graphs, reference)

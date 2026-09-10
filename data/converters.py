@@ -175,6 +175,7 @@ class SimpleCrystalConverter:
             max_neighbors=None,
             hypergraph_radius=3.0,
             ignore_state=False,
+            hypergraph_schema='per_defect_neighborhood_v2',
     ):
         self.cutoff = cutoff
         self.local_radius = cutoff if local_radius is None else local_radius
@@ -182,6 +183,10 @@ class SimpleCrystalConverter:
         if self.max_neighbors is not None and self.max_neighbors < 1:
             raise ValueError("max_neighbors must be >= 1")
         self.hypergraph_radius = float(hypergraph_radius)
+        from ..config.defaults import HYPERGRAPH_SCHEMAS
+        if hypergraph_schema not in HYPERGRAPH_SCHEMAS:
+            raise ValueError(f"Unknown hypergraph schema: {hypergraph_schema}")
+        self.hypergraph_schema = hypergraph_schema
         if self.hypergraph_radius < 0:
             raise ValueError("hypergraph_radius must be >= 0")
         self.atom_converter = atom_converter if atom_converter else DummyConverter()
@@ -274,7 +279,7 @@ class SimpleCrystalConverter:
         return all_nbrs
 
     def _hypergraph_regions(self, structure):
-        """Build independent defect-core/local hyperedges plus one far field.
+        """Build the selected defect hypergraph without changing physical bonds.
 
         Every defect gets two distinct hyperedges: a singleton defect-core
         hyperedge and a local-neighborhood hyperedge containing that defect
@@ -285,7 +290,9 @@ class SimpleCrystalConverter:
 
         Node ``region_type`` remains an exclusive marker used for input region
         embeddings: 0=defect, 1=near at least one defect, 2=far pristine.
-        Hyperedge types use the same IDs for core/local/far readout pooling.
+        V3 replaces the singleton cores with one all-defect hyperedge and
+        omits the far-field hyperedge. Far pristine atoms remain in the
+        physical graph and keep region_type=2, with no hyperedge incidence.
         """
         defect_indices = [
             idx
@@ -306,6 +313,10 @@ class SimpleCrystalConverter:
         near_pristine = set()
         hyperedge_members = []
         hyperedge_types = []
+        legacy = self.hypergraph_schema == 'per_defect_neighborhood_v2'
+        if not legacy:
+            hyperedge_members.append(defect_indices)
+            hyperedge_types.append(0)
 
         for defect_idx in defect_indices:
             local_pristine = [
@@ -317,8 +328,9 @@ class SimpleCrystalConverter:
 
             # Keep defect identities separate even when multiple defects occur
             # in the same crystal.
-            hyperedge_members.append([defect_idx])
-            hyperedge_types.append(0)
+            if legacy:
+                hyperedge_members.append([defect_idx])
+                hyperedge_types.append(0)
 
             # The center defect anchors its own local environment; no other
             # defect is admitted to this hyperedge.
@@ -328,7 +340,7 @@ class SimpleCrystalConverter:
         far_pristine = [
             idx for idx in pristine_indices if idx not in near_pristine
         ]
-        if far_pristine:
+        if legacy and far_pristine:
             hyperedge_members.append(far_pristine)
             hyperedge_types.append(2)
 
