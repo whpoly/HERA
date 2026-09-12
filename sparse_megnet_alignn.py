@@ -76,7 +76,7 @@ def alignn_result_prefix(dataset_root, prediction_path):
     mode = parts[0]
     suffixes = [
         part for part in parts[1:]
-        if part.startswith(('r', 'norm_', 'pool_', 'features_'))
+        if part.startswith(('r', 'norm_', 'pool_', 'features_', 'updates_'))
     ]
     return '_'.join(('alignn', mode, *suffixes))
 

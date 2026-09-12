@@ -14,6 +14,7 @@ from .modules import (
     RelationFusionUpdate,
 )
 from .hypergraph import RegionHypergraphInteraction
+from ..config.defaults import validate_alignn_hetero_relations
 
 
 def _edge_type_key(edge_type):
@@ -352,7 +353,7 @@ class HeteroRelationConv(nn.Module):
             return x
         return x, x
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, x, edge_index, edge_attr, relation_adapter=None):
         x_src, x_dst = self._split_nodes(x)
         message_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
         gate_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
@@ -365,8 +366,15 @@ class HeteroRelationConv(nn.Module):
             + self.dst_gate(x_dst[dst])
             + self.edge_gate(edge_attr)
         )
+        messages = self.message_update(x_src)[src]
+        if relation_adapter is not None:
+            gate_delta, message_delta = relation_adapter(torch.cat(
+                [x_src[src], x_dst[dst], edge_attr], dim=-1,
+            )).chunk(2, dim=-1)
+            edge_update = edge_update + gate_delta
+            messages = messages + message_delta
         sigma = torch.sigmoid(edge_update)
-        messages = self.message_update(x_src)[src] * sigma
+        messages = messages * sigma
         message_sum.index_add_(
             0,
             dst,
@@ -378,6 +386,62 @@ class HeteroRelationConv(nn.Module):
         if edge_attr.size(-1) == self.channels:
             edge_update = edge_attr + edge_update
         return message_sum, gate_sum, edge_update
+
+
+class RelationResidualAdapter(nn.Module):
+    """Small relation-specific corrections to gate logits and message values."""
+
+    def __init__(self, channels, edge_dim, rank):
+        super().__init__()
+        self.down = nn.Linear(2 * channels + edge_dim, rank)
+        self.up = nn.Linear(rank, 2 * channels)
+        self.scale_logit = nn.Parameter(torch.tensor(-3.0))
+        # The first forward is exactly the shared model. Gradients can train
+        # the output projection immediately; the bottleneck follows thereafter.
+        nn.init.zeros_(self.up.weight)
+        nn.init.zeros_(self.up.bias)
+
+    def forward(self, inputs):
+        return self.scale_logit.sigmoid() * self.up(F.silu(self.down(inputs)))
+
+
+class SharedHeteroRelations(nn.Module):
+    """One message core per layer, optionally with independent relation adapters."""
+
+    def __init__(self, shared, relation_keys, mode, rank):
+        super().__init__()
+        self.shared = shared
+        self.relation_keys = tuple(relation_keys)
+        self.mode = mode
+        # Adapters must not change initialization of the remaining model when
+        # comparing shared and shared_residual under the same seed.
+        with torch.random.fork_rng(devices=[]):
+            self.adapters = nn.ModuleDict({
+                key: RelationResidualAdapter(shared.channels, shared.edge_gate.in_features, rank)
+                for key in self.relation_keys
+            } if mode == 'shared_residual' else {})
+
+    def forward(self, relation_key, x, edge_index, edge_attr):
+        if relation_key not in self.relation_keys:
+            raise KeyError(f'Unknown relation: {relation_key}')
+        adapter = self.adapters[relation_key] if self.mode == 'shared_residual' else None
+        return self.shared(x, edge_index, edge_attr, relation_adapter=adapter)
+
+
+def _make_hetero_relation_convs(hidden_dim, edge_types, feature_norm, mode, rank):
+    validate_alignn_hetero_relations(mode, rank)
+    # Initialize in the legacy order to keep embeddings, node fusion and the
+    # prediction head identical across relation modes at a fixed random seed.
+    convs = nn.ModuleDict({
+        key: HeteroRelationConv(hidden_dim, hidden_dim, normalization=feature_norm)
+        for key in dict.fromkeys(_edge_parameter_key(edge_type) for edge_type in edge_types)
+    })
+    if mode == 'independent':
+        return convs
+    if not convs:
+        raise ValueError('Shared hetero messages require at least one relation')
+    # The other independently initialized cores are discarded, not registered.
+    return SharedHeteroRelations(next(iter(convs.values())), tuple(convs), mode, rank)
 
 
 class HeteroNodeUpdate(nn.Module):
@@ -433,13 +497,13 @@ def _hetero_relation_update(
 
     for edge_type in edge_types:
         src_type, _, dst_type = edge_type
-        message_sum, gate_sum, edge_update = relation_convs[
-            _edge_parameter_key(edge_type)
-        ](
-            (x_dict[src_type], x_dict[dst_type]),
-            edge_index_dict[edge_type],
-            edge_attr_dict[edge_type],
-        )
+        relation_key = _edge_parameter_key(edge_type)
+        inputs = ((x_dict[src_type], x_dict[dst_type]),
+                  edge_index_dict[edge_type], edge_attr_dict[edge_type])
+        if isinstance(relation_convs, SharedHeteroRelations):
+            message_sum, gate_sum, edge_update = relation_convs(relation_key, *inputs)
+        else:
+            message_sum, gate_sum, edge_update = relation_convs[relation_key](*inputs)
         incoming_by_edge_type[edge_type] = (
             message_sum / (gate_sum + 1e-6)
         )
@@ -661,7 +725,7 @@ class HeteroALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, metadata,
                  vertex_aggregation="add", node_delta_norm="layernorm",
-                 feature_norm="batchnorm"):
+                 feature_norm="batchnorm", relation_mode="independent", relation_rank=8):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
@@ -669,14 +733,9 @@ class HeteroALIGNNLayer(nn.Module):
             hidden_dim, hidden_dim, aggr=vertex_aggregation,
             normalization=feature_norm,
         )
-        self.atom_convs = nn.ModuleDict({
-            parameter_key: HeteroRelationConv(
-                hidden_dim, hidden_dim, normalization=feature_norm,
-            )
-            for parameter_key in dict.fromkeys(
-                _edge_parameter_key(edge_type) for edge_type in self.edge_types
-            )
-        })
+        self.atom_convs = _make_hetero_relation_convs(
+            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank,
+        )
         self.node_updates = nn.ModuleDict({
             node_type: HeteroNodeUpdate(
                 hidden_dim,
@@ -721,18 +780,14 @@ class HeteroGraphConvLayer(nn.Module):
     """Heterogeneous graph-conv block after ALIGNN line-graph blocks."""
 
     def __init__(self, hidden_dim, metadata, vertex_aggregation="add",
-                 node_delta_norm="layernorm", feature_norm="batchnorm"):
+                 node_delta_norm="layernorm", feature_norm="batchnorm",
+                 relation_mode="independent", relation_rank=8):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
-        self.atom_convs = nn.ModuleDict({
-            parameter_key: HeteroRelationConv(
-                hidden_dim, hidden_dim, normalization=feature_norm,
-            )
-            for parameter_key in dict.fromkeys(
-                _edge_parameter_key(edge_type) for edge_type in self.edge_types
-            )
-        })
+        self.atom_convs = _make_hetero_relation_convs(
+            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank,
+        )
         self.node_updates = nn.ModuleDict({
             node_type: HeteroNodeUpdate(
                 hidden_dim,
@@ -837,6 +892,7 @@ class HyperALIGNN(nn.Module):
             cutoff=8.0,
             hypergraph_schema='per_defect_neighborhood_v2',
             hypergraph_pooling=None,
+            hypergraph_updates=None,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -874,6 +930,7 @@ class HyperALIGNN(nn.Module):
             dropout=dropout,
             schema=hypergraph_schema,
             pooling=hypergraph_pooling,
+            updates=hypergraph_updates,
         )
         if self.is_v3 and not self.hypergraph.defect_mean:
             self.node_readout = AtomTypeGlobalAttentionReadout(hidden_dim)
@@ -1188,7 +1245,8 @@ class HeteroALIGNN(nn.Module):
     """Heterogeneous ALIGNN with configurable feature norms and defect pooling.
 
     Constructor defaults preserve pre-existing checkpoints. New training
-    configs select LayerNorm throughout and mean pooling over actual defects.
+    configs select LayerNorm, actual-defect mean pooling and shared message
+    cores with small relation-specific residual adapters.
     """
 
     def __init__(
@@ -1206,6 +1264,8 @@ class HeteroALIGNN(nn.Module):
             cutoff=8.0,
             feature_norm="batchnorm",
             pooling="type_mean",
+            relation_mode="independent",
+            relation_rank=8,
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
@@ -1219,6 +1279,9 @@ class HeteroALIGNN(nn.Module):
             raise ValueError("pooling must be type_mean or defect_mean")
         self.feature_norm = feature_norm
         self.pooling = pooling
+        validate_alignn_hetero_relations(relation_mode, relation_rank)
+        self.relation_mode = relation_mode
+        self.relation_rank = relation_rank
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim, normalization=feature_norm)
             for node_type in self.node_types
@@ -1244,6 +1307,8 @@ class HeteroALIGNN(nn.Module):
                 vertex_aggregation=vertex_aggregation,
                 node_delta_norm=node_delta_norm,
                 feature_norm=feature_norm,
+                relation_mode=relation_mode,
+                relation_rank=relation_rank,
             )
             for _ in range(n_blocks)
         ])
@@ -1254,6 +1319,8 @@ class HeteroALIGNN(nn.Module):
                 vertex_aggregation=vertex_aggregation,
                 node_delta_norm=node_delta_norm,
                 feature_norm=feature_norm,
+                relation_mode=relation_mode,
+                relation_rank=relation_rank,
             )
             for _ in range(gcn_blocks)
         ])

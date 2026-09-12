@@ -7,7 +7,7 @@ from torch_geometric.utils import scatter, softmax
 
 from ..config.defaults import (
     HYPERGRAPH_SCHEMA, LEGACY_HYPERGRAPH_SCHEMA, HYPERGRAPH_SCHEMAS,
-    resolve_hypergraph_pooling,
+    resolve_hypergraph_pooling, resolve_hypergraph_updates,
 )
 
 
@@ -68,12 +68,25 @@ class DefectHypergraphBlock(nn.Module):
         return tensor.reshape(-1, self.heads, self.head_dim)
 
     def forward(self, x, hyperedge_index, hyperedge_attr, num_hyperedges,
-                hyperedge_type):
+                hyperedge_type, active_edge_mask=None):
         node_ids, edge_ids = hyperedge_index
         z = self.node_norm(x)
         centers, means, _ = hyperedge_context(
             z, hyperedge_index, hyperedge_type, num_hyperedges,
         )
+        # Full membership identifies actual defects and local centers. Only
+        # selected incidences participate in either attention normalization.
+        if active_edge_mask is not None:
+            active_edge_mask = active_edge_mask.to(device=x.device, dtype=torch.bool)
+            if active_edge_mask.shape != (num_hyperedges,):
+                raise ValueError('Expected one active-edge marker per hyperedge')
+            active_incidence = active_edge_mask[edge_ids]
+            node_ids, edge_ids = node_ids[active_incidence], edge_ids[active_incidence]
+        self._active_hyperedge_index = torch.stack([node_ids, edge_ids]).detach()
+        if node_ids.numel() == 0:
+            empty = x.new_empty((0, self.heads))
+            self._attention_weights = (empty, empty)
+            return x
         q = self._heads(self.edge_query(torch.cat([centers, means, hyperedge_attr], -1)))
         k, v = self._heads(self.node_key(z)), self._heads(self.node_value(z))
         scores = (q[edge_ids] * k[node_ids]).sum(-1) / self.head_dim ** 0.5
@@ -236,7 +249,7 @@ class RegionHypergraphInteraction(nn.Module):
     FAR_FIELD = 2
 
     def __init__(self, hidden_dim, n_steps, heads=4, dropout=0.0,
-                 schema=LEGACY_HYPERGRAPH_SCHEMA, pooling=None):
+                 schema=LEGACY_HYPERGRAPH_SCHEMA, pooling=None, updates=None):
         super().__init__()
         if hidden_dim < 1:
             raise ValueError("hidden_dim must be >= 1")
@@ -250,6 +263,7 @@ class RegionHypergraphInteraction(nn.Module):
         self.schema = schema
         self.is_v3 = schema == HYPERGRAPH_SCHEMA
         self.pooling_mode = resolve_hypergraph_pooling(schema, pooling)
+        self.updates_mode = resolve_hypergraph_updates(schema, self.pooling_mode, updates)
         self.defect_mean = self.pooling_mode == 'defect_mean'
         self.output_dim = hidden_dim if self.defect_mean else 3 * hidden_dim
         self.region_embedding = nn.Embedding(self.NUM_REGION_TYPES, hidden_dim)
@@ -365,7 +379,11 @@ class RegionHypergraphInteraction(nn.Module):
         return x + self.region_embedding(region_type)
 
     def update(self, step, x, hyperedge_index, hyperedge_type, num_hyperedges):
+        if self.updates_mode == 'none':
+            return x
         kwargs = {'hyperedge_type': hyperedge_type} if self.is_v3 else {}
+        if self.updates_mode == 'local':
+            kwargs['active_edge_mask'] = hyperedge_type.eq(self.LOCAL_NEIGHBORHOOD)
         return self.blocks[step](
             x,
             hyperedge_index,

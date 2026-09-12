@@ -278,6 +278,9 @@ class MEGNetTrainer:
             'hypergraph_schema', 'per_defect_neighborhood_v2',
         )
         hypergraph_pooling = self.config['model'].get('hypergraph_pooling')
+        hypergraph_updates = self.config['model'].get('hypergraph_updates')
+        if hypergraph_updates is not None and self.config['task'] not in ALIGNN_HYPERGRAPH_TASKS:
+            raise ValueError('Hypergraph update ablations are supported only for HyperALIGNN')
         self.converter = SimpleCrystalConverter(
             self.config['task'],
             bond_converter=bond_converter,
@@ -335,6 +338,7 @@ class MEGNetTrainer:
             self.model = HyperALIGNN(
                 hypergraph_schema=hypergraph_schema,
                 hypergraph_pooling=hypergraph_pooling,
+                hypergraph_updates=hypergraph_updates,
                 node_input_shape=atom_converter.get_shape(),
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
                 hidden_dim=self.config['model']['embedding_size'],
@@ -438,6 +442,8 @@ class MEGNetTrainer:
                 cutoff=self.config["model"]["cutoff"],
                 feature_norm=self.config['model'].get('hetero_feature_norm', 'batchnorm'),
                 pooling=self.config['model'].get('hetero_pooling', 'type_mean'),
+                relation_mode=self.config['model'].get('hetero_relation_mode', 'independent'),
+                relation_rank=self.config['model'].get('hetero_relation_rank', 8),
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(

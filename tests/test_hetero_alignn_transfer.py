@@ -30,7 +30,8 @@ class HeteroAlignnTransferTests(unittest.TestCase):
         config = get_config('alignn', '2dmd_mos2', mode)
         config['model'].update(embedding_size=8, nblocks=1, gcn_blocks=1,
                                edge_embed_size=4, angle_embed_size=4, local_radius=0)
-        apply_alignn_hetero_options(config, feature_norm, pooling)
+        # These checks retain the preceding independent-relation architecture.
+        apply_alignn_hetero_options(config, feature_norm, pooling, relation_mode='independent')
         return MEGNetTrainer(config, 'cpu', seed=123)
 
     def graphs(self, trainer):
@@ -43,6 +44,7 @@ class HeteroAlignnTransferTests(unittest.TestCase):
             config = get_config('alignn', '2dmd_mos2', mode)
             self.assertEqual(config['model']['hetero_feature_norm'], 'layernorm')
             self.assertEqual(config['model']['hetero_pooling'], 'defect_mean')
+            self.assertEqual(config['model']['hetero_relation_mode'], 'shared_residual')
         for model, mode in (('cgcnn', 'hetero'), ('megnet', 'hetero'),
                             ('alignn', 'attention'), ('alignn', 'hypergraph'), ('alignn', 'full')):
             config = get_config(model, '2dmd_mos2', mode)
@@ -144,6 +146,7 @@ class HeteroAlignnTransferTests(unittest.TestCase):
                 run = expand_leave_one_out_runs(
                     'alignn', ['hetero'], None, hetero_feature_norm=feature_norm,
                     hetero_pooling=pooling,
+                    hetero_relation_mode='independent',
                 )[0]
                 parts = alignn_hetero_run_components(run['config']['model'])
                 relative = Path('hetero/r0').joinpath(*parts)

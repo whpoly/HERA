@@ -38,11 +38,14 @@ from .config.defaults import (
     VALID_MODES, HYPERGRAPH_POOLING_MODES, apply_hypergraph_options, hypergraph_run_components,
     resolve_hypergraph_pooling,
     ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
+    ALIGNN_HETERO_RELATION_MODES,
+    HYPERGRAPH_UPDATE_MODES, resolve_hypergraph_updates,
 )
 from .data.datasets import dataset_index_for_mode, init_elem_embedding, representation_for_mode
 from .main import (
     ALIGNN_NODE_NORM_MODES,
     expand_alignn_node_norm_runs,
+    expand_hypergraph_update_runs,
     is_meaningful_relative_improvement,
     parse_radius_values,
     parse_seed_values,
@@ -908,12 +911,16 @@ def expand_leave_one_out_runs(
     hypergraph_pooling=None,
     hetero_feature_norm=None,
     hetero_pooling=None,
+    hypergraph_updates=None,
+    hetero_relation_mode=None,
+    hetero_relation_rank=None,
 ):
     """Build isolated LOO run specs and apply hypergraph-region settings."""
     model_modes = modes_for_model(model_name, requested_modes)
     runs = expand_mode_runs(
         model_name, model_modes, radii,
         hetero_feature_norm=hetero_feature_norm, hetero_pooling=hetero_pooling,
+        hetero_relation_mode=hetero_relation_mode, hetero_relation_rank=hetero_relation_rank,
     )
     expanded = []
     for run in runs:
@@ -925,13 +932,15 @@ def expand_leave_one_out_runs(
                 run['label'] = f'{run["label"]}_r{radius:g}'
             components = hypergraph_run_components(run['config']['model'])
             run['label'] += '_' + '_'.join(components)
-        expanded.extend(
-            expand_alignn_node_norm_runs(
-                [run],
-                norm_values,
-                model_name == "alignn" and run["mode"] in ALIGNN_NODE_NORM_MODES,
-            )
+        norm_runs = expand_alignn_node_norm_runs(
+            [run],
+            norm_values,
+            model_name == "alignn" and run["mode"] in ALIGNN_NODE_NORM_MODES,
         )
+        expanded.extend(expand_hypergraph_update_runs(
+            norm_runs, hypergraph_updates,
+            model_name == 'alignn' and run['mode'] in {'hypergraph', 'hypergraph_was'},
+        ))
     return expanded
 
 
@@ -947,7 +956,7 @@ def build_alignn_hypergraph_comparison(summary_df):
     baseline = alignn[mode.eq("full")].copy()
     hypergraph = alignn[
         mode.str.match(
-            r"^hypergraph(?:_r[^_]+)?(?:_(?:per_defect_neighborhood_v2|defect_global_attention_v3))?(?:_pool_defect_mean)?$"
+            r"^hypergraph(?:_r[^_]+)?(?:_(?:per_defect_neighborhood_v2|defect_global_attention_v3))?(?:_pool_defect_mean)?(?:_updates_(?:none|local|local_global))?$"
         )
     ].copy()
     if baseline.empty or hypergraph.empty:
@@ -1953,6 +1962,9 @@ def run_single_seed(args, run_dir, radii):
             hypergraph_pooling=getattr(args, 'hypergraph_pooling', None),
             hetero_feature_norm=getattr(args, 'alignn_hetero_feature_norm', None),
             hetero_pooling=getattr(args, 'alignn_hetero_pooling', None),
+            hypergraph_updates=getattr(args, 'hypergraph_updates', None),
+            hetero_relation_mode=getattr(args, 'alignn_hetero_relations', None),
+            hetero_relation_rank=getattr(args, 'alignn_hetero_adapter_rank', None),
         )
         for run in runs:
             run["config"]["optim"].update(
@@ -2153,6 +2165,7 @@ def main():
     from .config.defaults import HYPERGRAPH_SCHEMAS
     parser.add_argument('--hypergraph-schema', choices=HYPERGRAPH_SCHEMAS, default=None)
     parser.add_argument('--hypergraph-pooling', choices=HYPERGRAPH_POOLING_MODES, default=None)
+    parser.add_argument('--hypergraph-updates', nargs='+', choices=HYPERGRAPH_UPDATE_MODES, default=None)
     parser.add_argument(
         "--materials",
         "--material",
@@ -2189,7 +2202,34 @@ def main():
         '--alignn-hetero-pooling', choices=ALIGNN_HETERO_POOLING_MODES,
         default=None, help='HeteroALIGNN pooling (default: defect_mean)',
     )
+    parser.add_argument(
+        '--alignn-hetero-relations', choices=ALIGNN_HETERO_RELATION_MODES,
+        default=None, help='HeteroALIGNN message parameters (default: shared_residual)',
+    )
+    parser.add_argument('--alignn-hetero-adapter-rank', type=int, default=None,
+                        help='Shared-residual adapter bottleneck width (default: 8)')
     args = parser.parse_args()
+    if args.alignn_hetero_relations is not None or args.alignn_hetero_adapter_rank is not None:
+        if args.models != ['alignn']:
+            parser.error('Hetero relation options require --model alignn')
+        if not any(mode in {'hetero', 'hetero_was', 'hetero_fixed_pool'} for mode in args.mode):
+            parser.error('Hetero relation options require a hetero mode')
+        if args.alignn_hetero_adapter_rank is not None:
+            if args.alignn_hetero_adapter_rank < 1:
+                parser.error('--alignn-hetero-adapter-rank must be >= 1')
+            if args.alignn_hetero_relations not in (None, 'shared_residual'):
+                parser.error('Relation adapter rank requires shared_residual relations')
+    if args.hypergraph_updates is not None:
+        if args.models != ['alignn']:
+            parser.error('--hypergraph-updates requires --model alignn')
+        if not any(mode in {'hypergraph', 'hypergraph_was'} for mode in args.mode):
+            parser.error('--hypergraph-updates requires a hypergraph mode')
+        try:
+            for updates in args.hypergraph_updates:
+                resolve_hypergraph_updates(args.hypergraph_schema or HYPERGRAPH_SCHEMAS[-1],
+                                          args.hypergraph_pooling or 'defect_mean', updates)
+        except ValueError as exc:
+            parser.error(str(exc))
     args.seeds = parse_seed_values(args.seeds, parser)
     if args.alignn_hetero_node_norm is not None:
         args.alignn_hetero_node_norm = list(dict.fromkeys(args.alignn_hetero_node_norm))

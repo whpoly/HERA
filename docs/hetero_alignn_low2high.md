@@ -1,11 +1,16 @@
 # HeteroALIGNN：全程 LayerNorm + defect mean
 
-本次实现的是讨论中优先验证的一版：保留四种有向关系、每种关系的独立参数、
-关系内 gate 归一化、节点融合 FFN、物理邻居和角度图；修改归一化与最终 pooling。
-尚未加入共享关系参数或跨关系 attention。没有完成新版 low→high 全量训练，
-不能声称优于 attention。
+2026-09-12 更新：新训练默认已增加共享消息主体与小型关系修正，详见
+[共享关系版本与命令](hetero_alignn_shared_relations.md)。下文记录前一版
+独立关系参数的 LN + defect mean 架构。
 
-## 当前默认架构
+前一版实现：保留四种有向关系、每种关系的独立参数、
+关系内 gate 归一化、节点融合 FFN、物理邻居和角度图；修改归一化与最终 pooling。
+当时尚未加入共享关系参数或跨关系 attention。后续用户提供的这一版完整
+训练日志显示 high MAE 为 0.129310，attention 为 0.051590，详见
+[实际结果分析](hetero_relation_shift_review.md)。
+
+## 前一版架构
 
 `get_config('alignn', dataset, 'hetero')` 默认设置：
 
@@ -41,7 +46,7 @@ line-graph 的节点/边更新、所有 ALIGNN/GCN 关系边更新和节点残�
 在 HERA 的上一级目录、激活 hera Python 环境后运行：
 
 ```bash
-python -m HERA.main --model alignn --dataset 2dmd_mos2 --mode hetero --r 0 --alignn-hetero-feature-norm layernorm --alignn-hetero-pooling defect_mean --seed 123 --epochs 500 --device cuda:0 --run-dir HERA/logs/2dmd_mos2_hetero_ln_mean
+python -m HERA.main --model alignn --dataset 2dmd_mos2 --mode hetero --r 0 --alignn-hetero-feature-norm layernorm --alignn-hetero-pooling defect_mean --alignn-hetero-relations independent --seed 123 --epochs 500 --device cuda:0 --run-dir HERA/logs/2dmd_mos2_hetero_ln_mean
 ```
 
 如需同一入口同时训练 attention 对照，使用 `--mode attention hetero`。

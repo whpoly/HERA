@@ -226,7 +226,8 @@ def load_native_with_metadata(
     )
 
 
-def expand_mode_runs(model_name, modes, radii, hetero_feature_norm=None, hetero_pooling=None):
+def expand_mode_runs(model_name, modes, radii, hetero_feature_norm=None, hetero_pooling=None,
+                     hetero_relation_mode=None, hetero_relation_rank=None):
     runs = []
     for mode in modes:
         if mode not in VALID_MODES:
@@ -264,7 +265,8 @@ def expand_mode_runs(model_name, modes, radii, hetero_feature_norm=None, hetero_
             )
     if model_name == 'alignn':
         for run in runs:
-            apply_alignn_hetero_options(run['config'], hetero_feature_norm, hetero_pooling)
+            apply_alignn_hetero_options(run['config'], hetero_feature_norm, hetero_pooling,
+                                       hetero_relation_mode, hetero_relation_rank)
             parts = alignn_hetero_run_components(run['config']['model'])
             if parts:
                 run['label'] += '_' + '_'.join(parts)
@@ -331,6 +333,21 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    if '_relations_' in mode:
+        base, relation_suffix = mode.split('_relations_', 1)
+        if relation_suffix.startswith('shared_residual_rank'):
+            rank_and_rest = relation_suffix.removeprefix('shared_residual_rank').split('_', 1)
+            display = f'shared messages + relation adapters, rank {rank_and_rest[0]}'
+            rest = '_' + rank_and_rest[1] if len(rank_and_rest) > 1 else ''
+        else:
+            rest = relation_suffix.removeprefix('shared')
+            display = 'shared messages'
+        return mode_display_name(base + rest) + f' ({display})'
+    if '_updates_' in mode:
+        base, updates = mode.rsplit('_updates_', 1)
+        display = {'none': 'no hypergraph updates', 'local': 'local updates',
+                   'local_global': 'local + global updates'}.get(updates, updates)
+        return mode_display_name(base) + f' ({display})'
     if '_features_layernorm' in mode:
         return mode_display_name(mode.replace('_features_layernorm', '')) + ' (feature LayerNorm)'
     if '_pool_defect_mean' in mode and not mode.endswith('_pool_defect_mean'):

@@ -235,7 +235,7 @@ class NativeAlignnLeaveOneOutTests(unittest.TestCase):
 
         self.assertEqual(
             [run["label"] for run in runs],
-            ["full", "hetero_r0_features_layernorm_pool_defect_mean_norm_layernorm"],
+            ["full", "hetero_r0_features_layernorm_pool_defect_mean_relations_shared_residual_rank8_norm_layernorm"],
         )
         self.assertEqual(runs[1]["config"]["model"]["hetero_node_norm"], "layernorm")
         self.assertEqual(runs[0]["config"]["task"], "alignn_full")

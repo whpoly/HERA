@@ -10,11 +10,22 @@ HYPERGRAPH_SCHEMA = 'defect_global_attention_v3'
 HYPERGRAPH_SCHEMAS = (LEGACY_HYPERGRAPH_SCHEMA, HYPERGRAPH_SCHEMA)
 HYPERGRAPH_POOLING = 'defect_mean'
 HYPERGRAPH_POOLING_MODES = ('defect_mean', 'hierarchical_attention', 'region_mean')
+HYPERGRAPH_UPDATE_MODES = ('none', 'local', 'local_global')
 ALIGNN_HETERO_FEATURE_NORMS = ('layernorm', 'batchnorm')
 ALIGNN_HETERO_POOLING_MODES = ('defect_mean', 'type_mean')
+ALIGNN_HETERO_RELATION_MODES = ('independent', 'shared', 'shared_residual')
+ALIGNN_HETERO_RELATION_RANK = 8
 
 
-def apply_alignn_hetero_options(config, feature_norm=None, pooling=None):
+def validate_alignn_hetero_relations(mode, rank):
+    if mode not in ALIGNN_HETERO_RELATION_MODES:
+        raise ValueError(f'Unknown ALIGNN hetero relation mode: {mode}')
+    if isinstance(rank, bool) or not isinstance(rank, int) or rank < 1:
+        raise ValueError('ALIGNN hetero relation adapter rank must be a positive integer')
+
+
+def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
+                               relation_mode=None, relation_rank=None):
     """Override ALIGNN hetero only; omitted saved fields retain legacy behavior."""
     if config['task'] not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
         return config
@@ -23,10 +34,18 @@ def apply_alignn_hetero_options(config, feature_norm=None, pooling=None):
         model['hetero_feature_norm'] = feature_norm
     if pooling is not None:
         model['hetero_pooling'] = pooling
+    if relation_mode is not None:
+        model['hetero_relation_mode'] = relation_mode
+    if relation_rank is not None:
+        if model.get('hetero_relation_mode', 'independent') != 'shared_residual':
+            raise ValueError('Relation adapter rank requires shared_residual relations')
+        model['hetero_relation_rank'] = relation_rank
     if model.get('hetero_feature_norm', 'batchnorm') not in ALIGNN_HETERO_FEATURE_NORMS:
         raise ValueError('Unknown ALIGNN hetero feature normalization')
     if model.get('hetero_pooling', 'type_mean') not in ALIGNN_HETERO_POOLING_MODES:
         raise ValueError('Unknown ALIGNN hetero pooling')
+    validate_alignn_hetero_relations(model.get('hetero_relation_mode', 'independent'),
+                                   model.get('hetero_relation_rank', ALIGNN_HETERO_RELATION_RANK))
     return config
 
 
@@ -37,6 +56,13 @@ def alignn_hetero_run_components(model_config):
         parts.append('features_layernorm')
     if model_config.get('hetero_pooling', 'type_mean') == 'defect_mean':
         parts.append('pool_defect_mean')
+    mode = model_config.get('hetero_relation_mode', 'independent')
+    rank = model_config.get('hetero_relation_rank', ALIGNN_HETERO_RELATION_RANK)
+    validate_alignn_hetero_relations(mode, rank)
+    if mode == 'shared':
+        parts.append('relations_shared')
+    elif mode == 'shared_residual':
+        parts.append(f'relations_shared_residual_rank{rank}')
     return parts
 
 
@@ -67,11 +93,27 @@ def apply_hypergraph_options(config, schema=None, pooling=None):
     return config
 
 
+def resolve_hypergraph_updates(schema, pooling, updates=None):
+    """Explicit update ablations use v3 with a fixed defect-mean readout."""
+    if updates is None:
+        return 'local_global'
+    if updates not in HYPERGRAPH_UPDATE_MODES:
+        raise ValueError(f'Unknown hypergraph update mode: {updates}')
+    if schema != HYPERGRAPH_SCHEMA or pooling != 'defect_mean':
+        raise ValueError('Hypergraph update ablations require v3 and defect_mean pooling')
+    return updates
+
+
 def hypergraph_run_components(model_config):
     """New readouts get isolated paths; existing checkpoint paths stay valid."""
     schema = model_config.get('hypergraph_schema', LEGACY_HYPERGRAPH_SCHEMA)
     pooling = resolve_hypergraph_pooling(schema, model_config.get('hypergraph_pooling'))
-    return [schema, 'pool_defect_mean'] if pooling == 'defect_mean' else [schema]
+    parts = [schema, 'pool_defect_mean'] if pooling == 'defect_mean' else [schema]
+    updates = model_config.get('hypergraph_updates')
+    if updates is not None:
+        resolve_hypergraph_updates(schema, pooling, updates)
+        parts.append(f'updates_{updates}')
+    return parts
 
 
 def _base_optim():
@@ -368,6 +410,8 @@ def _finalize_config(config, model, dataset):
         if config['task'] in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
             config['model']['hetero_feature_norm'] = 'layernorm'
             config['model']['hetero_pooling'] = 'defect_mean'
+            config['model']['hetero_relation_mode'] = 'shared_residual'
+            config['model']['hetero_relation_rank'] = ALIGNN_HETERO_RELATION_RANK
     if dataset in (
             'vacancy', 'vacancy_mos2', 'vacancy_wse2',
             '2dmd_low', '2dmd_mos2', '2dmd_wse2',

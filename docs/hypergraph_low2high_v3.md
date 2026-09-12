@@ -1,5 +1,13 @@
 # low→high 的 attention 优势与 hypergraph v3
 
+2026-09-11 更新：第一版 v3 **分层 attention pooling** 已完成训练，high MAE 为
+0.250031，劣于 v2 和 attention。后续默认的 **defect_mean** 尚无完整结果。
+详见 [本次结果诊断](hypergraph_v3_completed_diagnosis.md)。以下保留原设计分析和
+实现记录，不能把其中的预期或旧实验数字当作新版性能证据。
+
+现已加入固定 `defect_mean` 的 `none / local / local_global` 超图更新对照。
+运行命令与具体区别见 [消息传递消融说明](hypergraph_update_ablation.md)。
+
 本次依据本地 `logs/2dmd_mos2` 的已有结果分析，并实现
 `defect_global_attention_v3`。新版已完成工程验证，**尚未完成完整训练，
 不能声称其测试 MAE 已经超过 attention**。以下误差均来自旧实验，版本设计

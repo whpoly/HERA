@@ -51,7 +51,9 @@ from .config.defaults import (
     get_config, VALID_DATASETS, VALID_MODELS, VALID_MODES, HYPERGRAPH_POOLING_MODES,
     apply_hypergraph_options, hypergraph_run_components, resolve_hypergraph_pooling,
     ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
+    ALIGNN_HETERO_RELATION_MODES,
     apply_alignn_hetero_options, alignn_hetero_run_components,
+    HYPERGRAPH_UPDATE_MODES, resolve_hypergraph_updates,
 )
 from .data.datasets import (
     dataset_index_for_mode,
@@ -227,6 +229,26 @@ def expand_alignn_node_norm_runs(mode_runs, norm_values, enabled):
     return expanded
 
 
+def expand_hypergraph_update_runs(mode_runs, update_values, enabled):
+    """Change only active hypergraph messages; keep model and graph inputs fixed."""
+    if not enabled or update_values is None:
+        return mode_runs
+    if isinstance(update_values, str):
+        update_values = [update_values]
+    expanded = []
+    for run in mode_runs:
+        for updates in dict.fromkeys(update_values):
+            update_run = copy.deepcopy(run)
+            model = update_run['config']['model']
+            pooling = resolve_hypergraph_pooling(model['hypergraph_schema'], model.get('hypergraph_pooling'))
+            model['hypergraph_updates'] = resolve_hypergraph_updates(
+                model['hypergraph_schema'], pooling, updates,
+            )
+            update_run['label'] += f'_updates_{updates}'
+            expanded.append(update_run)
+    return expanded
+
+
 def apply_training_overrides(config, args, model_name):
     config = copy.deepcopy(config)
     if args.train_batch_size is not None:
@@ -269,6 +291,8 @@ def apply_training_overrides(config, args, model_name):
         apply_alignn_hetero_options(
             config, getattr(args, 'alignn_hetero_feature_norm', None),
             getattr(args, 'alignn_hetero_pooling', None),
+            getattr(args, 'alignn_hetero_relations', None),
+            getattr(args, 'alignn_hetero_adapter_rank', None),
         )
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
@@ -792,13 +816,17 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
             f'{config["model"]["hypergraph_radius"]} A; pooling: '
             f'{resolve_hypergraph_pooling(config["model"]["hypergraph_schema"], config["model"].get("hypergraph_pooling"))}',
         )
+        if 'hypergraph_updates' in config['model']:
+            mode_summary.insert(2, f'Hypergraph message updates: {config["model"]["hypergraph_updates"]}')
     elif radius_label is not None:
         mode_summary.insert(1, radius_summary(run_label.rsplit('_r', 1)[0], config))
     if config['task'] in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
         mode_summary.insert(
             1, f'Hetero feature norm: {config["model"].get("hetero_feature_norm", "batchnorm")}; '
             f'node delta norm: {config["model"].get("hetero_node_norm", "layernorm")}; '
-            f'pooling: {config["model"].get("hetero_pooling", "type_mean")}',
+            f'pooling: {config["model"].get("hetero_pooling", "type_mean")}; '
+            f'relations: {config["model"].get("hetero_relation_mode", "independent")}; '
+            f'adapter rank: {config["model"].get("hetero_relation_rank", 8)}',
         )
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
@@ -988,6 +1016,14 @@ def main():
         default=None, help='HeteroALIGNN readout: actual defect mean or concatenated type means (default: defect_mean)',
     )
     parser.add_argument(
+        '--alignn-hetero-relations', choices=ALIGNN_HETERO_RELATION_MODES,
+        default=None, help='HeteroALIGNN message parameters (default: shared_residual)',
+    )
+    parser.add_argument(
+        '--alignn-hetero-adapter-rank', type=int, default=None,
+        help='Bottleneck width for shared_residual relations (default: 8)',
+    )
+    parser.add_argument(
         '--alignn-hetero-node-norm',
         nargs='+',
         choices=('layernorm', 'batchnorm', 'none'),
@@ -1020,6 +1056,10 @@ def main():
     parser.add_argument(
         '--hypergraph-pooling', choices=HYPERGRAPH_POOLING_MODES, default=None,
         help='V3: defect_mean (default) or hierarchical_attention; v2: region_mean',
+    )
+    parser.add_argument(
+        '--hypergraph-updates', nargs='+', choices=HYPERGRAPH_UPDATE_MODES, default=None,
+        help='HyperALIGNN v3 defect-mean ablations: none, local, local_global; multiple choices run sequentially',
     )
     parser.add_argument(
         '--seed',
@@ -1094,11 +1134,35 @@ def main():
         parser.error('--alignn-cutoff must be > 0')
     if args.hypergraph_radius is not None and args.hypergraph_radius < 0:
         parser.error('--hypergraph-radius must be >= 0')
+    if args.alignn_hetero_relations is not None or args.alignn_hetero_adapter_rank is not None:
+        if args.model != 'alignn':
+            parser.error('Hetero relation options require --model alignn')
+        if args.mode is not None and not any(
+                mode in ('hetero', 'hetero_was', 'hetero_fixed_pool', 'all') for mode in args.mode):
+            parser.error('Hetero relation options require a hetero mode')
+        if args.alignn_hetero_adapter_rank is not None:
+            if args.alignn_hetero_adapter_rank < 1:
+                parser.error('--alignn-hetero-adapter-rank must be >= 1')
+            if args.alignn_hetero_relations not in (None, 'shared_residual'):
+                parser.error('Relation adapter rank requires shared_residual relations')
     try:
         resolve_hypergraph_pooling(args.hypergraph_schema or HYPERGRAPH_SCHEMAS[-1],
                                   args.hypergraph_pooling)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.hypergraph_updates is not None:
+        if args.model != 'alignn':
+            parser.error('--hypergraph-updates requires --model alignn')
+        if args.mode is not None and not any(mode in (*HYPERGRAPH_MODES, 'all') for mode in args.mode):
+            parser.error('--hypergraph-updates requires a hypergraph mode')
+        try:
+            for updates in args.hypergraph_updates:
+                resolve_hypergraph_updates(
+                    args.hypergraph_schema or HYPERGRAPH_SCHEMAS[-1],
+                    args.hypergraph_pooling or 'defect_mean', updates,
+                )
+        except ValueError as exc:
+            parser.error(str(exc))
     args.seeds = parse_seed_values(args.seeds, parser)
     if args.alignn_hetero_node_norm is not None:
         args.alignn_hetero_node_norm = list(dict.fromkeys(
@@ -1261,6 +1325,10 @@ def main():
                     args.alignn_hetero_node_norm,
                     model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES,
                 )
+                mode_runs = expand_hypergraph_update_runs(
+                    mode_runs, args.hypergraph_updates,
+                    model_name == 'alignn' and mode in HYPERGRAPH_MODES,
+                )
 
                 for run in mode_runs:
                     if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
@@ -1312,7 +1380,7 @@ def main():
                         '  Hypergraph/model: '
                         f'pooling={config["model"]["hypergraph_pooling"]}, '
                         f'{physical_summary}'
-                        'hyperedges=per-defect core + centered local + optional far, '
+                        f'updates={config["model"].get("hypergraph_updates", "schema default")}, '
                         f'schema={config["model"]["hypergraph_schema"]}, '
                         f'radius={config["model"]["hypergraph_radius"]} A, '
                         f'hidden={config["model"]["embedding_size"]}, '
@@ -1331,6 +1399,8 @@ def main():
                         f'hetero_node_norm={config["model"].get("hetero_node_norm", "layernorm")}, '
                         f'hetero_feature_norm={config["model"].get("hetero_feature_norm", "n/a")}, '
                         f'hetero_pooling={config["model"].get("hetero_pooling", "n/a")}, '
+                        f'hetero_relations={config["model"].get("hetero_relation_mode", "independent")}, '
+                        f'hetero_adapter_rank={config["model"].get("hetero_relation_rank", 8)}, '
                         f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )

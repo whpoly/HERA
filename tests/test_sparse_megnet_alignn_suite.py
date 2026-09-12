@@ -57,7 +57,7 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
         )
         self.assertEqual(
             prediction_file_path(root, 'alignn', '2dmd_mos2', 'hetero', 123),
-            root / 'alignn/2dmd_mos2/hetero/r0/features_layernorm/pool_defect_mean/seed123_test_predictions.csv',
+            root / 'alignn/2dmd_mos2/hetero/r0/features_layernorm/pool_defect_mean/relations_shared_residual_rank8/seed123_test_predictions.csv',
         )
         self.assertEqual(
             prediction_file_path(root, 'alignn', '2dmd_mos2', 'hypergraph', 123),
@@ -100,14 +100,14 @@ class SparseMegnetAlignnSuiteTests(unittest.TestCase):
             [
                 'megnet_sparse',
                 'alignn_full',
-                'alignn_hetero_r0_features_layernorm_pool_defect_mean',
+                'alignn_hetero_r0_features_layernorm_pool_defect_mean_relations_shared_residual_rank8',
                 'alignn_hypergraph_pool_defect_mean',
             ],
         )
         self.assertEqual(written_rows[0]['source_id'], 'a')
         self.assertEqual(float(written_rows[0]['megnet_sparse_prediction']), 1.1)
         self.assertEqual(float(written_rows[0]['alignn_full_prediction']), 0.9)
-        self.assertEqual(float(written_rows[0]['alignn_hetero_r0_features_layernorm_pool_defect_mean_prediction']), 1.0)
+        self.assertEqual(float(written_rows[0]['alignn_hetero_r0_features_layernorm_pool_defect_mean_relations_shared_residual_rank8_prediction']), 1.0)
         self.assertEqual(float(written_rows[0]['alignn_hypergraph_pool_defect_mean_prediction']), 1.2)
         self.assertAlmostEqual(float(written_rows[0]['megnet_sparse_test_mae']), 0.15)
         self.assertAlmostEqual(float(written_rows[0]['alignn_full_test_mae']), 0.1)
