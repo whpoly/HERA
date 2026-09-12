@@ -2200,7 +2200,7 @@ def main():
     )
     parser.add_argument(
         '--alignn-hetero-pooling', choices=ALIGNN_HETERO_POOLING_MODES,
-        default=None, help='HeteroALIGNN pooling (default: defect_mean)',
+        default=None, help='HeteroALIGNN pooling: defect_mean = MLP(mean(h)); defect_energy_mean = mean(MLP(h)) (default: defect_mean)',
     )
     parser.add_argument(
         '--alignn-hetero-relations', choices=ALIGNN_HETERO_RELATION_MODES,

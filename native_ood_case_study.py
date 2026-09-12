@@ -350,6 +350,8 @@ def mode_display_name(mode):
         return mode_display_name(base) + f' ({display})'
     if '_features_layernorm' in mode:
         return mode_display_name(mode.replace('_features_layernorm', '')) + ' (feature LayerNorm)'
+    if '_pool_defect_energy_mean' in mode:
+        return mode_display_name(mode.replace('_pool_defect_energy_mean', '')) + ' (mean defect energy)'
     if '_pool_defect_mean' in mode and not mode.endswith('_pool_defect_mean'):
         return mode_display_name(mode.replace('_pool_defect_mean', '')) + ' (defect mean)'
     if mode.endswith('_pool_defect_mean'):

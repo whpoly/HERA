@@ -126,7 +126,7 @@ class HeteroAlignnTransferTests(unittest.TestCase):
 
     def test_saved_configs_restore_both_poolings_and_missing_legacy_fields(self):
         for feature_norm in ('batchnorm', 'layernorm'):
-            for pooling in ('type_mean', 'defect_mean'):
+            for pooling in ('type_mean', 'defect_mean', 'defect_energy_mean'):
                 trainer = self.trainer(feature_norm, pooling)
                 config = copy.deepcopy(trainer.config)
                 if feature_norm == 'batchnorm' and pooling == 'type_mean':
@@ -142,7 +142,7 @@ class HeteroAlignnTransferTests(unittest.TestCase):
     def test_ablations_have_distinct_paths_labels_and_prediction_columns(self):
         labels, prefixes, paths = set(), set(), set()
         for feature_norm in ('batchnorm', 'layernorm'):
-            for pooling in ('type_mean', 'defect_mean'):
+            for pooling in ('type_mean', 'defect_mean', 'defect_energy_mean'):
                 run = expand_leave_one_out_runs(
                     'alignn', ['hetero'], None, hetero_feature_norm=feature_norm,
                     hetero_pooling=pooling,
@@ -153,9 +153,9 @@ class HeteroAlignnTransferTests(unittest.TestCase):
                 paths.add(relative)
                 labels.add(run['label'])
                 prefixes.add(alignn_result_prefix(Path('dataset'), Path('dataset') / relative / 'seed123_test_predictions.csv'))
-        self.assertEqual(len(paths), 4)
-        self.assertEqual(len(labels), 4)
-        self.assertEqual(len(prefixes), 4)
+        self.assertEqual(len(paths), 6)
+        self.assertEqual(len(labels), 6)
+        self.assertEqual(len(prefixes), 6)
         self.assertIn('hetero_r0', labels)
         display = model_mode_display('alignn', 'hetero_r0_features_layernorm_pool_defect_mean_norm_layernorm')
         self.assertIn('defect mean', display)

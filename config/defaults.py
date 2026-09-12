@@ -12,7 +12,7 @@ HYPERGRAPH_POOLING = 'defect_mean'
 HYPERGRAPH_POOLING_MODES = ('defect_mean', 'hierarchical_attention', 'region_mean')
 HYPERGRAPH_UPDATE_MODES = ('none', 'local', 'local_global')
 ALIGNN_HETERO_FEATURE_NORMS = ('layernorm', 'batchnorm')
-ALIGNN_HETERO_POOLING_MODES = ('defect_mean', 'type_mean')
+ALIGNN_HETERO_POOLING_MODES = ('defect_mean', 'defect_energy_mean', 'type_mean')
 ALIGNN_HETERO_RELATION_MODES = ('independent', 'shared', 'shared_residual')
 ALIGNN_HETERO_RELATION_RANK = 8
 
@@ -54,8 +54,9 @@ def alignn_hetero_run_components(model_config):
     parts = []
     if model_config.get('hetero_feature_norm', 'batchnorm') == 'layernorm':
         parts.append('features_layernorm')
-    if model_config.get('hetero_pooling', 'type_mean') == 'defect_mean':
-        parts.append('pool_defect_mean')
+    pooling = model_config.get('hetero_pooling', 'type_mean')
+    if pooling in ('defect_mean', 'defect_energy_mean'):
+        parts.append(f'pool_{pooling}')
     mode = model_config.get('hetero_relation_mode', 'independent')
     rank = model_config.get('hetero_relation_rank', ALIGNN_HETERO_RELATION_RANK)
     validate_alignn_hetero_relations(mode, rank)

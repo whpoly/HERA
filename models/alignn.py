@@ -14,7 +14,7 @@ from .modules import (
     RelationFusionUpdate,
 )
 from .hypergraph import RegionHypergraphInteraction
-from ..config.defaults import validate_alignn_hetero_relations
+from ..config.defaults import ALIGNN_HETERO_POOLING_MODES, validate_alignn_hetero_relations
 
 
 def _edge_type_key(edge_type):
@@ -1247,6 +1247,8 @@ class HeteroALIGNN(nn.Module):
     Constructor defaults preserve pre-existing checkpoints. New training
     configs select LayerNorm, actual-defect mean pooling and shared message
     cores with small relation-specific residual adapters.
+    Optional defect_energy_mean applies the same head to each actual defect
+    before averaging its scalar output, with unchanged message parameters.
     """
 
     def __init__(
@@ -1275,8 +1277,8 @@ class HeteroALIGNN(nn.Module):
         self.node_delta_norm = node_delta_norm
         if feature_norm not in {"batchnorm", "layernorm"}:
             raise ValueError("feature_norm must be batchnorm or layernorm")
-        if pooling not in {"type_mean", "defect_mean"}:
-            raise ValueError("pooling must be type_mean or defect_mean")
+        if pooling not in ALIGNN_HETERO_POOLING_MODES:
+            raise ValueError(f"pooling must be one of {ALIGNN_HETERO_POOLING_MODES}")
         self.feature_norm = feature_norm
         self.pooling = pooling
         validate_alignn_hetero_relations(relation_mode, relation_rank)
@@ -1325,7 +1327,7 @@ class HeteroALIGNN(nn.Module):
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(hidden_dim if pooling == "defect_mean" else 2 * hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(2 * hidden_dim if pooling == "type_mean" else hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -1371,7 +1373,7 @@ class HeteroALIGNN(nn.Module):
         return torch.full((x.size(0),), default_value, dtype=torch.long, device=x.device)
 
     def _pool_fixed_type(self, x_dict, batch_dict, pool_type_dict, target_type,
-                         num_graphs, reference, require_nonempty=False):
+                         num_graphs, reference, require_nonempty=False, node_transform=None):
         features = []
         batches = []
         pool_type_dict = {} if pool_type_dict is None else pool_type_dict
@@ -1393,16 +1395,19 @@ class HeteroALIGNN(nn.Module):
             batches.append(batch[mask])
         if not features:
             if require_nonempty:
-                raise ValueError("defect_mean pooling requires at least one defect per graph")
+                raise ValueError("defect pooling requires at least one defect per graph")
             return _pool_mean_or_zeros(None, None, num_graphs, self.hidden_dim, reference)
         pooled_batch = torch.cat(batches, dim=0)
         if require_nonempty and torch.any(torch.bincount(pooled_batch, minlength=num_graphs) == 0):
-            raise ValueError("defect_mean pooling requires at least one defect per graph")
+            raise ValueError("defect pooling requires at least one defect per graph")
+        selected = torch.cat(features, dim=0)
+        if node_transform is not None:
+            selected = node_transform(selected)
         return _pool_mean_or_zeros(
-            torch.cat(features, dim=0),
+            selected,
             pooled_batch,
             num_graphs,
-            self.hidden_dim,
+            selected.size(-1),
             reference,
         )
 
@@ -1442,13 +1447,16 @@ class HeteroALIGNN(nn.Module):
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)
-        if self.pooling == "defect_mean":
+        if self.pooling in {"defect_mean", "defect_energy_mean"}:
             # pool_type retains the actual defects when r > 0 also marks
             # surrounding pristine sites as members of the defect node store.
             defect_pool = self._pool_fixed_type(
                 x_dict, batch_dict, pool_type, 1, num_graphs, reference,
                 require_nonempty=True,
+                node_transform=self.readout if self.pooling == "defect_energy_mean" else None,
             )
+            if self.pooling == "defect_energy_mean":
+                return defect_pool
             return self.readout(defect_pool)
         if self.fixed_pooling:
             atom_pool = self._pool_fixed_type(x_dict, batch_dict, pool_type, 0, num_graphs, reference)
