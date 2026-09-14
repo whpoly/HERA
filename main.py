@@ -53,6 +53,7 @@ from .config.defaults import (
     ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
     ALIGNN_HETERO_RELATION_MODES,
     ALIGNN_HETERO_MESSAGE_MODES, ALIGNN_HETERO_DISTANCE_MODES, ALIGNN_HETERO_ABLATIONS,
+    ALIGNN_HETERO_AGGREGATION_MODES, ALIGNN_HETERO_DEFECT_RESIDUAL_MODES,
     apply_alignn_hetero_options, alignn_hetero_run_components,
     HYPERGRAPH_UPDATE_MODES, resolve_hypergraph_updates,
 )
@@ -231,7 +232,7 @@ def expand_alignn_node_norm_runs(mode_runs, norm_values, enabled):
 
 
 def expand_alignn_hetero_encoder_runs(mode_runs, ablations, enabled):
-    """Run one change at a time relative to linear messages/independent distances."""
+    """Run explicitly requested, independent encoder/interaction ablations."""
     if not enabled or ablations is None:
         return mode_runs
     if isinstance(ablations, str):
@@ -242,9 +243,10 @@ def expand_alignn_hetero_encoder_runs(mode_runs, ablations, enabled):
             if ablation not in ALIGNN_HETERO_ABLATIONS:
                 raise ValueError(f'Unknown hetero encoder ablation: {ablation}')
             variant = copy.deepcopy(run)
-            message_mode, distance_mode = ALIGNN_HETERO_ABLATIONS[ablation]
+            message_mode, distance_mode, aggregation, residual = ALIGNN_HETERO_ABLATIONS[ablation]
             apply_alignn_hetero_options(variant['config'], message_mode=message_mode,
-                                       distance_mode=distance_mode)
+                                       distance_mode=distance_mode, aggregation_mode=aggregation,
+                                       defect_residual=residual)
             expanded.append(variant)
     return expanded
 
@@ -315,6 +317,9 @@ def apply_training_overrides(config, args, model_name):
             getattr(args, 'alignn_hetero_adapter_rank', None),
             message_mode=getattr(args, 'alignn_hetero_message', None),
             distance_mode=getattr(args, 'alignn_hetero_distance', None),
+            aggregation_mode=getattr(args, 'alignn_hetero_aggregation', None),
+            defect_residual=getattr(args, 'alignn_hetero_defect_residual', None),
+            defect_cutoff=getattr(args, 'alignn_hetero_defect_cutoff', None),
         )
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
@@ -850,7 +855,10 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
             f'relations: {config["model"].get("hetero_relation_mode", "independent")}; '
             f'adapter rank: {config["model"].get("hetero_relation_rank", 8)}; '
             f'message: {config["model"].get("hetero_message_mode", "linear")}; '
-            f'distance: {config["model"].get("hetero_distance_mode", "independent")}',
+            f'distance: {config["model"].get("hetero_distance_mode", "independent")}; '
+            f'aggregation: {config["model"].get("hetero_aggregation_mode", "relation_mean")}; '
+            f'defect residual: {config["model"].get("hetero_defect_residual", "none")}; '
+            f'defect cutoff: {config["model"].get("hetero_defect_cutoff", 12.0)} A',
         )
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
@@ -1062,9 +1070,15 @@ def main():
                         help='Hetero message content: linear source or pair-conditioned MLP')
     parser.add_argument('--alignn-hetero-distance', choices=ALIGNN_HETERO_DISTANCE_MODES,
                         help='Hetero radial encoder: independent or shared with relation vectors')
+    parser.add_argument('--alignn-hetero-aggregation', choices=ALIGNN_HETERO_AGGREGATION_MODES,
+                        help='Separate relation means or joint softmax over all incoming relations')
+    parser.add_argument('--alignn-hetero-defect-residual', choices=ALIGNN_HETERO_DEFECT_RESIDUAL_MODES,
+                        help='Optional direct sparse defect residual after the local backbone')
+    parser.add_argument('--alignn-hetero-defect-cutoff', type=float,
+                        help='Auxiliary sparse defect edge cutoff in angstrom (default: 12)')
     parser.add_argument('--alignn-hetero-ablation', nargs='+', choices=tuple(ALIGNN_HETERO_ABLATIONS),
-                        help='Sequential independent ablations: baseline, pair_message, shared_distance; '
-                             'cannot combine with explicit message/distance options')
+                        help='Sequential independent hetero ablations; cannot combine with explicit '
+                             'message/distance/aggregation/defect-residual options')
     parser.add_argument('--early-stopping-patience', type=int, default=None,
                         help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
@@ -1166,15 +1180,20 @@ def main():
     if args.hypergraph_radius is not None and args.hypergraph_radius < 0:
         parser.error('--hypergraph-radius must be >= 0')
     if any(value is not None for value in (
-            args.alignn_hetero_message, args.alignn_hetero_distance, args.alignn_hetero_ablation)):
+            args.alignn_hetero_message, args.alignn_hetero_distance, args.alignn_hetero_ablation,
+            args.alignn_hetero_aggregation, args.alignn_hetero_defect_residual, args.alignn_hetero_defect_cutoff)):
         if args.model != 'alignn':
             parser.error('Hetero encoder options require --model alignn')
         if args.mode is not None and not any(
                 mode in (*ALIGNN_NODE_NORM_MODES, 'all') for mode in args.mode):
             parser.error('Hetero encoder options require a hetero mode')
-        if args.alignn_hetero_ablation is not None and (
-                args.alignn_hetero_message is not None or args.alignn_hetero_distance is not None):
-            parser.error('Use either --alignn-hetero-ablation or explicit message/distance options')
+        if args.alignn_hetero_ablation is not None and any(value is not None for value in (
+                args.alignn_hetero_message, args.alignn_hetero_distance,
+                args.alignn_hetero_aggregation, args.alignn_hetero_defect_residual)):
+            parser.error('Use either --alignn-hetero-ablation or explicit message/distance/aggregation/defect-residual options')
+        if args.alignn_hetero_defect_cutoff is not None and (
+                not np.isfinite(args.alignn_hetero_defect_cutoff) or args.alignn_hetero_defect_cutoff <= 0):
+            parser.error('--alignn-hetero-defect-cutoff must be finite and > 0')
     if args.alignn_hetero_relations is not None or args.alignn_hetero_adapter_rank is not None:
         if args.model != 'alignn':
             parser.error('Hetero relation options require --model alignn')
@@ -1448,6 +1467,9 @@ def main():
                         f'hetero_adapter_rank={config["model"].get("hetero_relation_rank", 8)}, '
                         f'hetero_message={config["model"].get("hetero_message_mode", "linear")}, '
                         f'hetero_distance={config["model"].get("hetero_distance_mode", "independent")}, '
+                        f'hetero_aggregation={config["model"].get("hetero_aggregation_mode", "relation_mean")}, '
+                        f'hetero_defect_residual={config["model"].get("hetero_defect_residual", "none")}, '
+                        f'hetero_defect_cutoff={config["model"].get("hetero_defect_cutoff", 12.0)}, '
                         f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )

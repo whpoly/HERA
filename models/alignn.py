@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
+from torch_geometric.utils import softmax as graph_softmax, scatter
 
 from .modules import (
     AtomTypeGlobalAttentionReadout,
@@ -17,6 +18,7 @@ from .hypergraph import RegionHypergraphInteraction
 from ..config.defaults import (
     ALIGNN_HETERO_POOLING_MODES, validate_alignn_hetero_relations,
     validate_alignn_hetero_encoders,
+    validate_alignn_hetero_interactions,
 )
 
 
@@ -336,9 +338,9 @@ class GatedGraphConv(nn.Module):
 class HeteroRelationConv(nn.Module):
     """Relation-specific gated messages without a relation-local root update.
 
-    Each relation returns the numerator and gate normalization required by the
-    ALIGNN update. Callers normalize each relation independently and preserve
-    the result in a separate slot for the node-type-specific fusion FFN.
+    The legacy forward returns sigmoid-weighted sums and gate totals. The
+    edge_messages method also exposes values/logits for joint neighbor softmax.
+    Both aggregations retain separate slots for the node-type-specific fusion.
     """
 
     def __init__(self, channels, edge_dim, normalization="batchnorm", message_mode="linear"):
@@ -365,12 +367,12 @@ class HeteroRelationConv(nn.Module):
             return x
         return x, x
 
-    def forward(self, x, edge_index, edge_attr, relation_adapter=None):
+    def edge_messages(self, x, edge_index, edge_attr, relation_adapter=None):
+        """Unnormalized values/logits for either relation-wise or joint aggregation."""
         x_src, x_dst = self._split_nodes(x)
-        message_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
-        gate_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
         if x_src.size(0) == 0 or x_dst.size(0) == 0 or edge_index.size(1) == 0:
-            return message_sum, gate_sum, edge_attr
+            empty = x_dst.new_empty((0, self.channels))
+            return empty, empty, edge_attr
 
         src, dst = edge_index
         edge_update = (
@@ -388,7 +390,21 @@ class HeteroRelationConv(nn.Module):
             )).chunk(2, dim=-1)
             edge_update = edge_update + gate_delta
             messages = messages + message_delta
-        sigma = torch.sigmoid(edge_update)
+        logits = edge_update
+        edge_update = F.silu(self.bn_edges(edge_update))
+        if edge_attr.size(-1) == self.channels:
+            edge_update = edge_attr + edge_update
+        return messages, logits, edge_update
+
+    def forward(self, x, edge_index, edge_attr, relation_adapter=None):
+        _, x_dst = self._split_nodes(x)
+        message_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
+        gate_sum = x_dst.new_zeros((x_dst.size(0), self.channels))
+        messages, logits, edge_update = self.edge_messages(x, edge_index, edge_attr, relation_adapter)
+        if messages.size(0) == 0:
+            return message_sum, gate_sum, edge_update
+        dst = edge_index[1]
+        sigma = torch.sigmoid(logits)
         messages = messages * sigma
         message_sum.index_add_(
             0,
@@ -397,9 +413,6 @@ class HeteroRelationConv(nn.Module):
         )
         gate_sum.index_add_(0, dst, sigma.to(dtype=gate_sum.dtype))
 
-        edge_update = F.silu(self.bn_edges(edge_update))
-        if edge_attr.size(-1) == self.channels:
-            edge_update = edge_attr + edge_update
         return message_sum, gate_sum, edge_update
 
 
@@ -441,6 +454,12 @@ class SharedHeteroRelations(nn.Module):
             raise KeyError(f'Unknown relation: {relation_key}')
         adapter = self.adapters[relation_key] if self.mode == 'shared_residual' else None
         return self.shared(x, edge_index, edge_attr, relation_adapter=adapter)
+
+    def edge_messages(self, relation_key, x, edge_index, edge_attr):
+        if relation_key not in self.relation_keys:
+            raise KeyError(f'Unknown relation: {relation_key}')
+        adapter = self.adapters[relation_key] if self.mode == 'shared_residual' else None
+        return self.shared.edge_messages(x, edge_index, edge_attr, relation_adapter=adapter)
 
 
 def _make_hetero_relation_convs(hidden_dim, edge_types, feature_norm, mode, rank,
@@ -507,23 +526,31 @@ def _hetero_relation_update(
         edge_types,
         relation_convs,
         node_updates,
+        aggregation_mode='relation_mean',
 ):
-    """Aggregate each relation independently, then fuse fixed relation slots."""
+    """Preserve relation slots with either separate means or joint attention."""
     incoming_by_edge_type = {}
     out_edge_attr = {}
+    edge_values = {}
+    edge_logits = {}
 
     for edge_type in edge_types:
         src_type, _, dst_type = edge_type
         relation_key = _edge_parameter_key(edge_type)
         inputs = ((x_dict[src_type], x_dict[dst_type]),
                   edge_index_dict[edge_type], edge_attr_dict[edge_type])
-        if isinstance(relation_convs, SharedHeteroRelations):
+        if aggregation_mode == 'cross_relation_attention':
+            if isinstance(relation_convs, SharedHeteroRelations):
+                values, logits, edge_update = relation_convs.edge_messages(relation_key, *inputs)
+            else:
+                values, logits, edge_update = relation_convs[relation_key].edge_messages(*inputs)
+            edge_values[edge_type], edge_logits[edge_type] = values, logits
+        elif isinstance(relation_convs, SharedHeteroRelations):
             message_sum, gate_sum, edge_update = relation_convs(relation_key, *inputs)
         else:
             message_sum, gate_sum, edge_update = relation_convs[relation_key](*inputs)
-        incoming_by_edge_type[edge_type] = (
-            message_sum / (gate_sum + 1e-6)
-        )
+        if aggregation_mode == 'relation_mean':
+            incoming_by_edge_type[edge_type] = message_sum / (gate_sum + 1e-6)
         out_edge_attr[edge_type] = edge_update
 
     out_dict = {}
@@ -539,6 +566,21 @@ def _hetero_relation_update(
             ),
             key=lambda edge_type: node_type_order[edge_type[0]],
         )
+        if aggregation_mode == 'cross_relation_attention':
+            # A shared denominator across all relations, independently per feature
+            # channel. Reuse the existing gate logits; no new scoring parameters.
+            logits = torch.cat([edge_logits[t] for t in incoming_edge_types], dim=0).float()
+            targets = torch.cat([edge_index_dict[t][1] for t in incoming_edge_types])
+            alpha = graph_softmax(logits, targets, num_nodes=x_dict[node_type].size(0))
+            offset = 0
+            for edge_type in incoming_edge_types:
+                count = edge_values[edge_type].size(0)
+                weighted = alpha[offset:offset + count] * edge_values[edge_type].float()
+                incoming_by_edge_type[edge_type] = scatter(
+                    weighted, edge_index_dict[edge_type][1], dim=0,
+                    dim_size=x_dict[node_type].size(0), reduce='sum',
+                ).to(x_dict[node_type].dtype)
+                offset += count
         out_dict[node_type] = node_updates[node_type](
             x_dict[node_type],
             [
@@ -743,8 +785,10 @@ class HeteroALIGNNLayer(nn.Module):
     def __init__(self, hidden_dim, angle_dim, metadata,
                  vertex_aggregation="add", node_delta_norm="layernorm",
                  feature_norm="batchnorm", relation_mode="independent", relation_rank=8,
-                 message_mode="linear"):
+                 message_mode="linear", aggregation_mode="relation_mean"):
         super().__init__()
+        validate_alignn_hetero_interactions(aggregation_mode, 'none')
+        self.aggregation_mode = aggregation_mode
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.line_conv = GatedGraphConv(
@@ -790,6 +834,7 @@ class HeteroALIGNNLayer(nn.Module):
             self.edge_types,
             self.atom_convs,
             self.node_updates,
+            self.aggregation_mode,
         )
         return out_dict, out_edge_attr, angle_attr
 
@@ -799,8 +844,11 @@ class HeteroGraphConvLayer(nn.Module):
 
     def __init__(self, hidden_dim, metadata, vertex_aggregation="add",
                  node_delta_norm="layernorm", feature_norm="batchnorm",
-                 relation_mode="independent", relation_rank=8, message_mode="linear"):
+                 relation_mode="independent", relation_rank=8, message_mode="linear",
+                 aggregation_mode="relation_mean"):
         super().__init__()
+        validate_alignn_hetero_interactions(aggregation_mode, 'none')
+        self.aggregation_mode = aggregation_mode
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = _make_hetero_relation_convs(
@@ -824,6 +872,7 @@ class HeteroGraphConvLayer(nn.Module):
             self.edge_types,
             self.atom_convs,
             self.node_updates,
+            self.aggregation_mode,
         )
 
 
@@ -1278,6 +1327,53 @@ class SharedHeteroDistanceEmbedding(nn.Module):
         return embedded + self.relation_embedding[relation_key].to(embedded.dtype)
 
 
+class SparseDefectResidual(nn.Module):
+    """One direct, geometry-conditioned defect update after the local backbone.
+
+    Auxiliary edges connect actual defects only. They are excluded from the
+    physical atom/line graph. A zero output projection preserves the baseline
+    initially; its gradients start learning on the first optimization step.
+    """
+
+    def __init__(self, channels, node_types, cutoff=12.0, radial_bins=40):
+        super().__init__()
+        self.node_types = tuple(node_types)
+        self.radial = RBFExpansion(0.0, cutoff, radial_bins)
+        self.norm = nn.LayerNorm(channels)
+        self.message = nn.Sequential(
+            nn.Linear(2 * channels + radial_bins, channels), nn.SiLU(),
+            nn.Linear(channels, channels),
+        )
+        self.gate = nn.Linear(2 * channels + radial_bins, channels)
+        self.output = nn.Linear(channels, channels, bias=False)
+        self.scale_logit = nn.Parameter(torch.tensor(-3.0))
+        nn.init.zeros_(self.output.weight)
+
+    def forward(self, x_dict, edge_index_dict, edge_vec_dict):
+        normalized = {t: self.norm(x_dict[t]) for t in self.node_types}
+        outputs = {}
+        for target_type in self.node_types:
+            messages, targets = [], []
+            for source_type in self.node_types:
+                key = (source_type, 'sparse_dd', target_type)
+                if key not in edge_index_dict or key not in edge_vec_dict:
+                    raise ValueError('Sparse defect residual requires auxiliary sparse_dd edges; '
+                                     'rebuild graphs using the saved model configuration')
+                src, dst = edge_index_dict[key]
+                radial = self.radial(edge_vec_dict[key].float().norm(dim=-1))
+                features = torch.cat([normalized[source_type][src], normalized[target_type][dst], radial], dim=-1)
+                messages.append(self.message(features) * torch.sigmoid(self.gate(features)))
+                targets.append(dst)
+            # Average incoming gated messages over actual defect neighbors.
+            # Empty destinations receive no residual (no output bias).
+            values = torch.cat(messages, dim=0).float()
+            indices = torch.cat(targets)
+            aggregate = scatter(values, indices, dim=0, dim_size=x_dict[target_type].size(0), reduce='mean')
+            delta = self.scale_logit.sigmoid() * self.output(aggregate)
+            outputs[target_type] = x_dict[target_type] + delta.to(x_dict[target_type].dtype)
+        return outputs
+
+
 class HeteroALIGNN(nn.Module):
     """Heterogeneous ALIGNN with configurable feature norms and defect pooling.
 
@@ -1307,6 +1403,9 @@ class HeteroALIGNN(nn.Module):
             relation_rank=8,
             message_mode="linear",
             distance_mode="independent",
+            aggregation_mode="relation_mean",
+            defect_residual="none",
+            defect_cutoff=12.0,
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
@@ -1326,6 +1425,10 @@ class HeteroALIGNN(nn.Module):
         validate_alignn_hetero_encoders(message_mode, distance_mode)
         self.message_mode = message_mode
         self.distance_mode = distance_mode
+        validate_alignn_hetero_interactions(aggregation_mode, defect_residual, defect_cutoff)
+        self.aggregation_mode = aggregation_mode
+        self.defect_residual = defect_residual
+        self.defect_cutoff = float(defect_cutoff)
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim, normalization=feature_norm)
             for node_type in self.node_types
@@ -1359,6 +1462,7 @@ class HeteroALIGNN(nn.Module):
                 relation_mode=relation_mode,
                 relation_rank=relation_rank,
                 message_mode=message_mode,
+                aggregation_mode=aggregation_mode,
             )
             for _ in range(n_blocks)
         ])
@@ -1372,6 +1476,7 @@ class HeteroALIGNN(nn.Module):
                 relation_mode=relation_mode,
                 relation_rank=relation_rank,
                 message_mode=message_mode,
+                aggregation_mode=aggregation_mode,
             )
             for _ in range(gcn_blocks)
         ])
@@ -1380,6 +1485,11 @@ class HeteroALIGNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
+        if defect_residual == 'sparse':
+            with torch.random.fork_rng(devices=[]):
+                self.sparse_defect_residual = SparseDefectResidual(
+                    hidden_dim, self.node_types, cutoff=self.defect_cutoff, radial_bins=edge_input_shape,
+                )
 
     def _line_graph_inputs(self, edge_index_dict, edge_attr_dict, edge_vec_dict):
         edge_offsets = {}
@@ -1495,6 +1605,9 @@ class HeteroALIGNN(nn.Module):
             )
         for layer in self.gcn_layers:
             x_dict, edge_attr_dict = layer(x_dict, edge_index_dict, edge_attr_dict)
+
+        if self.defect_residual == 'sparse':
+            x_dict = self.sparse_defect_residual(x_dict, edge_index_dict, edge_vec_dict)
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)

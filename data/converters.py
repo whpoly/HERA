@@ -176,6 +176,7 @@ class SimpleCrystalConverter:
             hypergraph_radius=3.0,
             ignore_state=False,
             hypergraph_schema='per_defect_neighborhood_v2',
+            sparse_defect_cutoff=None,
     ):
         self.cutoff = cutoff
         self.local_radius = cutoff if local_radius is None else local_radius
@@ -195,6 +196,11 @@ class SimpleCrystalConverter:
         self.add_eos_features = add_eos_features
         self.ignore_state = ignore_state
         self.task = self._graph_mode(task)
+        self.sparse_defect_cutoff = sparse_defect_cutoff
+        if sparse_defect_cutoff is not None:
+            if (not np.isfinite(sparse_defect_cutoff) or sparse_defect_cutoff <= 0
+                    or not task.startswith('alignn_hetero')):
+                raise ValueError('Sparse defect edges require ALIGNN hetero and a finite positive cutoff')
 
     @staticmethod
     def _graph_mode(task):
@@ -277,6 +283,36 @@ class SimpleCrystalConverter:
                 capped_nbrs.append(selected)
             all_nbrs = capped_nbrs
         return all_nbrs
+
+    def _attach_sparse_defect_edges(self, data, structure, node_types, pool_types):
+        """Separate periodic defect graph, with indices local to each node store."""
+        edges, vectors = {}, {}
+        for source_type in self.NODE_TYPE_NAMES:
+            for target_type in self.NODE_TYPE_NAMES:
+                key = (source_type, 'sparse_dd', target_type)
+                edges[key], vectors[key] = [[], []], []
+        local_index = {}
+        for type_id, type_name in enumerate(self.NODE_TYPE_NAMES):
+            for index, original in enumerate(torch.where(node_types.eq(type_id))[0].tolist()):
+                local_index[original] = (type_name, index)
+        defects = torch.where(pool_types.eq(1))[0].tolist()
+        if defects:
+            sparse = Structure.from_sites([structure[i] for i in defects])
+            # Do not truncate equal-distance shells or add the auxiliary edges
+            # to the physical ALIGNN line graph. Nonzero periodic images remain.
+            neighbors = sparse.get_all_neighbors(self.sparse_defect_cutoff, include_index=True)
+            for center, items in enumerate(neighbors):
+                src_type, src = local_index[defects[center]]
+                for neighbor in items:
+                    dst_type, dst = local_index[defects[neighbor.index]]
+                    key = (src_type, 'sparse_dd', dst_type)
+                    edges[key][0].append(src)
+                    edges[key][1].append(dst)
+                    vectors[key].append(np.asarray(neighbor.coords) - sparse[center].coords)
+        for key in edges:
+            data[key].edge_index = torch.tensor(edges[key], dtype=torch.long)
+            data[key].edge_vec = torch.tensor(np.asarray(vectors[key], dtype=float).reshape(-1, 3), dtype=torch.float32)
+        return data
 
     def _hypergraph_regions(self, structure):
         """Build the selected defect hypergraph without changing physical bonds.
@@ -608,6 +644,8 @@ class SimpleCrystalConverter:
             for edge_type_idx, edge_type_name in enumerate(self.EDGE_TYPE_NAMES):
                 edge_count = int((edge_incidies == edge_type_idx).sum().item())
                 data[edge_type_name].bond_batch = MyTensor(np.zeros(edge_count)).long()
+            if self.sparse_defect_cutoff is not None:
+                self._attach_sparse_defect_edges(data, d, indexs, pool_types)
             return data
 
     def __call__(self, d):

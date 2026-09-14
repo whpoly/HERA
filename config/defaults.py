@@ -1,6 +1,7 @@
 """Default configuration generators for each dataset."""
 
 import copy
+import math
 
 
 EARLY_STOPPING_PATIENCE = 50
@@ -17,11 +18,24 @@ ALIGNN_HETERO_RELATION_MODES = ('independent', 'shared', 'shared_residual')
 ALIGNN_HETERO_RELATION_RANK = 8
 ALIGNN_HETERO_MESSAGE_MODES = ('linear', 'pair_mlp')
 ALIGNN_HETERO_DISTANCE_MODES = ('independent', 'shared')
+ALIGNN_HETERO_AGGREGATION_MODES = ('relation_mean', 'cross_relation_attention')
+ALIGNN_HETERO_DEFECT_RESIDUAL_MODES = ('none', 'sparse')
 ALIGNN_HETERO_ABLATIONS = {
-    'baseline': ('linear', 'independent'),
-    'pair_message': ('pair_mlp', 'independent'),
-    'shared_distance': ('linear', 'shared'),
+    'baseline': ('linear', 'independent', 'relation_mean', 'none'),
+    'pair_message': ('pair_mlp', 'independent', 'relation_mean', 'none'),
+    'shared_distance': ('linear', 'shared', 'relation_mean', 'none'),
+    'cross_relation_attention': ('linear', 'independent', 'cross_relation_attention', 'none'),
+    'sparse_residual': ('linear', 'independent', 'relation_mean', 'sparse'),
 }
+
+
+def validate_alignn_hetero_interactions(aggregation_mode, defect_residual, defect_cutoff=12.0):
+    if aggregation_mode not in ALIGNN_HETERO_AGGREGATION_MODES:
+        raise ValueError(f'Unknown hetero aggregation mode: {aggregation_mode}')
+    if defect_residual not in ALIGNN_HETERO_DEFECT_RESIDUAL_MODES:
+        raise ValueError(f'Unknown hetero defect residual: {defect_residual}')
+    if isinstance(defect_cutoff, bool) or not math.isfinite(defect_cutoff) or defect_cutoff <= 0:
+        raise ValueError('Hetero defect cutoff must be finite and > 0')
 
 
 def validate_alignn_hetero_encoders(message_mode, distance_mode):
@@ -40,7 +54,8 @@ def validate_alignn_hetero_relations(mode, rank):
 
 def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
                                relation_mode=None, relation_rank=None,
-                               message_mode=None, distance_mode=None):
+                               message_mode=None, distance_mode=None,
+                               aggregation_mode=None, defect_residual=None, defect_cutoff=None):
     """Override ALIGNN hetero only; omitted saved fields retain legacy behavior."""
     if config['task'] not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
         return config
@@ -59,6 +74,15 @@ def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
         model['hetero_message_mode'] = message_mode
     if distance_mode is not None:
         model['hetero_distance_mode'] = distance_mode
+    if aggregation_mode is not None:
+        model['hetero_aggregation_mode'] = aggregation_mode
+    if defect_residual is not None:
+        model['hetero_defect_residual'] = defect_residual
+    if defect_cutoff is not None:
+        model['hetero_defect_cutoff'] = defect_cutoff
+    validate_alignn_hetero_interactions(model.get('hetero_aggregation_mode', 'relation_mean'),
+                                       model.get('hetero_defect_residual', 'none'),
+                                       model.get('hetero_defect_cutoff', 12.0))
     validate_alignn_hetero_encoders(model.get('hetero_message_mode', 'linear'),
                                    model.get('hetero_distance_mode', 'independent'))
     if model.get('hetero_feature_norm', 'batchnorm') not in ALIGNN_HETERO_FEATURE_NORMS:
@@ -92,6 +116,14 @@ def alignn_hetero_run_components(model_config):
         parts.append(f'message_{message_mode}')
     if distance_mode != 'independent':
         parts.append(f'distance_{distance_mode}')
+    aggregation = model_config.get('hetero_aggregation_mode', 'relation_mean')
+    residual = model_config.get('hetero_defect_residual', 'none')
+    defect_cutoff = model_config.get('hetero_defect_cutoff', 12.0)
+    validate_alignn_hetero_interactions(aggregation, residual, defect_cutoff)
+    if aggregation != 'relation_mean':
+        parts.append(f'aggregation_{aggregation}')
+    if residual != 'none':
+        parts.append(f'defect_residual_{residual}_cutoff{defect_cutoff:g}')
     return parts
 
 

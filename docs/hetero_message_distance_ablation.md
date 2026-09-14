@@ -14,6 +14,16 @@
 line graph 的角度更新。关系身份仍通过原有的关系距离编码和 adapter 表达。
 没有额外改变 gate、关系内归一化、节点融合、图连接、读出或标签。
 
+这里替换的是主消息函数，不是首次让消息接收节点对和距离信息。
+令 `z = [h_src, h_dst, e_ij]`，当前 shared_residual 基线的完整消息为
+`sigmoid(gate(z) + adapter_gate(z)) * (Linear(h_src) + adapter_message(z))`。
+原版 gate 和 rank-8 adapter 已依赖这三个输入；adapter 的输出投影虽然
+初始为零，但训练后可以学到依赖节点对与边特征的非线性修正。
+新版本仅将括号内的 `Linear(h_src)` 替换为共享的 `MLP(z)`。
+因此这是共享主消息的容量与参数化消融，不能解释为“有无距离信息”的消融。
+64 维配置中，原 adapter 为 `192 -> 8 -> 128`（拆分成 gate/message 修正），
+新增主消息为 `192 -> 64 -> 64`。原 attention 的主消息已经使用类似的节点对 MLP。
+
 `shared_distance` 仅共享初始距离编码器，不共享后续每条边的动态状态。
 四种有向关系仍各有一个 H 维向量，初始为零。
 节点 embedding、关系内归一化、关系 adapter 和节点融合保持当前实现。

@@ -292,6 +292,10 @@ class MEGNetTrainer:
             hypergraph_schema=hypergraph_schema,
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
+            sparse_defect_cutoff=(self.config['model'].get('hetero_defect_cutoff', 12.0)
+                                  if self.config['task'] in ALIGNN_HETERO_TASKS
+                                  and self.config['model'].get('hetero_defect_residual', 'none') == 'sparse'
+                                  else None),
         )
         self.scaler = Scaler()
 
@@ -446,6 +450,9 @@ class MEGNetTrainer:
                 relation_rank=self.config['model'].get('hetero_relation_rank', 8),
                 message_mode=self.config['model'].get('hetero_message_mode', 'linear'),
                 distance_mode=self.config['model'].get('hetero_distance_mode', 'independent'),
+                aggregation_mode=self.config['model'].get('hetero_aggregation_mode', 'relation_mean'),
+                defect_residual=self.config['model'].get('hetero_defect_residual', 'none'),
+                defect_cutoff=self.config['model'].get('hetero_defect_cutoff', 12.0),
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(

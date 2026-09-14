@@ -333,6 +333,12 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    if '_aggregation_cross_relation_attention' in mode:
+        return mode_display_name(mode.replace('_aggregation_cross_relation_attention', '')) + ' (cross-relation attention)'
+    if '_defect_residual_sparse_cutoff' in mode:
+        base, suffix = mode.split('_defect_residual_sparse_cutoff', 1)
+        cutoff, separator, rest = suffix.partition('_')
+        return mode_display_name(base + (separator + rest if separator else '')) + f' (sparse defect residual, {cutoff} A)'
     if '_message_pair_mlp' in mode:
         return mode_display_name(mode.replace('_message_pair_mlp', '')) + ' (pair-conditioned messages)'
     if '_distance_shared' in mode:
