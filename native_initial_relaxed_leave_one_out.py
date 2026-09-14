@@ -956,7 +956,7 @@ def build_alignn_hypergraph_comparison(summary_df):
     baseline = alignn[mode.eq("full")].copy()
     hypergraph = alignn[
         mode.str.match(
-            r"^hypergraph(?:_r[^_]+)?(?:_(?:per_defect_neighborhood_v2|defect_global_attention_v3))?(?:_pool_defect_mean)?(?:_updates_(?:none|local|local_global))?$"
+            r"^hypergraph(?:_r[^_]+)?(?:_(?:per_defect_neighborhood_v2|defect_global_attention_v3))?(?:_pool_defect_(?:energy_)?mean)?(?:_updates_(?:none|local|global_only|local_global))?$"
         )
     ].copy()
     if baseline.empty or hypergraph.empty:

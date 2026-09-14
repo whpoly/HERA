@@ -9,12 +9,26 @@ LEGACY_HYPERGRAPH_SCHEMA = 'per_defect_neighborhood_v2'
 HYPERGRAPH_SCHEMA = 'defect_global_attention_v3'
 HYPERGRAPH_SCHEMAS = (LEGACY_HYPERGRAPH_SCHEMA, HYPERGRAPH_SCHEMA)
 HYPERGRAPH_POOLING = 'defect_mean'
-HYPERGRAPH_POOLING_MODES = ('defect_mean', 'hierarchical_attention', 'region_mean')
-HYPERGRAPH_UPDATE_MODES = ('none', 'local', 'local_global')
+HYPERGRAPH_POOLING_MODES = ('defect_mean', 'defect_energy_mean', 'hierarchical_attention', 'region_mean')
+HYPERGRAPH_UPDATE_MODES = ('none', 'local', 'global_only', 'local_global')
 ALIGNN_HETERO_FEATURE_NORMS = ('layernorm', 'batchnorm')
 ALIGNN_HETERO_POOLING_MODES = ('defect_mean', 'defect_energy_mean', 'type_mean')
 ALIGNN_HETERO_RELATION_MODES = ('independent', 'shared', 'shared_residual')
 ALIGNN_HETERO_RELATION_RANK = 8
+ALIGNN_HETERO_MESSAGE_MODES = ('linear', 'pair_mlp')
+ALIGNN_HETERO_DISTANCE_MODES = ('independent', 'shared')
+ALIGNN_HETERO_ABLATIONS = {
+    'baseline': ('linear', 'independent'),
+    'pair_message': ('pair_mlp', 'independent'),
+    'shared_distance': ('linear', 'shared'),
+}
+
+
+def validate_alignn_hetero_encoders(message_mode, distance_mode):
+    if message_mode not in ALIGNN_HETERO_MESSAGE_MODES:
+        raise ValueError(f'Unknown hetero message mode: {message_mode}')
+    if distance_mode not in ALIGNN_HETERO_DISTANCE_MODES:
+        raise ValueError(f'Unknown hetero distance mode: {distance_mode}')
 
 
 def validate_alignn_hetero_relations(mode, rank):
@@ -25,7 +39,8 @@ def validate_alignn_hetero_relations(mode, rank):
 
 
 def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
-                               relation_mode=None, relation_rank=None):
+                               relation_mode=None, relation_rank=None,
+                               message_mode=None, distance_mode=None):
     """Override ALIGNN hetero only; omitted saved fields retain legacy behavior."""
     if config['task'] not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
         return config
@@ -40,6 +55,12 @@ def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
         if model.get('hetero_relation_mode', 'independent') != 'shared_residual':
             raise ValueError('Relation adapter rank requires shared_residual relations')
         model['hetero_relation_rank'] = relation_rank
+    if message_mode is not None:
+        model['hetero_message_mode'] = message_mode
+    if distance_mode is not None:
+        model['hetero_distance_mode'] = distance_mode
+    validate_alignn_hetero_encoders(model.get('hetero_message_mode', 'linear'),
+                                   model.get('hetero_distance_mode', 'independent'))
     if model.get('hetero_feature_norm', 'batchnorm') not in ALIGNN_HETERO_FEATURE_NORMS:
         raise ValueError('Unknown ALIGNN hetero feature normalization')
     if model.get('hetero_pooling', 'type_mean') not in ALIGNN_HETERO_POOLING_MODES:
@@ -64,6 +85,13 @@ def alignn_hetero_run_components(model_config):
         parts.append('relations_shared')
     elif mode == 'shared_residual':
         parts.append(f'relations_shared_residual_rank{rank}')
+    message_mode = model_config.get('hetero_message_mode', 'linear')
+    distance_mode = model_config.get('hetero_distance_mode', 'independent')
+    validate_alignn_hetero_encoders(message_mode, distance_mode)
+    if message_mode != 'linear':
+        parts.append(f'message_{message_mode}')
+    if distance_mode != 'independent':
+        parts.append(f'distance_{distance_mode}')
     return parts
 
 
@@ -73,7 +101,7 @@ def resolve_hypergraph_pooling(schema, pooling=None):
         raise ValueError(f'Unknown hypergraph schema: {schema}')
     if pooling is None:
         return 'region_mean' if schema == LEGACY_HYPERGRAPH_SCHEMA else 'hierarchical_attention'
-    allowed = ('region_mean',) if schema == LEGACY_HYPERGRAPH_SCHEMA else HYPERGRAPH_POOLING_MODES[:2]
+    allowed = ('region_mean',) if schema == LEGACY_HYPERGRAPH_SCHEMA else HYPERGRAPH_POOLING_MODES[:-1]
     if pooling not in allowed:
         raise ValueError(f'Hypergraph schema {schema} supports pooling {allowed}, got {pooling!r}')
     return pooling
@@ -95,13 +123,13 @@ def apply_hypergraph_options(config, schema=None, pooling=None):
 
 
 def resolve_hypergraph_updates(schema, pooling, updates=None):
-    """Explicit update ablations use v3 with a fixed defect-mean readout."""
+    """Explicit update ablations use v3 with either actual-defect mean readout."""
     if updates is None:
         return 'local_global'
     if updates not in HYPERGRAPH_UPDATE_MODES:
         raise ValueError(f'Unknown hypergraph update mode: {updates}')
-    if schema != HYPERGRAPH_SCHEMA or pooling != 'defect_mean':
-        raise ValueError('Hypergraph update ablations require v3 and defect_mean pooling')
+    if schema != HYPERGRAPH_SCHEMA or pooling not in ('defect_mean', 'defect_energy_mean'):
+        raise ValueError('Hypergraph update ablations require v3 and defect_mean or defect_energy_mean pooling')
     return updates
 
 
@@ -109,7 +137,7 @@ def hypergraph_run_components(model_config):
     """New readouts get isolated paths; existing checkpoint paths stay valid."""
     schema = model_config.get('hypergraph_schema', LEGACY_HYPERGRAPH_SCHEMA)
     pooling = resolve_hypergraph_pooling(schema, model_config.get('hypergraph_pooling'))
-    parts = [schema, 'pool_defect_mean'] if pooling == 'defect_mean' else [schema]
+    parts = [schema, f'pool_{pooling}'] if pooling in ('defect_mean', 'defect_energy_mean') else [schema]
     updates = model_config.get('hypergraph_updates')
     if updates is not None:
         resolve_hypergraph_updates(schema, pooling, updates)

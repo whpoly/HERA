@@ -28,7 +28,7 @@ from HERA.tests.test_hypergraph import (
 from HERA.tests.test_hypergraph_v3 import converter
 
 
-MODES = ('none', 'local', 'local_global')
+MODES = ('none', 'local', 'global_only', 'local_global')
 
 
 class HypergraphUpdateAblationTests(unittest.TestCase):
@@ -160,7 +160,7 @@ class HypergraphUpdateAblationTests(unittest.TestCase):
         run = {'label': 'hypergraph', 'mode': 'hypergraph',
                'config': get_config('alignn', '2dmd_mos2', 'hypergraph')}
         runs = expand_hypergraph_update_runs([run], [*MODES, 'local'], True)
-        self.assertEqual(len(runs), 3)
+        self.assertEqual(len(runs), len(MODES))
         self.assertNotIn('hypergraph_updates', run['config']['model'])
         prefixes = []
         for updates, run in zip(MODES, runs):
@@ -169,7 +169,7 @@ class HypergraphUpdateAblationTests(unittest.TestCase):
             self.assertEqual(parts, [HYPERGRAPH_SCHEMA, 'pool_defect_mean', f'updates_{updates}'])
             path = Path('root/hypergraph').joinpath(*parts, 'seed123_test_predictions.csv')
             prefixes.append(alignn_result_prefix(Path('root'), path))
-        self.assertEqual(len(set(prefixes)), 3)
+        self.assertEqual(len(set(prefixes)), len(MODES))
         self.assertEqual(expand_hypergraph_update_runs([run], MODES, False), [run])
 
     def test_incompatible_readouts_schemas_and_backbones_are_rejected(self):
@@ -187,13 +187,13 @@ class HypergraphUpdateAblationTests(unittest.TestCase):
     def test_native_runner_and_comparison_keep_all_update_variants(self):
         runs = expand_leave_one_out_runs('alignn', ['full', 'hypergraph'], None,
                                         hypergraph_updates=MODES)
-        self.assertEqual(len(runs), 4)
+        self.assertEqual(len(runs), len(MODES) + 1)
         rows = []
         for run in runs:
             rows.append({'model': 'alignn', 'mode': run['label'], 'material': 'MoS2',
                          'protocol': 'direct__final_test', 'seed': 123, 'mae': .1})
         comparison = build_alignn_hypergraph_comparison(pd.DataFrame(rows))
-        self.assertEqual(len(comparison), 3)
+        self.assertEqual(len(comparison), len(MODES))
         self.assertIn('local + global updates', model_mode_display('alignn', runs[-1]['label']))
 
 

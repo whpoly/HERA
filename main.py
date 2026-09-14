@@ -52,6 +52,7 @@ from .config.defaults import (
     apply_hypergraph_options, hypergraph_run_components, resolve_hypergraph_pooling,
     ALIGNN_HETERO_FEATURE_NORMS, ALIGNN_HETERO_POOLING_MODES,
     ALIGNN_HETERO_RELATION_MODES,
+    ALIGNN_HETERO_MESSAGE_MODES, ALIGNN_HETERO_DISTANCE_MODES, ALIGNN_HETERO_ABLATIONS,
     apply_alignn_hetero_options, alignn_hetero_run_components,
     HYPERGRAPH_UPDATE_MODES, resolve_hypergraph_updates,
 )
@@ -229,6 +230,25 @@ def expand_alignn_node_norm_runs(mode_runs, norm_values, enabled):
     return expanded
 
 
+def expand_alignn_hetero_encoder_runs(mode_runs, ablations, enabled):
+    """Run one change at a time relative to linear messages/independent distances."""
+    if not enabled or ablations is None:
+        return mode_runs
+    if isinstance(ablations, str):
+        ablations = [ablations]
+    expanded = []
+    for run in mode_runs:
+        for ablation in dict.fromkeys(ablations):
+            if ablation not in ALIGNN_HETERO_ABLATIONS:
+                raise ValueError(f'Unknown hetero encoder ablation: {ablation}')
+            variant = copy.deepcopy(run)
+            message_mode, distance_mode = ALIGNN_HETERO_ABLATIONS[ablation]
+            apply_alignn_hetero_options(variant['config'], message_mode=message_mode,
+                                       distance_mode=distance_mode)
+            expanded.append(variant)
+    return expanded
+
+
 def expand_hypergraph_update_runs(mode_runs, update_values, enabled):
     """Change only active hypergraph messages; keep model and graph inputs fixed."""
     if not enabled or update_values is None:
@@ -293,6 +313,8 @@ def apply_training_overrides(config, args, model_name):
             getattr(args, 'alignn_hetero_pooling', None),
             getattr(args, 'alignn_hetero_relations', None),
             getattr(args, 'alignn_hetero_adapter_rank', None),
+            message_mode=getattr(args, 'alignn_hetero_message', None),
+            distance_mode=getattr(args, 'alignn_hetero_distance', None),
         )
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
@@ -826,7 +848,9 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
             f'node delta norm: {config["model"].get("hetero_node_norm", "layernorm")}; '
             f'pooling: {config["model"].get("hetero_pooling", "type_mean")}; '
             f'relations: {config["model"].get("hetero_relation_mode", "independent")}; '
-            f'adapter rank: {config["model"].get("hetero_relation_rank", 8)}',
+            f'adapter rank: {config["model"].get("hetero_relation_rank", 8)}; '
+            f'message: {config["model"].get("hetero_message_mode", "linear")}; '
+            f'distance: {config["model"].get("hetero_distance_mode", "independent")}',
         )
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
@@ -1034,6 +1058,13 @@ def main():
             'isolated benchmark for each choice (default: layernorm)'
         ),
     )
+    parser.add_argument('--alignn-hetero-message', choices=ALIGNN_HETERO_MESSAGE_MODES,
+                        help='Hetero message content: linear source or pair-conditioned MLP')
+    parser.add_argument('--alignn-hetero-distance', choices=ALIGNN_HETERO_DISTANCE_MODES,
+                        help='Hetero radial encoder: independent or shared with relation vectors')
+    parser.add_argument('--alignn-hetero-ablation', nargs='+', choices=tuple(ALIGNN_HETERO_ABLATIONS),
+                        help='Sequential independent ablations: baseline, pair_message, shared_distance; '
+                             'cannot combine with explicit message/distance options')
     parser.add_argument('--early-stopping-patience', type=int, default=None,
                         help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
@@ -1055,11 +1086,11 @@ def main():
     )
     parser.add_argument(
         '--hypergraph-pooling', choices=HYPERGRAPH_POOLING_MODES, default=None,
-        help='V3: defect_mean (default) or hierarchical_attention; v2: region_mean',
+        help='V3: defect_mean = MLP(mean(h)) (default), defect_energy_mean = mean(MLP(h)), or hierarchical_attention; v2: region_mean',
     )
     parser.add_argument(
         '--hypergraph-updates', nargs='+', choices=HYPERGRAPH_UPDATE_MODES, default=None,
-        help='HyperALIGNN v3 defect-mean ablations: none, local, local_global; multiple choices run sequentially',
+        help='HyperALIGNN v3 mean-readout ablations: none, local, global_only, local_global; multiple choices run sequentially',
     )
     parser.add_argument(
         '--seed',
@@ -1134,6 +1165,16 @@ def main():
         parser.error('--alignn-cutoff must be > 0')
     if args.hypergraph_radius is not None and args.hypergraph_radius < 0:
         parser.error('--hypergraph-radius must be >= 0')
+    if any(value is not None for value in (
+            args.alignn_hetero_message, args.alignn_hetero_distance, args.alignn_hetero_ablation)):
+        if args.model != 'alignn':
+            parser.error('Hetero encoder options require --model alignn')
+        if args.mode is not None and not any(
+                mode in (*ALIGNN_NODE_NORM_MODES, 'all') for mode in args.mode):
+            parser.error('Hetero encoder options require a hetero mode')
+        if args.alignn_hetero_ablation is not None and (
+                args.alignn_hetero_message is not None or args.alignn_hetero_distance is not None):
+            parser.error('Use either --alignn-hetero-ablation or explicit message/distance options')
     if args.alignn_hetero_relations is not None or args.alignn_hetero_adapter_rank is not None:
         if args.model != 'alignn':
             parser.error('Hetero relation options require --model alignn')
@@ -1329,6 +1370,10 @@ def main():
                     mode_runs, args.hypergraph_updates,
                     model_name == 'alignn' and mode in HYPERGRAPH_MODES,
                 )
+                mode_runs = expand_alignn_hetero_encoder_runs(
+                    mode_runs, args.alignn_hetero_ablation,
+                    model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES,
+                )
 
                 for run in mode_runs:
                     if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
@@ -1401,6 +1446,8 @@ def main():
                         f'hetero_pooling={config["model"].get("hetero_pooling", "n/a")}, '
                         f'hetero_relations={config["model"].get("hetero_relation_mode", "independent")}, '
                         f'hetero_adapter_rank={config["model"].get("hetero_relation_rank", 8)}, '
+                        f'hetero_message={config["model"].get("hetero_message_mode", "linear")}, '
+                        f'hetero_distance={config["model"].get("hetero_distance_mode", "independent")}, '
                         f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )
@@ -1424,6 +1471,8 @@ def main():
                             explain_parts.append(run['radius_label'])
                         if run.get('norm_label') is not None:
                             explain_parts.append(run['norm_label'])
+                        if model_name == 'alignn' and train_mode in ALIGNN_NODE_NORM_MODES:
+                            explain_parts.extend(alignn_hetero_run_components(config['model']))
                         explain_root = os.path.join(*explain_parts)
                     else:
                         explain_root = os.path.join(mode_dir, 'explanations')

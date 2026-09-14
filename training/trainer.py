@@ -444,6 +444,8 @@ class MEGNetTrainer:
                 pooling=self.config['model'].get('hetero_pooling', 'type_mean'),
                 relation_mode=self.config['model'].get('hetero_relation_mode', 'independent'),
                 relation_rank=self.config['model'].get('hetero_relation_rank', 8),
+                message_mode=self.config['model'].get('hetero_message_mode', 'linear'),
+                distance_mode=self.config['model'].get('hetero_distance_mode', 'independent'),
             ).to(self.device)
         elif task in ALIGNN_ATTENTION_TASKS:
             self.model = AttentionALIGNN(

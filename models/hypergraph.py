@@ -186,23 +186,29 @@ class DefectHierarchicalReadout(nn.Module):
 
 
 class DefectMeanReadout(nn.Module):
-    """Mean each graph's final defect representations, counting nodes once.
+    """Mean each graph's actual defects, optionally transforming them first.
 
     Physical and hypergraph propagation have already incorporated the host
     environment and other defects. This readout does not pool incidences,
     local edges, pristine nodes, or raw defect counts into the prediction.
-    The subsequent graph MLP acts on the mean representation.
+    Without node_transform, the graph MLP acts on the mean representation.
+    With node_transform, the same head predicts each defect contribution
+    before averaging, without pooling duplicate hyperedge incidences.
     """
 
     def forward(self, x, hyperedge_index, hyperedge_type, batch,
-                num_graphs, num_hyperedges):
+                num_graphs, num_hyperedges, node_transform=None):
         regions = infer_region_type(x.size(0), hyperedge_index, hyperedge_type)
         defect = regions.eq(0)
         counts = scatter(defect.to(x.dtype), batch, dim=0,
                          dim_size=num_graphs, reduce='sum')
         if torch.any(counts.eq(0)):
             raise ValueError('Defect mean pooling requires at least one defect per graph')
-        return scatter(x[defect], batch[defect], dim=0,
+        selected = x[defect]
+        if node_transform is not None:
+            # Preserve the backbone dtype for accumulation under autocast.
+            selected = node_transform(selected).to(dtype=x.dtype)
+        return scatter(selected, batch[defect], dim=0,
                        dim_size=num_graphs, reduce='mean')
 
 
@@ -264,8 +270,10 @@ class RegionHypergraphInteraction(nn.Module):
         self.is_v3 = schema == HYPERGRAPH_SCHEMA
         self.pooling_mode = resolve_hypergraph_pooling(schema, pooling)
         self.updates_mode = resolve_hypergraph_updates(schema, self.pooling_mode, updates)
-        self.defect_mean = self.pooling_mode == 'defect_mean'
-        self.output_dim = hidden_dim if self.defect_mean else 3 * hidden_dim
+        self.defect_energy_mean = self.pooling_mode == 'defect_energy_mean'
+        # Both mean readouts take an H-dimensional per-defect prediction head.
+        self.defect_mean = self.pooling_mode in ('defect_mean', 'defect_energy_mean')
+        self.output_dim = 1 if self.defect_energy_mean else hidden_dim if self.defect_mean else 3 * hidden_dim
         self.region_embedding = nn.Embedding(self.NUM_REGION_TYPES, hidden_dim)
         block_type = DefectHypergraphBlock if self.is_v3 else RegionHypergraphBlock
         self.blocks = nn.ModuleList([
@@ -384,6 +392,8 @@ class RegionHypergraphInteraction(nn.Module):
         kwargs = {'hyperedge_type': hyperedge_type} if self.is_v3 else {}
         if self.updates_mode == 'local':
             kwargs['active_edge_mask'] = hyperedge_type.eq(self.LOCAL_NEIGHBORHOOD)
+        elif self.updates_mode == 'global_only':
+            kwargs['active_edge_mask'] = hyperedge_type.eq(self.DEFECT_CORE)
         return self.blocks[step](
             x,
             hyperedge_index,
@@ -400,6 +410,7 @@ class RegionHypergraphInteraction(nn.Module):
             batch,
             num_graphs,
             num_hyperedges,
+            node_transform=None,
     ):
         """Apply the configured graph readout after checking batch isolation."""
         node_ids, hyperedge_ids = hyperedge_index
@@ -421,6 +432,11 @@ class RegionHypergraphInteraction(nn.Module):
         if not torch.equal(hyperedge_graph_min, hyperedge_graph_max):
             raise ValueError("A hyperedge cannot contain nodes from multiple graphs")
         if self.is_v3:
+            if self.defect_energy_mean:
+                if node_transform is None:
+                    raise ValueError('defect_energy_mean requires a per-defect prediction head')
+                return self.readout(x, hyperedge_index, hyperedge_type, batch,
+                                    num_graphs, num_hyperedges, node_transform=node_transform)
             return self.readout(x, hyperedge_index, hyperedge_type, batch,
                                 num_graphs, num_hyperedges)
 
@@ -544,7 +560,10 @@ class RegionHypergraphNet(nn.Module):
             batch,
             num_graphs,
             num_hyperedges,
+            node_transform=self.readout if self.hypergraph.defect_energy_mean else None,
         )
+        if self.hypergraph.defect_energy_mean:
+            return region_pool
         if self.hypergraph.defect_mean:
             return self.readout(region_pool)
 

@@ -169,13 +169,19 @@ class HyperCGCNN(nn.Module):
             batch,
             num_graphs,
             num_hyperedges,
+            node_transform=self._readout if self.hypergraph.defect_energy_mean else None,
         )
+        if self.hypergraph.defect_energy_mean:
+            return region_pool
         if self.hypergraph.defect_mean:
             crys_fea = region_pool
         else:
             kwargs = {'node_type': region_type.eq(0).long()} if self.is_v3 else {}
             global_pool = self.pooling(atom_fea, batch, **kwargs)
             crys_fea = torch.cat([global_pool, region_pool], dim=-1)
+        return self._readout(crys_fea)
+
+    def _readout(self, crys_fea):
         crys_fea = F.softplus(self.conv_to_fc(F.softplus(crys_fea)))
         if self.classification:
             crys_fea = self.dropout(crys_fea)

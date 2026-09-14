@@ -333,6 +333,10 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    if '_message_pair_mlp' in mode:
+        return mode_display_name(mode.replace('_message_pair_mlp', '')) + ' (pair-conditioned messages)'
+    if '_distance_shared' in mode:
+        return mode_display_name(mode.replace('_distance_shared', '')) + ' (shared distance encoder)'
     if '_relations_' in mode:
         base, relation_suffix = mode.split('_relations_', 1)
         if relation_suffix.startswith('shared_residual_rank'):
@@ -346,6 +350,7 @@ def mode_display_name(mode):
     if '_updates_' in mode:
         base, updates = mode.rsplit('_updates_', 1)
         display = {'none': 'no hypergraph updates', 'local': 'local updates',
+                   'global_only': 'global-only updates',
                    'local_global': 'local + global updates'}.get(updates, updates)
         return mode_display_name(base) + f' ({display})'
     if '_features_layernorm' in mode:

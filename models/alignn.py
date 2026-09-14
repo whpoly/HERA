@@ -14,7 +14,10 @@ from .modules import (
     RelationFusionUpdate,
 )
 from .hypergraph import RegionHypergraphInteraction
-from ..config.defaults import ALIGNN_HETERO_POOLING_MODES, validate_alignn_hetero_relations
+from ..config.defaults import (
+    ALIGNN_HETERO_POOLING_MODES, validate_alignn_hetero_relations,
+    validate_alignn_hetero_encoders,
+)
 
 
 def _edge_type_key(edge_type):
@@ -338,13 +341,22 @@ class HeteroRelationConv(nn.Module):
     the result in a separate slot for the node-type-specific fusion FFN.
     """
 
-    def __init__(self, channels, edge_dim, normalization="batchnorm"):
+    def __init__(self, channels, edge_dim, normalization="batchnorm", message_mode="linear"):
         super().__init__()
+        validate_alignn_hetero_encoders(message_mode, 'independent')
         self.channels = channels
+        self.message_mode = message_mode
         self.src_gate = nn.Linear(channels, channels)
         self.dst_gate = nn.Linear(channels, channels)
         self.edge_gate = nn.Linear(edge_dim, channels)
         self.message_update = nn.Linear(channels, channels)
+        if message_mode == 'pair_mlp':
+            # Preserve the legacy RNG progression for all unchanged parameters.
+            with torch.random.fork_rng(devices=[]):
+                self.message_update = nn.Sequential(
+                    nn.Linear(2 * channels + edge_dim, channels), nn.SiLU(),
+                    nn.Linear(channels, channels),
+                )
         self.bn_edges = _make_feature_norm(channels, normalization)
 
     @staticmethod
@@ -366,7 +378,10 @@ class HeteroRelationConv(nn.Module):
             + self.dst_gate(x_dst[dst])
             + self.edge_gate(edge_attr)
         )
-        messages = self.message_update(x_src)[src]
+        messages = (
+            self.message_update(torch.cat([x_src[src], x_dst[dst], edge_attr], dim=-1))
+            if self.message_mode == 'pair_mlp' else self.message_update(x_src)[src]
+        )
         if relation_adapter is not None:
             gate_delta, message_delta = relation_adapter(torch.cat(
                 [x_src[src], x_dst[dst], edge_attr], dim=-1,
@@ -428,12 +443,14 @@ class SharedHeteroRelations(nn.Module):
         return self.shared(x, edge_index, edge_attr, relation_adapter=adapter)
 
 
-def _make_hetero_relation_convs(hidden_dim, edge_types, feature_norm, mode, rank):
+def _make_hetero_relation_convs(hidden_dim, edge_types, feature_norm, mode, rank,
+                                 message_mode='linear'):
     validate_alignn_hetero_relations(mode, rank)
     # Initialize in the legacy order to keep embeddings, node fusion and the
     # prediction head identical across relation modes at a fixed random seed.
     convs = nn.ModuleDict({
-        key: HeteroRelationConv(hidden_dim, hidden_dim, normalization=feature_norm)
+        key: HeteroRelationConv(hidden_dim, hidden_dim, normalization=feature_norm,
+                               message_mode=message_mode)
         for key in dict.fromkeys(_edge_parameter_key(edge_type) for edge_type in edge_types)
     })
     if mode == 'independent':
@@ -725,7 +742,8 @@ class HeteroALIGNNLayer(nn.Module):
 
     def __init__(self, hidden_dim, angle_dim, metadata,
                  vertex_aggregation="add", node_delta_norm="layernorm",
-                 feature_norm="batchnorm", relation_mode="independent", relation_rank=8):
+                 feature_norm="batchnorm", relation_mode="independent", relation_rank=8,
+                 message_mode="linear"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
@@ -734,7 +752,7 @@ class HeteroALIGNNLayer(nn.Module):
             normalization=feature_norm,
         )
         self.atom_convs = _make_hetero_relation_convs(
-            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank,
+            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank, message_mode,
         )
         self.node_updates = nn.ModuleDict({
             node_type: HeteroNodeUpdate(
@@ -781,12 +799,12 @@ class HeteroGraphConvLayer(nn.Module):
 
     def __init__(self, hidden_dim, metadata, vertex_aggregation="add",
                  node_delta_norm="layernorm", feature_norm="batchnorm",
-                 relation_mode="independent", relation_rank=8):
+                 relation_mode="independent", relation_rank=8, message_mode="linear"):
         super().__init__()
         self.node_types = tuple(metadata[0])
         self.edge_types = tuple(tuple(edge_type) for edge_type in metadata[1])
         self.atom_convs = _make_hetero_relation_convs(
-            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank,
+            hidden_dim, self.edge_types, feature_norm, relation_mode, relation_rank, message_mode,
         )
         self.node_updates = nn.ModuleDict({
             node_type: HeteroNodeUpdate(
@@ -1025,7 +1043,10 @@ class HyperALIGNN(nn.Module):
             batch,
             num_graphs,
             num_hyperedges,
+            node_transform=self.readout if self.hypergraph.defect_energy_mean else None,
         )
+        if self.hypergraph.defect_energy_mean:
+            return region_pool
         if self.hypergraph.defect_mean:
             return self.readout(region_pool)
         if self.is_v3:
@@ -1241,6 +1262,22 @@ class DefiNetALIGNN(nn.Module):
         return results
 
 
+class SharedHeteroDistanceEmbedding(nn.Module):
+    """One radial encoder with a small additive vector per directed relation."""
+
+    def __init__(self, shared, relation_keys, hidden_dim):
+        super().__init__()
+        self.shared = shared
+        # Zero initialization makes the initial radial encoding type-independent.
+        self.relation_embedding = nn.ParameterDict({
+            key: nn.Parameter(torch.zeros(hidden_dim)) for key in relation_keys
+        })
+
+    def forward(self, relation_key, features):
+        embedded = self.shared(features)
+        return embedded + self.relation_embedding[relation_key].to(embedded.dtype)
+
+
 class HeteroALIGNN(nn.Module):
     """Heterogeneous ALIGNN with configurable feature norms and defect pooling.
 
@@ -1268,6 +1305,8 @@ class HeteroALIGNN(nn.Module):
             pooling="type_mean",
             relation_mode="independent",
             relation_rank=8,
+            message_mode="linear",
+            distance_mode="independent",
     ):
         super().__init__()
         self.node_types = tuple(metadata[0])
@@ -1284,6 +1323,9 @@ class HeteroALIGNN(nn.Module):
         validate_alignn_hetero_relations(relation_mode, relation_rank)
         self.relation_mode = relation_mode
         self.relation_rank = relation_rank
+        validate_alignn_hetero_encoders(message_mode, distance_mode)
+        self.message_mode = message_mode
+        self.distance_mode = distance_mode
         self.node_embedding = nn.ModuleDict({
             node_type: MLPLayer(node_input_shape, hidden_dim, normalization=feature_norm)
             for node_type in self.node_types
@@ -1297,6 +1339,11 @@ class HeteroALIGNN(nn.Module):
                 _edge_parameter_key(edge_type) for edge_type in self.edge_types
             )
         })
+        if distance_mode == 'shared':
+            # Construct the old bank first so subsequent initialization is unchanged.
+            self.edge_embedding = SharedHeteroDistanceEmbedding(
+                next(iter(self.edge_embedding.values())), tuple(self.edge_embedding), hidden_dim,
+            )
         self.angle_expansion = AngleExpansion(angle_embed_size)
         self.angle_embedding = _official_feature_embedding(
             self.angle_expansion.out_features, hidden_dim, normalization=feature_norm,
@@ -1311,6 +1358,7 @@ class HeteroALIGNN(nn.Module):
                 feature_norm=feature_norm,
                 relation_mode=relation_mode,
                 relation_rank=relation_rank,
+                message_mode=message_mode,
             )
             for _ in range(n_blocks)
         ])
@@ -1323,6 +1371,7 @@ class HeteroALIGNN(nn.Module):
                 feature_norm=feature_norm,
                 relation_mode=relation_mode,
                 relation_rank=relation_rank,
+                message_mode=message_mode,
             )
             for _ in range(gcn_blocks)
         ])
@@ -1423,7 +1472,9 @@ class HeteroALIGNN(nn.Module):
                 edge_attr_dict[edge_type],
                 edge_vec_dict.get(edge_type),
                 self.distance_expansion,
-                self.edge_embedding[_edge_parameter_key(edge_type)],
+                (lambda features, key=_edge_parameter_key(edge_type): self.edge_embedding(key, features))
+                if self.distance_mode == 'shared'
+                else self.edge_embedding[_edge_parameter_key(edge_type)],
             )
             for edge_type in self.edge_types
         }

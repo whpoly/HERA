@@ -158,6 +158,9 @@ class DefectHypergraphIntegrationTests(unittest.TestCase):
     def test_all_backbones_backward_and_batch_independence(self):
         self.check_backbones('defect_mean')
 
+    def test_energy_mean_backbones_backward_and_batch_independence(self):
+        self.check_backbones('defect_energy_mean')
+
     def test_hierarchical_ablation_backward_and_batch_independence(self):
         self.check_backbones('hierarchical_attention')
 

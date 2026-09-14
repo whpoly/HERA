@@ -223,7 +223,10 @@ class HyperMEGNet(nn.Module):
             batch,
             num_graphs,
             num_hyperedges,
+            node_transform=self.hiddens if self.hypergraph.defect_energy_mean else None,
         )
+        if self.hypergraph.defect_energy_mean:
+            return region_pool
         if self.hypergraph.defect_mean:
             return self.hiddens(region_pool)
         node_pool = self.sv(x, batch, dim_size=num_graphs)

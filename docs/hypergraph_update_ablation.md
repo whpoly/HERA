@@ -1,5 +1,9 @@
 # HyperALIGNN：固定 defect mean pooling 的消息传递消融
 
+2026-09-13 更新：新增 `global_only` 和 `defect_energy_mean`，支持独立组合。
+四组运行命令与验证见 [新的读出与 global-only 对照](hypergraph_energy_global_ablation.md)。
+以下保留最初三组消融的设计记录。
+
 2026-09-11。为检查此前 hypergraph 变差是否与超图消息传递有关，增加
 `--hypergraph-updates`，在相同 v3 架构中选择三种更新方式：
 
