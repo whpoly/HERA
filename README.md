@@ -331,6 +331,30 @@ its own `test_summary.csv` plus per-checkpoint prediction CSVs. Pass an explicit
 list such as `--alignn-mode full full_x hetero definet attention hypergraph`
 to restrict the ALIGNN checkpoints.
 
+For the complete CGCNN/MEGNet/ALIGNN benchmark, train both domain datasets and
+then evaluate every saved mixed-low model on MoS2 high and WSe2 high separately:
+
+```bash
+PYTHONHASHSEED=123 CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m HERA.main --model all --dataset 2dmd_low 2dmd_high --mode all --r 0 --alignn-hetero-feature-norm layernorm --alignn-hetero-pooling defect_energy_mean --alignn-hetero-relations shared_residual --alignn-hetero-adapter-rank 8 --seed 123 --epochs 500 --device cuda:0 --resume --run-dir HERA/logs/2dmd_all_low_high_benchmark && PYTHONHASHSEED=123 CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m HERA.predict_2dmd_low_checkpoints --checkpoint-root HERA/logs/2dmd_all_low_high_benchmark --model all --mode all --material mos2 wse2 --seed 123 --device cuda:0 --test-batch-size 1
+```
+
+Run from HERA's parent directory. `--model all --mode all` uses every supported
+mode of the three backbones, including attention, DefiNet where supported,
+hypergraph and WAS variants. Sparse belongs to MEGNet. At r=0, fixed hetero
+pooling duplicates hetero and is skipped: 32 model/mode runs per dataset,
+64 training runs for seed 123. ALIGNN hetero uses shared_residual rank8 and
+defect_energy_mean; the ALIGNN options do not alter CGCNN or MEGNet.
+`--resume` skips completed training runs; it does not restore interrupted
+optimizer progress. The inference command restores the saved low checkpoint
+configurations and scalers and ignores high-trained checkpoints. Each material
+gets its own `high_test_predictions/<material dataset>/test_summary.csv` and
+per-model prediction CSVs. Completed inference summaries are saved after each
+model. Use `--model cgcnn --mode attention definet` to filter inference.
+
+The domain benchmark uses each dataset's train/validation/test split;
+`2dmd_high` contains six host materials. The subsequent low-to-high evaluation
+uses only the 500 MoS2 high and 500 WSe2 high samples, in separate result files.
+
 On the configured Slurm cluster, `scripts/submit_hypergraph_benchmark.sbatch`
 runs the four standard hypergraph datasets in parallel, then reuses one GPU for
 the seed-123 native leave-one-material-out comparison between full ALIGNN and

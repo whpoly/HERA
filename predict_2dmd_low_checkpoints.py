@@ -22,7 +22,7 @@ from .data.datasets import (
     init_elem_embedding,
     representation_for_mode,
 )
-from .main import clear_cuda_cache, write_test_predictions
+from .main import ALL_MODEL_SUITES, clear_cuda_cache, set_seed, write_test_predictions
 from .training.trainer import MEGNetTrainer, load_trusted_checkpoint
 
 
@@ -78,8 +78,14 @@ def discover_low_checkpoints(
         checkpoint_root,
         alignn_modes=None,
         seeds=None,
+        models=None,
+        modes=None,
 ):
-    """Discover MEGNet Sparse and selected non-WAS ALIGNN checkpoints."""
+    """Select mixed-low checkpoints; keep the legacy selection by default.
+
+    Explicit models opt into the full suite, including WAS modes. Checkpoint
+    metadata, rather than the directory name, determines the training dataset.
+    """
     checkpoint_root = Path(checkpoint_root)
     if not checkpoint_root.is_dir():
         raise FileNotFoundError(
@@ -91,6 +97,8 @@ def discover_low_checkpoints(
         else set(alignn_modes)
     )
     seeds = None if seeds is None else {int(seed) for seed in seeds}
+    models = None if models is None else set(models)
+    modes = set(VALID_MODES) if modes is None else set(modes)
     selected = []
 
     for path in sorted(checkpoint_root.rglob(CHECKPOINT_PATTERN)):
@@ -113,13 +121,15 @@ def discover_low_checkpoints(
             and 'was' not in record['mode']
             and 'was' not in record['run_label']
         )
-        if is_sparse or is_alignn:
+        matches = (is_sparse or is_alignn) if models is None else (
+            record['model_name'] in models and record['mode'] in modes
+        )
+        if matches:
             selected.append(record)
 
     if not selected:
         raise FileNotFoundError(
-            'No matching 2dmd_low MEGNet Sparse or non-WAS ALIGNN best '
-            f'checkpoints found under {checkpoint_root}'
+            f'No matching 2dmd_low best checkpoints found under {checkpoint_root}'
         )
 
     identities = {}
@@ -139,7 +149,7 @@ def discover_low_checkpoints(
         identities[identity] = record['path']
 
     selected.sort(key=lambda record: (
-        0 if record['model_name'] == 'megnet' else 1,
+        {'megnet': 0, 'alignn': 1, 'cgcnn': 2}.get(record['model_name'], 3),
         record['mode'],
         record['run_label'],
         record['seed'],
@@ -152,7 +162,7 @@ def load_material_high_test(material_key, model_name, mode, config):
     material, _ = MATERIAL_DATASETS[material_key]
     representation = representation_for_mode(mode)
     local_cutoff = None
-    if mode in ('hetero', 'hetero_fixed_pool'):
+    if mode in ('hetero', 'hetero_fixed_pool', 'hetero_was'):
         local_cutoff = config['model'].get('local_radius')
     dataset = _load_data_2dmd_material_transfer(
         material,
@@ -241,6 +251,7 @@ def predict_checkpoint(record, material_key, output_root, device,
         config.setdefault('optim', {})['amp'] = True
     compatibility = apply_checkpoint_model_compatibility(config, record)
 
+    set_seed(record['seed'])
     trainer = MEGNetTrainer(config, device, seed=record['seed'])
     trainer.scaler.load_state_dict(checkpoint['scaler'])
     # Validate architecture compatibility before converting hundreds of CIFs.
@@ -270,6 +281,8 @@ def predict_checkpoint(record, material_key, output_root, device,
         checkpoint['model'],
         return_predictions=True,
     )
+    if not torch.isfinite(torch.as_tensor(predictions)).all() or not torch.isfinite(torch.as_tensor(float(mae))):
+        raise ValueError(f'Nonfinite high-test predictions or MAE for {record["path"]}; no result was written.')
 
     material, test_dataset = MATERIAL_DATASETS[material_key]
     result_dir = (
@@ -345,6 +358,14 @@ def parse_args(argv=None):
         default=list(MATERIAL_DATASETS),
     )
     parser.add_argument(
+        '--model', nargs='+', choices=(*ALL_MODEL_SUITES, 'all'), default=None,
+        help='Select model families, including every saved mode. all = ALIGNN, MEGNet, CGCNN.',
+    )
+    parser.add_argument(
+        '--mode', nargs='+', choices=(*VALID_MODES, 'all'), default=None,
+        help='Mode filter for --model; all includes WAS variants (default for explicit --model).',
+    )
+    parser.add_argument(
         '--alignn-mode',
         nargs='+',
         choices=(*NON_WAS_ALIGNN_MODES, 'available'),
@@ -365,6 +386,17 @@ def parse_args(argv=None):
     parser.add_argument('--amp', action='store_true')
     args = parser.parse_args(argv)
 
+    if args.mode is not None and args.model is None:
+        parser.error('--mode requires --model; use --alignn-mode for the legacy selection')
+    if args.model is not None and args.alignn_mode != ['available']:
+        parser.error('Use --model/--mode or --alignn-mode, not both')
+    if args.model is not None and 'all' in args.model and len(args.model) != 1:
+        parser.error('--model all cannot be combined with other model names')
+    if args.mode is not None and 'all' in args.mode and len(args.mode) != 1:
+        parser.error('--mode all cannot be combined with other modes')
+    args.models = (list(ALL_MODEL_SUITES) if args.model == ['all'] else
+                   list(dict.fromkeys(args.model)) if args.model is not None else None)
+    args.modes = None if args.mode in (None, ['all']) else list(dict.fromkeys(args.mode))
     if 'available' in args.alignn_mode:
         if len(args.alignn_mode) != 1:
             parser.error(
@@ -394,34 +426,24 @@ def main():
         args.checkpoint_root,
         alignn_modes=args.alignn_modes,
         seeds=args.seeds,
+        models=args.models,
+        modes=args.modes,
     )
-    sparse_count = sum(
-        record['model_name'] == 'megnet' and record['mode'] == 'sparse'
-        for record in records
-    )
-    alignn_count = sum(record['model_name'] == 'alignn' for record in records)
-    if sparse_count == 0:
-        raise FileNotFoundError(
-            'No 2dmd_low MEGNet Sparse checkpoint matched this selection.'
-        )
-    if alignn_count == 0:
-        raise FileNotFoundError(
-            'No selected non-WAS 2dmd_low ALIGNN checkpoint was found.'
-        )
-
-    print(
-        f'Found {len(records)} checkpoints: MEGNet Sparse={sparse_count}, '
-        f'ALIGNN={alignn_count}'
-    )
+    counts = {model: sum(r['model_name'] == model for r in records) for model in ALL_MODEL_SUITES}
+    print(f'Found {len(records)} checkpoints: {counts}')
     print(f'Inference output root: {args.output_root}')
     args.output_root.mkdir(parents=True, exist_ok=True)
 
-    dataset_cache = {}
     for material_key in args.material:
         material, test_dataset = MATERIAL_DATASETS[material_key]
         print(f'\n=== {material}: {test_dataset} high test only ===')
         summary_rows = []
+        dataset_cache = {}
+        active_model = None
         for index, record in enumerate(records, start=1):
+            if record['model_name'] != active_model:
+                dataset_cache.clear()
+                active_model = record['model_name']
             print(
                 f'[{index}/{len(records)}] {record["model_name"]}/'
                 f'{record["run_label"]}/seed{record["seed"]}'
@@ -436,15 +458,15 @@ def main():
                 dataset_cache=dataset_cache,
             )
             summary_rows.append(row)
+            # Preserve completed results if a later model fails or is interrupted.
+            summary_path = write_material_summary(
+                args.output_root / test_dataset / 'test_summary.csv', summary_rows,
+            )
             print(
                 f'  high-test MAE={row["test_mae"]} eV, '
                 f'n={row["n_test"]}, '
                 f'compatibility={row["model_compatibility"]}'
             )
-        summary_path = write_material_summary(
-            args.output_root / test_dataset / 'test_summary.csv',
-            summary_rows,
-        )
         print(f'{material} summary: {summary_path}')
 
 

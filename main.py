@@ -1195,8 +1195,8 @@ def main():
                 not np.isfinite(args.alignn_hetero_defect_cutoff) or args.alignn_hetero_defect_cutoff <= 0):
             parser.error('--alignn-hetero-defect-cutoff must be finite and > 0')
     if args.alignn_hetero_relations is not None or args.alignn_hetero_adapter_rank is not None:
-        if args.model != 'alignn':
-            parser.error('Hetero relation options require --model alignn')
+        if args.model not in ('alignn', 'all'):
+            parser.error('Hetero relation options require --model alignn or all')
         if args.mode is not None and not any(
                 mode in ('hetero', 'hetero_was', 'hetero_fixed_pool', 'all') for mode in args.mode):
             parser.error('Hetero relation options require a hetero mode')
