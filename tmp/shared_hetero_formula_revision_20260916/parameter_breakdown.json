@@ -1,0 +1,118 @@
+{
+  "independent": {
+    "total": 916289,
+    "groups": {
+      "node_embedding": 12160,
+      "edge_embedding": 28160,
+      "angle_embedding": 7040,
+      "line_graph_convs": 63168,
+      "relation_message_cores": 402432,
+      "node_type_fusion": 397056,
+      "readout": 6273
+    },
+    "model_config": {
+      "train_batch_size": 8,
+      "test_batch_size": 1,
+      "add_z_bond_coord": false,
+      "atom_features": "Z",
+      "state_input_shape": 2,
+      "cutoff": 6,
+      "edge_embed_size": 40,
+      "vertex_aggregation": "sum",
+      "global_aggregation": "mean",
+      "embedding_size": 64,
+      "nblocks": 3,
+      "gcn_blocks": 3,
+      "max_neighbors": 12,
+      "hetero_node_norm": "layernorm",
+      "hetero_feature_norm": "layernorm",
+      "hetero_pooling": "defect_energy_mean",
+      "hetero_relation_mode": "independent",
+      "hetero_relation_rank": 8
+    }
+  },
+  "shared": {
+    "total": 614465,
+    "groups": {
+      "node_embedding": 12160,
+      "edge_embedding": 28160,
+      "angle_embedding": 7040,
+      "line_graph_convs": 63168,
+      "relation_message_cores": 100608,
+      "node_type_fusion": 397056,
+      "readout": 6273
+    },
+    "model_config": {
+      "train_batch_size": 8,
+      "test_batch_size": 1,
+      "add_z_bond_coord": false,
+      "atom_features": "Z",
+      "state_input_shape": 2,
+      "cutoff": 6,
+      "edge_embed_size": 40,
+      "vertex_aggregation": "sum",
+      "global_aggregation": "mean",
+      "embedding_size": 64,
+      "nblocks": 3,
+      "gcn_blocks": 3,
+      "max_neighbors": 12,
+      "hetero_node_norm": "layernorm",
+      "hetero_feature_norm": "layernorm",
+      "hetero_pooling": "defect_energy_mean",
+      "hetero_relation_mode": "shared",
+      "hetero_relation_rank": 8
+    }
+  },
+  "shared_residual": {
+    "total": 679193,
+    "groups": {
+      "node_embedding": 12160,
+      "edge_embedding": 28160,
+      "angle_embedding": 7040,
+      "line_graph_convs": 63168,
+      "relation_message_cores": 100608,
+      "relation_adapters": 64728,
+      "node_type_fusion": 397056,
+      "readout": 6273
+    },
+    "model_config": {
+      "train_batch_size": 8,
+      "test_batch_size": 1,
+      "add_z_bond_coord": false,
+      "atom_features": "Z",
+      "state_input_shape": 2,
+      "cutoff": 6,
+      "edge_embed_size": 40,
+      "vertex_aggregation": "sum",
+      "global_aggregation": "mean",
+      "embedding_size": 64,
+      "nblocks": 3,
+      "gcn_blocks": 3,
+      "max_neighbors": 12,
+      "hetero_node_norm": "layernorm",
+      "hetero_feature_norm": "layernorm",
+      "hetero_pooling": "defect_energy_mean",
+      "hetero_relation_mode": "shared_residual",
+      "hetero_relation_rank": 8
+    },
+    "first_core": {
+      "src_gate.weight": 4096,
+      "src_gate.bias": 64,
+      "dst_gate.weight": 4096,
+      "dst_gate.bias": 64,
+      "edge_gate.weight": 4096,
+      "edge_gate.bias": 64,
+      "message_update.weight": 4096,
+      "message_update.bias": 64,
+      "bn_edges.weight": 64,
+      "bn_edges.bias": 64
+    },
+    "first_adapter": {
+      "scale_logit": 1,
+      "down.weight": 1536,
+      "down.bias": 8,
+      "up.weight": 1024,
+      "up.bias": 128
+    }
+  }
+}

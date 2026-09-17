@@ -1,0 +1,15 @@
+{
+  "final_sha256": "36f2d0b86296032bebddefbda8ced3247ddb9cceb762dd7a91f04cca0ee120f3",
+  "slides": 20,
+  "native_powerpoint_opened_read_only": true,
+  "native_powerpoint_exported_all_slides": true,
+  "all_native_slide_exports_visually_reviewed": true,
+  "chinese_speaker_notes_and_sources": 20,
+  "native_table_style_warnings": [
+    14,
+    15,
+    19
+  ],
+  "style_warning_resolution": "All flagged tables fit in actual PowerPoint exports, with no overlap or clipped text.",
+  "content_scope": "Recent 2DMD work. 17 main slides and 3 appendix slides. Unfinished concurrent code changes are not included as evaluated results."
+}

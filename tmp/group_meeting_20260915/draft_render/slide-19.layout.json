@@ -1,0 +1,849 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/466r0e",
+    "id": "466r0e",
+    "slide": 19,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/k3qhkbuh",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "526d05c4-8e7f-4586-86fa-902f76c69226",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m9ofq9oj",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Appendix: adapters and DefiNet-style gates",
+      "textPreview": "Appendix: adapters and DefiNet-style gates",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Appendix: adapters and DefiNet-style gates"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Appendix: adapters and DefiNet-style gates",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Appendix: adapters and DefiNet-style gates",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/naxgze54",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "The current baseline uses a linear source-message projection plus relation adapters.",
+      "textPreview": "The current baseline uses a linear source-message projection plus relation adapters.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "The current baseline uses a linear source-message projection plus relation adapters."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "The current baseline uses a linear source-message projection plus relation adapters.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "The current baseline uses a linear source-message projection plus relation adapters.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wzqhw3m1",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "19",
+      "textPreview": "19",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "19"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "19",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "19",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/0vyd4j2h",
+      "id": "5",
+      "bbox": [
+        50,
+        153,
+        1180,
+        405
+      ],
+      "text": "Component | Conditioning | Role\nHetero relation adapter | Source, destination and edge state\nOne adapter per relation per layer | Corrects both gate logits\nand message values\nDefiNet-style gate | Marker-pair embedding\nwith separate distance modulation | Reweights a shared message\nwithout neighbor softmax\nPair-message option | MLP([source, destination, edge]) | Makes the shared value\nexplicitly pair-conditioned\nShared-distance option | Shared RBF encoder\nwith zero-initialized relation offsets | Reduces independent\nrelation-distance encoders",
+      "textPreview": "Component | Conditioning | Role | Hetero relation adapter | Source, destination and edge state | One adapter per relation per layer | Cor...",
+      "rows": 5,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            153,
+            320,
+            81
+          ],
+          "text": "Component",
+          "textPreview": "Component",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Component",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Component",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            370,
+            153,
+            510,
+            81
+          ],
+          "text": "Conditioning",
+          "textPreview": "Conditioning",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Conditioning",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Conditioning",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            880,
+            153,
+            350,
+            81
+          ],
+          "text": "Role",
+          "textPreview": "Role",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Role",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Role",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            234,
+            320,
+            81
+          ],
+          "text": "Hetero relation adapter",
+          "textPreview": "Hetero relation adapter",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Hetero relation adapter",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Hetero relation adapter"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            370,
+            234,
+            510,
+            81
+          ],
+          "text": "Source, destination and edge state\nOne adapter per relation per layer",
+          "textPreview": "Source, destination and edge state | One adapter per relation per layer",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Source, destination and edge state",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Source, destination and edge state"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "One adapter per relation per layer",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "One adapter per relation per layer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            880,
+            234,
+            350,
+            81
+          ],
+          "text": "Corrects both gate logits\nand message values",
+          "textPreview": "Corrects both gate logits | and message values",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Corrects both gate logits",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Corrects both gate logits"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "and message values",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "and message values"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            315,
+            320,
+            81
+          ],
+          "text": "DefiNet-style gate",
+          "textPreview": "DefiNet-style gate",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "DefiNet-style gate",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "DefiNet-style gate"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            370,
+            315,
+            510,
+            81
+          ],
+          "text": "Marker-pair embedding\nwith separate distance modulation",
+          "textPreview": "Marker-pair embedding | with separate distance modulation",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Marker-pair embedding",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Marker-pair embedding"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "with separate distance modulation",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "with separate distance modulation"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            880,
+            315,
+            350,
+            81
+          ],
+          "text": "Reweights a shared message\nwithout neighbor softmax",
+          "textPreview": "Reweights a shared message | without neighbor softmax",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Reweights a shared message",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Reweights a shared message"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "without neighbor softmax",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "without neighbor softmax"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            396,
+            320,
+            81
+          ],
+          "text": "Pair-message option",
+          "textPreview": "Pair-message option",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Pair-message option",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Pair-message option"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            370,
+            396,
+            510,
+            81
+          ],
+          "text": "MLP([source, destination, edge])",
+          "textPreview": "MLP([source, destination, edge])",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "MLP([source, destination, edge])",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "MLP([source, destination, edge])"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            880,
+            396,
+            350,
+            81
+          ],
+          "text": "Makes the shared value\nexplicitly pair-conditioned",
+          "textPreview": "Makes the shared value | explicitly pair-conditioned",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Makes the shared value",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Makes the shared value"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "explicitly pair-conditioned",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "explicitly pair-conditioned"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "row": 5,
+          "column": 1,
+          "bbox": [
+            50,
+            477,
+            320,
+            81
+          ],
+          "text": "Shared-distance option",
+          "textPreview": "Shared-distance option",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Shared-distance option",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Shared-distance option"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "row": 5,
+          "column": 2,
+          "bbox": [
+            370,
+            477,
+            510,
+            81
+          ],
+          "text": "Shared RBF encoder\nwith zero-initialized relation offsets",
+          "textPreview": "Shared RBF encoder | with zero-initialized relation offsets",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Shared RBF encoder",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Shared RBF encoder"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "with zero-initialized relation offsets",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "with zero-initialized relation offsets"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "row": 5,
+          "column": 3,
+          "bbox": [
+            880,
+            477,
+            350,
+            81
+          ],
+          "text": "Reduces independent\nrelation-distance encoders",
+          "textPreview": "Reduces independent | relation-distance encoders",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Reduces independent",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Reduces independent"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "relation-distance encoders",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "relation-distance encoders"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/axofut4v",
+      "id": "6",
+      "bbox": [
+        60,
+        592,
+        1160,
+        45
+      ],
+      "geometry": "rect",
+      "text": "Pair-message and shared-distance options need separate performance tests.",
+      "textPreview": "Pair-message and shared-distance options need separate performance tests.",
+      "resolvedFontSize": 29,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 29,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Pair-message and shared-distance options need separate performance tests."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Pair-message and shared-distance options need separate performance tests.",
+          "resolvedTextStyle": {
+            "fontSize": 29,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Pair-message and shared-distance options need separate performance tests.",
+              "fontSize": 29,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

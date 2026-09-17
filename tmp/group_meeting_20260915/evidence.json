@@ -1,0 +1,774 @@
+{
+  "mixed": {
+    "checkpoint": "C:\\Users\\User\\Desktop\\HERA\\logs\\hetero_energy_mean_benchmark\\alignn\\2dmd_low\\hetero\\r0\\features_layernorm\\pool_defect_energy_mean\\relations_shared_residual_rank8\\seed123_best_checkpoint.pth",
+    "checkpoint_sha256": "aaf4995019b6dbe70d4da0c5aa65ff9eefead9f37e49f4b64c7cc1a048548a49",
+    "training_dataset": "2dmd_low",
+    "seed": 123,
+    "best_epoch": 303,
+    "saved_low_val_mae": 0.003194254370515376,
+    "saved_low_test_mae": 0.0026330359302087518,
+    "config": {
+      "task": "alignn_hetero",
+      "model": {
+        "train_batch_size": 8,
+        "test_batch_size": 1,
+        "add_z_bond_coord": false,
+        "atom_features": "Z",
+        "state_input_shape": 2,
+        "cutoff": 6,
+        "edge_embed_size": 40,
+        "vertex_aggregation": "sum",
+        "global_aggregation": "mean",
+        "embedding_size": 64,
+        "nblocks": 3,
+        "gcn_blocks": 3,
+        "max_neighbors": 12,
+        "hetero_node_norm": "layernorm",
+        "hetero_feature_norm": "layernorm",
+        "hetero_pooling": "defect_energy_mean",
+        "hetero_relation_mode": "shared_residual",
+        "hetero_relation_rank": 8,
+        "local_radius": 0
+      },
+      "optim": {
+        "optimizer": "AdamW",
+        "weight_decay": 0.0001,
+        "factor": 0.9,
+        "patience": 10,
+        "threshold": 0.0005,
+        "min_lr": 1e-05,
+        "lr_initial": 0.001,
+        "scheduler": "ReduceLROnPlateau",
+        "early_stopping_patience": 50,
+        "early_stopping_min_delta_percent": 0.5
+      }
+    },
+    "scaler": {
+      "mean": 1.855519413948059,
+      "std": 1.2596341371536255
+    },
+    "precision": "FP32",
+    "test_batch_size": 1,
+    "torch": "2.11.0+cu128",
+    "device": "NVIDIA GeForce RTX 5060 Ti",
+    "scope": "MoS2 and WSe2 high, 500 structures per material; excludes unseen host materials.",
+    "materials": {
+      "MoS2": {
+        "samples": 500,
+        "mae": 0.04553561198359999,
+        "rmse": 0.07971013083486322,
+        "bias_prediction_minus_target": 0.033546334385200015,
+        "prediction_csv": "C:\\Users\\User\\Desktop\\HERA\\logs\\hetero_energy_mean_benchmark\\high_test_predictions_fp32\\2dmd_mos2\\alignn\\hetero_r0_features_layernorm_pool_defect_energy_mean_relations_shared_residual_rank8\\seed123_test_predictions.csv",
+        "by_defect_count": {
+          "4": {
+            "samples": 100,
+            "mae": 0.01764433086699998,
+            "bias": -0.01576103988099995
+          },
+          "9": {
+            "samples": 100,
+            "mae": 0.02671646711699996,
+            "bias": 0.016007889542999993
+          },
+          "14": {
+            "samples": 100,
+            "mae": 0.03791125175400002,
+            "bias": 0.027793867564000027
+          },
+          "19": {
+            "samples": 100,
+            "mae": 0.05993062382999998,
+            "bias": 0.056136382849999986
+          },
+          "24": {
+            "samples": 100,
+            "mae": 0.08547538634999999,
+            "bias": 0.08355457184999998
+          }
+        }
+      },
+      "WSe2": {
+        "samples": 500,
+        "mae": 0.05905464739048001,
+        "rmse": 0.08949473224454826,
+        "bias_prediction_minus_target": 0.04746082776648001,
+        "prediction_csv": "C:\\Users\\User\\Desktop\\HERA\\logs\\hetero_energy_mean_benchmark\\high_test_predictions_fp32\\2dmd_wse2\\alignn\\hetero_r0_features_layernorm_pool_defect_energy_mean_relations_shared_residual_rank8\\seed123_test_predictions.csv",
+        "by_defect_count": {
+          "4": {
+            "samples": 100,
+            "mae": 0.009073818012999993,
+            "bias": 0.00451522136899999
+          },
+          "9": {
+            "samples": 100,
+            "mae": 0.027520037604399993,
+            "bias": 0.001061594244400006
+          },
+          "14": {
+            "samples": 100,
+            "mae": 0.056660446823000005,
+            "bias": 0.04352536288700001
+          },
+          "19": {
+            "samples": 100,
+            "mae": 0.08083092452200001,
+            "bias": 0.071585793502
+          },
+          "24": {
+            "samples": 100,
+            "mae": 0.12118800999,
+            "bias": 0.11661616683
+          }
+        }
+      }
+    },
+    "historical_mixed_baselines": [
+      {
+        "model": "Sparse (historical)",
+        "MoS2": {
+          "mae": 0.1363652929028,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_mos2\\megnet\\sparse\\seed123_test_predictions.csv"
+        },
+        "WSe2": {
+          "mae": 0.11374063890224001,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_wse2\\megnet\\sparse\\seed123_test_predictions.csv"
+        }
+      },
+      {
+        "model": "Attention (historical BN)",
+        "MoS2": {
+          "mae": 0.09665676593879999,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_mos2\\alignn\\attention\\seed123_test_predictions.csv"
+        },
+        "WSe2": {
+          "mae": 0.10653677294358802,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_wse2\\alignn\\attention\\seed123_test_predictions.csv"
+        }
+      },
+      {
+        "model": "Hetero (historical)",
+        "MoS2": {
+          "mae": 0.1796382981622,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_mos2\\alignn\\hetero_r0_norm_layernorm\\seed123_test_predictions.csv"
+        },
+        "WSe2": {
+          "mae": 0.05977212494164,
+          "same_test_ids_and_labels": true,
+          "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\high_test_predictions\\2dmd_wse2\\alignn\\hetero_r0_norm_layernorm\\seed123_test_predictions.csv"
+        }
+      }
+    ],
+    "comparison_note": "Historical results share the same 500 IDs and labels per material, but were not rerun here. Different training versions and inference precision prevent interpreting this as a controlled ablation."
+  },
+  "repro": {
+    "scope": "Independent-process short-run repeatability; not full-training or cross-seed stability.",
+    "steps": 100,
+    "devices": {
+      "cuda:0": {
+        "status": "NUMERICAL_DIFFERENCES",
+        "controls": {
+          "code": true,
+          "environment": true,
+          "config": true,
+          "scaler": true,
+          "sources": true,
+          "graphs": true,
+          "initial_weights": true,
+          "batch_order_and_inputs": true
+        },
+        "first_training_difference": {
+          "step": 1,
+          "stage": "gradient_hash"
+        },
+        "tensor_differences": {
+          "initial": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "first_gradient": {
+            "exact": false,
+            "max_abs": 7.450580596923828e-09
+          },
+          "final": {
+            "exact": false,
+            "max_abs": 3.1245406717061996e-05
+          },
+          "checkpoint_predictions": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "final_predictions": {
+            "exact": false,
+            "max_abs": 1.8596649169921875e-05
+          }
+        },
+        "inference_exact_within_process": true,
+        "max_loss_difference": 2.466142177581787e-06,
+        "small_val_mae": [
+          0.1991511583328247,
+          0.19915221631526947
+        ]
+      },
+      "cpu": {
+        "status": "EXACT_SHORT_RUN",
+        "controls": {
+          "code": true,
+          "environment": true,
+          "config": true,
+          "scaler": true,
+          "sources": true,
+          "graphs": true,
+          "initial_weights": true,
+          "batch_order_and_inputs": true
+        },
+        "first_training_difference": null,
+        "tensor_differences": {
+          "initial": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "first_gradient": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "final": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "checkpoint_predictions": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "final_predictions": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "inference_exact_within_process": true,
+        "max_loss_difference": 0.0,
+        "small_val_mae": [
+          0.1991255283355713,
+          0.1991255283355713
+        ]
+      }
+    }
+  },
+  "retest": {
+    "local": {
+      "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\2dmd_mos2\\megnet\\2dmd_mos2\\sparse\\seed123_history.csv",
+      "epochs": 437,
+      "best_epoch": 414,
+      "best_val_mae": 0.002972,
+      "train_mae_at_best": 0.001847,
+      "high_test_mae": 0.161786,
+      "epoch1": {
+        "train_mae": 0.108644,
+        "train_mse": 0.024331,
+        "val_mae": 0.184901
+      }
+    },
+    "new": {
+      "source": "C:\\Users\\User\\.codex\\attachments\\2d46ade4-2397-4269-864e-00d651f3837c\\pasted-text.txt",
+      "epochs": 500,
+      "best_epoch": 494,
+      "best_val_mae": 0.002466,
+      "train_mae_at_best": 0.0013,
+      "high_test_mae": 0.192789,
+      "epoch1": {
+        "train_mae": 0.120887,
+        "train_mse": 0.028449,
+        "val_mae": 0.085405
+      }
+    },
+    "differences": {
+      "test_new_minus_local": 0.031002999999999975,
+      "test_relative_increase_percent": 19.16296836561877,
+      "val_relative_reduction_percent": 17.025572005383584
+    },
+    "scope": "Comparison of saved history values rounded to 6 decimals; new checkpoint, configuration and split not supplied."
+  },
+  "mixed_single": {
+    "purpose": "Read-only comparison of mixed-low high predictions and single-material runs.",
+    "checkpoints": {
+      "mixed_sparse_bench": {
+        "dataset_name": "2dmd_low",
+        "model_name": "megnet",
+        "mode": "sparse",
+        "run_label": "sparse",
+        "best_epoch": 412,
+        "best_val_mae": 0.004316469648946351,
+        "test_mae": 0.0030794196863793344,
+        "epochs_completed": 434,
+        "local_path": "logs/bench_2dmd_high_all_models/megnet/2dmd_low/sparse/seed123_best_checkpoint.pth",
+        "config": {
+          "task": "megnet_sparse",
+          "model": {
+            "train_batch_size": 8,
+            "test_batch_size": 1,
+            "add_z_bond_coord": false,
+            "atom_features": "werespecies",
+            "state_input_shape": 2,
+            "cutoff": 12,
+            "edge_embed_size": 40,
+            "vertex_aggregation": "max",
+            "global_aggregation": "max",
+            "embedding_size": 64,
+            "nblocks": 3
+          },
+          "optim": {
+            "optimizer": "AdamW",
+            "weight_decay": 0.0001,
+            "factor": 0.9,
+            "patience": 10,
+            "threshold": 0.0005,
+            "min_lr": 1e-05,
+            "lr_initial": 0.001,
+            "scheduler": "ReduceLROnPlateau",
+            "early_stopping_patience": 50,
+            "early_stopping_min_delta_percent": 0.5
+          }
+        },
+        "scaler": {
+          "mean": 1.855519413948059,
+          "std": 1.2596341371536255
+        },
+        "batchnorm_running_mean_count": 0,
+        "split_sizes": {
+          "train": 7118,
+          "val": 2373,
+          "test": 2373
+        },
+        "split_material_counts": {
+          "train": {
+            "WSe2": 3588,
+            "MoS2": 3530
+          },
+          "val": {
+            "WSe2": 1164,
+            "MoS2": 1209
+          }
+        },
+        "train_label_stats_match_scaler": true,
+        "weights_sha256": "4f30c73f7715cc5f4d80208fdccfd7ef5544fe59bd244dd08c0bd9afb355ac65"
+      },
+      "mixed_sparse_reproduction": {
+        "dataset_name": "2dmd_low",
+        "model_name": "megnet",
+        "mode": "sparse",
+        "run_label": "sparse",
+        "best_epoch": 191,
+        "best_val_mae": 0.005568547624100927,
+        "test_mae": 0.004434070787347423,
+        "epochs_completed": 199,
+        "local_path": "logs/megnet_sparse_reproduction/megnet/2dmd_low/sparse/seed123_best_checkpoint.pth",
+        "config": {
+          "task": "megnet_sparse",
+          "model": {
+            "train_batch_size": 8,
+            "test_batch_size": 1,
+            "add_z_bond_coord": false,
+            "atom_features": "werespecies",
+            "state_input_shape": 2,
+            "cutoff": 12,
+            "edge_embed_size": 40,
+            "vertex_aggregation": "max",
+            "global_aggregation": "max",
+            "embedding_size": 64,
+            "nblocks": 3
+          },
+          "optim": {
+            "optimizer": "AdamW",
+            "weight_decay": 0.0001,
+            "factor": 0.9,
+            "patience": 10,
+            "threshold": 0.0005,
+            "min_lr": 1e-05,
+            "lr_initial": 0.001,
+            "scheduler": "ReduceLROnPlateau",
+            "early_stopping_patience": 50,
+            "early_stopping_min_delta_percent": 0.5
+          }
+        },
+        "scaler": {
+          "mean": 1.855519413948059,
+          "std": 1.2596341371536255
+        },
+        "batchnorm_running_mean_count": 0,
+        "split_sizes": {
+          "train": 7118,
+          "val": 2373,
+          "test": 2373
+        },
+        "split_material_counts": {
+          "train": {
+            "WSe2": 3588,
+            "MoS2": 3530
+          },
+          "val": {
+            "WSe2": 1164,
+            "MoS2": 1209
+          }
+        },
+        "train_label_stats_match_scaler": true,
+        "weights_sha256": "bc96690ec238701ea2d2971ce3b78b75f40b43c49e1fa8d195b3502883295c6b"
+      },
+      "mixed_attention_bench": {
+        "dataset_name": "2dmd_low",
+        "model_name": "alignn",
+        "mode": "attention",
+        "run_label": "attention",
+        "best_epoch": 407,
+        "best_val_mae": 0.004245371379984917,
+        "test_mae": 0.003602801503835727,
+        "epochs_completed": 457,
+        "local_path": "logs/bench_2dmd_high_all_models/alignn/2dmd_low/attention/seed123_best_checkpoint.pth",
+        "config": {
+          "task": "alignn_attention",
+          "model": {
+            "train_batch_size": 8,
+            "test_batch_size": 1,
+            "add_z_bond_coord": false,
+            "atom_features": "Z",
+            "state_input_shape": 2,
+            "cutoff": 6,
+            "edge_embed_size": 40,
+            "vertex_aggregation": "sum",
+            "global_aggregation": "mean",
+            "embedding_size": 64,
+            "nblocks": 3,
+            "n_heads": 4,
+            "gcn_blocks": 3,
+            "max_neighbors": 12
+          },
+          "optim": {
+            "optimizer": "AdamW",
+            "weight_decay": 0.0001,
+            "factor": 0.9,
+            "patience": 10,
+            "threshold": 0.0005,
+            "min_lr": 1e-05,
+            "lr_initial": 0.001,
+            "scheduler": "ReduceLROnPlateau",
+            "early_stopping_patience": 50,
+            "early_stopping_min_delta_percent": 0.5
+          }
+        },
+        "scaler": {
+          "mean": 1.855519413948059,
+          "std": 1.2596341371536255
+        },
+        "batchnorm_running_mean_count": 20,
+        "split_sizes": {
+          "train": 7118,
+          "val": 2373,
+          "test": 2373
+        },
+        "split_material_counts": {
+          "train": {
+            "WSe2": 3588,
+            "MoS2": 3530
+          },
+          "val": {
+            "WSe2": 1164,
+            "MoS2": 1209
+          }
+        },
+        "train_label_stats_match_scaler": true,
+        "weights_sha256": "228c83db622ed31d6ae3b84181f9d28467e43ed1b8ba2a81242faf478e429c9f"
+      },
+      "single_sparse": {
+        "dataset_name": "2dmd_wse2",
+        "model_name": "megnet",
+        "mode": "sparse",
+        "run_label": "sparse",
+        "best_epoch": 195,
+        "best_val_mae": 0.004900789100177768,
+        "test_mae": 0.03696663837134838,
+        "epochs_completed": 199,
+        "local_path": "logs/2dmd_wse2/megnet/2dmd_wse2/sparse/seed123_best_checkpoint.pth",
+        "config": {
+          "task": "megnet_sparse",
+          "model": {
+            "train_batch_size": 8,
+            "test_batch_size": 1,
+            "add_z_bond_coord": false,
+            "atom_features": "werespecies",
+            "state_input_shape": 2,
+            "cutoff": 12,
+            "edge_embed_size": 40,
+            "vertex_aggregation": "max",
+            "global_aggregation": "max",
+            "embedding_size": 64,
+            "nblocks": 3
+          },
+          "optim": {
+            "optimizer": "AdamW",
+            "weight_decay": 0.0001,
+            "factor": 0.9,
+            "patience": 10,
+            "threshold": 0.0005,
+            "min_lr": 1e-05,
+            "lr_initial": 0.001,
+            "scheduler": "ReduceLROnPlateau",
+            "early_stopping_patience": 50,
+            "early_stopping_min_delta_percent": 0.5
+          }
+        },
+        "scaler": {
+          "mean": 1.5455402135849,
+          "std": 1.170499324798584
+        },
+        "batchnorm_running_mean_count": 0,
+        "split_sizes": {
+          "train": 4746,
+          "val": 1187,
+          "test": 500
+        },
+        "split_material_counts": {
+          "train": {
+            "WSe2": 4746
+          },
+          "val": {
+            "WSe2": 1187
+          }
+        },
+        "train_label_stats_match_scaler": true,
+        "weights_sha256": "97b9983fcd1febe756768e5dc72109fe3427a1eed731e42c6748c7b3edd36964"
+      },
+      "single_attention": {
+        "dataset_name": "2dmd_wse2",
+        "model_name": "alignn",
+        "mode": "attention",
+        "run_label": "attention",
+        "best_epoch": 203,
+        "best_val_mae": 0.004299023920684274,
+        "test_mae": 0.04623291771113872,
+        "epochs_completed": 253,
+        "local_path": "logs/2dmd_wse2/alignn/2dmd_wse2/attention/seed123_best_checkpoint.pth",
+        "config": {
+          "task": "alignn_attention",
+          "model": {
+            "train_batch_size": 8,
+            "test_batch_size": 1,
+            "add_z_bond_coord": false,
+            "atom_features": "Z",
+            "state_input_shape": 2,
+            "cutoff": 6,
+            "edge_embed_size": 40,
+            "vertex_aggregation": "sum",
+            "global_aggregation": "mean",
+            "embedding_size": 64,
+            "nblocks": 3,
+            "n_heads": 4,
+            "gcn_blocks": 3,
+            "max_neighbors": 12,
+            "hetero_node_norm": "layernorm"
+          },
+          "optim": {
+            "optimizer": "AdamW",
+            "weight_decay": 0.0001,
+            "factor": 0.9,
+            "patience": 10,
+            "threshold": 0.0005,
+            "min_lr": 1e-05,
+            "lr_initial": 0.001,
+            "scheduler": "ReduceLROnPlateau",
+            "early_stopping_patience": 50,
+            "early_stopping_min_delta_percent": 0.5
+          }
+        },
+        "scaler": {
+          "mean": 1.5455402135849,
+          "std": 1.170499324798584
+        },
+        "batchnorm_running_mean_count": 0,
+        "split_sizes": {
+          "train": 4746,
+          "val": 1187,
+          "test": 500
+        },
+        "split_material_counts": {
+          "train": {
+            "WSe2": 4746
+          },
+          "val": {
+            "WSe2": 1187
+          }
+        },
+        "train_label_stats_match_scaler": true,
+        "weights_sha256": "c4679e0e8e53bc212860ec27af677ee47492a3576d870283609f81c14fe599f3"
+      }
+    },
+    "predictions": {
+      "sparse": {
+        "identical_500_test_ids": true,
+        "target_max_difference": 0.0,
+        "mixed": {
+          "mae": 0.11374063890224001,
+          "bias": 0.09057871405536,
+          "finite_predictions": true,
+          "by_defects": {
+            "4": {
+              "mae": 0.07259235235400001,
+              "bias": 0.016142034783999996
+            },
+            "9": {
+              "mae": 0.10177363956020001,
+              "bias": 0.07114756497179998
+            },
+            "14": {
+              "mae": 0.11208924326699998,
+              "bias": 0.09154439953099999
+            },
+            "19": {
+              "mae": 0.12645718456,
+              "bias": 0.11840488791999998
+            },
+            "24": {
+              "mae": 0.15579077477,
+              "bias": 0.15565468307
+            }
+          }
+        },
+        "single": {
+          "mae": 0.036966638370439994,
+          "bias": 0.0034785021019599948,
+          "finite_predictions": true,
+          "by_defects": {
+            "4": {
+              "mae": 0.019935828745000012,
+              "bias": -0.0076117661650000135
+            },
+            "9": {
+              "mae": 0.03016630012419999,
+              "bias": -0.008578629154200013
+            },
+            "14": {
+              "mae": 0.048210347015999994,
+              "bias": 0.013093126078000011
+            },
+            "19": {
+              "mae": 0.04491260290699998,
+              "bias": 0.008023412291000002
+            },
+            "24": {
+              "mae": 0.04160811306,
+              "bias": 0.012466367459999985
+            }
+          }
+        }
+      },
+      "attention": {
+        "identical_500_test_ids": true,
+        "target_max_difference": 0.0,
+        "mixed": {
+          "mae": 0.10653677294358802,
+          "bias": 0.074535691901588,
+          "finite_predictions": true,
+          "by_defects": {
+            "4": {
+              "mae": 0.08975938117400002,
+              "bias": 0.037079534783999994
+            },
+            "9": {
+              "mae": 0.09183546458294002,
+              "bias": 0.04228987606294
+            },
+            "14": {
+              "mae": 0.109535379721,
+              "bias": 0.08852682138099999
+            },
+            "19": {
+              "mae": 0.12086737042199999,
+              "bias": 0.10735508329799998
+            },
+            "24": {
+              "mae": 0.12068626881800001,
+              "bias": 0.097427143982
+            }
+          }
+        },
+        "single": {
+          "mae": 0.046232917688399995,
+          "bias": 0.038013436248,
+          "finite_predictions": true,
+          "by_defects": {
+            "4": {
+              "mae": 0.013824204435999996,
+              "bias": 0.010883721369999998
+            },
+            "9": {
+              "mae": 0.03079783104899999,
+              "bias": 0.021169788610999992
+            },
+            "14": {
+              "mae": 0.057569639975,
+              "bias": 0.045752609649000006
+            },
+            "19": {
+              "mae": 0.05988114714199999,
+              "bias": 0.04975801944999998
+            },
+            "24": {
+              "mae": 0.06909176583999999,
+              "bias": 0.06250304216
+            }
+          }
+        }
+      }
+    },
+    "notes": [
+      "Mixed prediction summary references remote bench_2dmd_low_all_models checkpoints; local similarly named checkpoints must be matched by predictions before assuming identity.",
+      "Mixed checkpoint test_mae is the held-out low-domain test metric, not the external high-test metric."
+    ]
+  },
+  "hyper_ablation": [
+    {
+      "mode": "updates_local",
+      "best_epoch": 227,
+      "val": 0.002313,
+      "test": 0.075823,
+      "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\2dmd_mos2_hypergraph_ablation\\alignn\\2dmd_mos2\\hypergraph\\defect_global_attention_v3\\pool_defect_mean\\updates_local\\seed123_history.csv"
+    },
+    {
+      "mode": "updates_local_global",
+      "best_epoch": 237,
+      "val": 0.002239,
+      "test": 0.068386,
+      "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\2dmd_mos2_hypergraph_ablation\\alignn\\2dmd_mos2\\hypergraph\\defect_global_attention_v3\\pool_defect_mean\\updates_local_global\\seed123_history.csv"
+    },
+    {
+      "mode": "updates_none",
+      "best_epoch": 251,
+      "val": 0.002066,
+      "test": 0.061941,
+      "source": "C:\\Users\\User\\Desktop\\HERA\\logs\\2dmd_mos2_hypergraph_ablation\\alignn\\2dmd_mos2\\hypergraph\\defect_global_attention_v3\\pool_defect_mean\\updates_none\\seed123_history.csv"
+    }
+  ],
+  "mos_hetero_reported": {
+    "best": {
+      "epoch": "164",
+      "train_mae": "0.002704",
+      "train_mse": "0.000008",
+      "val_mae": "0.001806",
+      "best_val_mae": "0.001806",
+      "lr": "4.78e-04",
+      "test_mae": ""
+    },
+    "final": {
+      "epoch": "TEST",
+      "train_mae": "",
+      "train_mse": "",
+      "val_mae": "",
+      "best_val_mae": "",
+      "lr": "",
+      "test_mae": "0.036838"
+    },
+    "source": "C:\\Users\\User\\.codex\\attachments\\40916e91-6e79-4164-b78f-70d54f1072a5\\pasted-text.txt"
+  }
+}

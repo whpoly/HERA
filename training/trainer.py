@@ -146,7 +146,8 @@ def attach_ranking_metadata(structures, ranking_groups=None, ranking_items=None)
     return structures
 
 
-def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict=None):
+def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict,
+                            bond_batch_dict=None, edge_types=HETERO_EDGE_TYPES):
     x_dict = dict(x_dict)
     edge_index_dict = dict(edge_index_dict)
     edge_attr_dict = dict(edge_attr_dict)
@@ -168,7 +169,7 @@ def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict,
         ref_edge_attr = ref_x.new_empty((0, 1))
         edge_feature_dim = 1
 
-    for edge_type in HETERO_EDGE_TYPES:
+    for edge_type in edge_types:
         if edge_type not in edge_index_dict:
             edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, device=ref_x.device)
         if edge_type not in edge_attr_dict:
@@ -179,9 +180,9 @@ def _complete_hetero_inputs(x_dict, edge_index_dict, edge_attr_dict, batch_dict,
     return x_dict, edge_index_dict, edge_attr_dict, batch_dict, bond_batch_dict
 
 
-def _complete_hetero_edge_vecs(edge_vec_dict, edge_attr_dict):
+def _complete_hetero_edge_vecs(edge_vec_dict, edge_attr_dict, edge_types=HETERO_EDGE_TYPES):
     edge_vec_dict = {} if edge_vec_dict is None else dict(edge_vec_dict)
-    for edge_type in HETERO_EDGE_TYPES:
+    for edge_type in edge_types:
         if edge_type not in edge_vec_dict:
             edge_vec_dict[edge_type] = edge_attr_dict[edge_type].new_zeros(
                 (edge_attr_dict[edge_type].size(0), 3)
@@ -290,6 +291,9 @@ class MEGNetTrainer:
             max_neighbors=self.config["model"].get("max_neighbors"),
             hypergraph_radius=self.config["model"].get("hypergraph_radius", 3.0),
             hypergraph_schema=hypergraph_schema,
+            hetero_defect_connectivity=self.config['model'].get('hetero_defect_connectivity', 'physical'),
+            hetero_aa_mode=self.config['model'].get('hetero_aa_mode', 'keep'),
+            hetero_dd_mode=self.config['model'].get('hetero_dd_mode', 'keep'),
             add_z_bond_coord=self.config["model"]["add_z_bond_coord"],
             add_eos_features=(use_eos := self.config["model"].get("add_eos_features", False)),
             sparse_defect_cutoff=(self.config['model'].get('hetero_defect_cutoff', 12.0)
@@ -422,14 +426,13 @@ class MEGNetTrainer:
                 cutoff=self.config["model"]["cutoff"],
             ).to(self.device)
         elif task in ALIGNN_HETERO_TASKS:
+            edge_types = [edge_type for edge_type in HETERO_EDGE_TYPES
+                          if (self.converter.hetero_aa_mode == 'keep' or edge_type[1] != 'aa')
+                          and (self.converter.hetero_dd_mode == 'keep' or edge_type[1] != 'dd')]
             self.model = HeteroALIGNN(
                 node_input_shape=atom_converter.get_shape(),
                 edge_input_shape=bond_converter.get_shape(eos=use_eos),
-                metadata=(['atom', 'defect'],
-                          [('atom', 'aa', 'atom'),
-                           ('defect', 'dd', 'defect'),
-                           ('atom', 'ad', 'defect'),
-                           ('defect', 'da', 'atom')]),
+                metadata=(list(HETERO_NODE_TYPES), edge_types),
                 hidden_dim=self.config['model']['embedding_size'],
                 n_blocks=self.config['model']['nblocks'],
                 gcn_blocks=self.config['model'].get('gcn_blocks', 4),
@@ -717,10 +720,12 @@ class MEGNetTrainer:
                 batch.edge_index_dict,
                 batch.edge_attr_dict,
                 batch.batch_dict,
+                edge_types=self.model.edge_types,
             )
             edge_vec_dict = _complete_hetero_edge_vecs(
                 _collect_hetero_attr(batch, 'edge_vec'),
                 edge_attr_dict,
+                edge_types=self.model.edge_types,
             )
             return _prediction_vector(self.model(
                 x_dict, edge_index_dict, edge_attr_dict,

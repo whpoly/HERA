@@ -20,6 +20,9 @@ ALIGNN_HETERO_MESSAGE_MODES = ('linear', 'pair_mlp')
 ALIGNN_HETERO_DISTANCE_MODES = ('independent', 'shared')
 ALIGNN_HETERO_AGGREGATION_MODES = ('relation_mean', 'cross_relation_attention')
 ALIGNN_HETERO_DEFECT_RESIDUAL_MODES = ('none', 'sparse')
+ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES = ('physical', 'complete')
+ALIGNN_HETERO_AA_MODES = ('keep', 'drop')
+ALIGNN_HETERO_DD_MODES = ('keep', 'drop')
 ALIGNN_HETERO_ABLATIONS = {
     'baseline': ('linear', 'independent', 'relation_mean', 'none'),
     'pair_message': ('pair_mlp', 'independent', 'relation_mean', 'none'),
@@ -55,7 +58,8 @@ def validate_alignn_hetero_relations(mode, rank):
 def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
                                relation_mode=None, relation_rank=None,
                                message_mode=None, distance_mode=None,
-                               aggregation_mode=None, defect_residual=None, defect_cutoff=None):
+                               aggregation_mode=None, defect_residual=None, defect_cutoff=None,
+                               defect_connectivity=None, aa_mode=None, dd_mode=None):
     """Override ALIGNN hetero only; omitted saved fields retain legacy behavior."""
     if config['task'] not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
         return config
@@ -80,6 +84,18 @@ def apply_alignn_hetero_options(config, feature_norm=None, pooling=None,
         model['hetero_defect_residual'] = defect_residual
     if defect_cutoff is not None:
         model['hetero_defect_cutoff'] = defect_cutoff
+    if defect_connectivity is not None:
+        model['hetero_defect_connectivity'] = defect_connectivity
+    if model.get('hetero_defect_connectivity', 'physical') not in ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES:
+        raise ValueError('Unknown hetero defect connectivity')
+    if aa_mode is not None:
+        model['hetero_aa_mode'] = aa_mode
+    if model.get('hetero_aa_mode', 'keep') not in ALIGNN_HETERO_AA_MODES:
+        raise ValueError('Unknown hetero atom-atom mode')
+    if dd_mode is not None:
+        model['hetero_dd_mode'] = dd_mode
+    if model.get('hetero_dd_mode', 'keep') not in ALIGNN_HETERO_DD_MODES:
+        raise ValueError('Unknown hetero defect-defect mode')
     validate_alignn_hetero_interactions(model.get('hetero_aggregation_mode', 'relation_mean'),
                                        model.get('hetero_defect_residual', 'none'),
                                        model.get('hetero_defect_cutoff', 12.0))
@@ -124,6 +140,21 @@ def alignn_hetero_run_components(model_config):
         parts.append(f'aggregation_{aggregation}')
     if residual != 'none':
         parts.append(f'defect_residual_{residual}_cutoff{defect_cutoff:g}')
+    connectivity = model_config.get('hetero_defect_connectivity', 'physical')
+    if connectivity not in ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES:
+        raise ValueError('Unknown hetero defect connectivity')
+    if connectivity != 'physical':
+        parts.append(f'defect_edges_{connectivity}')
+    aa_mode = model_config.get('hetero_aa_mode', 'keep')
+    if aa_mode not in ALIGNN_HETERO_AA_MODES:
+        raise ValueError('Unknown hetero atom-atom mode')
+    if aa_mode == 'drop':
+        parts.append('relations_no_aa')
+    dd_mode = model_config.get('hetero_dd_mode', 'keep')
+    if dd_mode not in ALIGNN_HETERO_DD_MODES:
+        raise ValueError('Unknown hetero defect-defect mode')
+    if dd_mode == 'drop':
+        parts.append('relations_no_dd')
     return parts
 
 

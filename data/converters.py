@@ -177,6 +177,9 @@ class SimpleCrystalConverter:
             ignore_state=False,
             hypergraph_schema='per_defect_neighborhood_v2',
             sparse_defect_cutoff=None,
+            hetero_defect_connectivity='physical',
+            hetero_aa_mode='keep',
+            hetero_dd_mode='keep',
     ):
         self.cutoff = cutoff
         self.local_radius = cutoff if local_radius is None else local_radius
@@ -196,6 +199,24 @@ class SimpleCrystalConverter:
         self.add_eos_features = add_eos_features
         self.ignore_state = ignore_state
         self.task = self._graph_mode(task)
+        from ..config.defaults import ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES
+        if hetero_defect_connectivity not in ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES:
+            raise ValueError(f'Unknown hetero defect connectivity: {hetero_defect_connectivity}')
+        if hetero_defect_connectivity != 'physical' and not task.startswith('alignn_hetero'):
+            raise ValueError('Complete defect connectivity requires ALIGNN hetero')
+        self.hetero_defect_connectivity = hetero_defect_connectivity
+        from ..config.defaults import ALIGNN_HETERO_AA_MODES
+        if hetero_aa_mode not in ALIGNN_HETERO_AA_MODES:
+            raise ValueError(f'Unknown hetero atom-atom mode: {hetero_aa_mode}')
+        if hetero_aa_mode != 'keep' and not task.startswith('alignn_hetero'):
+            raise ValueError('Dropping atom-atom relations requires ALIGNN hetero')
+        self.hetero_aa_mode = hetero_aa_mode
+        from ..config.defaults import ALIGNN_HETERO_DD_MODES
+        if hetero_dd_mode not in ALIGNN_HETERO_DD_MODES:
+            raise ValueError(f'Unknown hetero defect-defect mode: {hetero_dd_mode}')
+        if hetero_dd_mode != 'keep' and not task.startswith('alignn_hetero'):
+            raise ValueError('Dropping defect-defect relations requires ALIGNN hetero')
+        self.hetero_dd_mode = hetero_dd_mode
         self.sparse_defect_cutoff = sparse_defect_cutoff
         if sparse_defect_cutoff is not None:
             if (not np.isfinite(sparse_defect_cutoff) or sparse_defect_cutoff <= 0
@@ -313,6 +334,34 @@ class SimpleCrystalConverter:
             data[key].edge_index = torch.tensor(edges[key], dtype=torch.long)
             data[key].edge_vec = torch.tensor(np.asarray(vectors[key], dtype=float).reshape(-1, 3), dtype=torch.float32)
         return data
+
+    @staticmethod
+    def _complete_defect_edges(structure, pool_types, bond_index, bond_attr, bond_vec):
+        """Append missing directed pairs of actual defects using minimum images.
+
+        Existing physical edges (including periodic images) keep their order
+        and geometry. Added pairs bypass the physical cutoff and neighbor cap;
+        no new self-images or zero-distance loops are introduced. Opposite
+        directions use opposite vectors even at a minimum-image tie.
+        """
+        defects = torch.where(pool_types.eq(1))[0].tolist()
+        existing = set(zip(*bond_index))
+        for pos, source in enumerate(defects):
+            for target in defects[pos + 1:]:
+                if (source, target) in existing and (target, source) in existing:
+                    continue
+                distance, image = structure.lattice.get_distance_and_image(
+                    structure[source].frac_coords, structure[target].frac_coords,
+                )
+                vector = structure.lattice.get_cartesian_coords(
+                    structure[target].frac_coords + image - structure[source].frac_coords,
+                )
+                for src, dst, vec in ((source, target, vector), (target, source, -vector)):
+                    if (src, dst) not in existing:
+                        bond_index[0].append(src)
+                        bond_index[1].append(dst)
+                        bond_attr.append(distance)
+                        bond_vec.append(vec)
 
     def _hypergraph_regions(self, structure):
         """Build the selected defect hypergraph without changing physical bonds.
@@ -586,16 +635,25 @@ class SimpleCrystalConverter:
             ])
             all_nbrs = self._neighbor_lists(d)
             # All heterogeneous backbones already preserve root/node features
-            # internally. Use only physical periodic-neighbor edges so an
+            # internally. Start with physical periodic-neighbor edges so an
             # otherwise empty relation (especially single-defect ``dd``) stays
             # empty for CGCNN, MEGNet, and ALIGNN alike.
             for i, nbrs in enumerate(all_nbrs):
                 center = np.asarray(d[i].coords)
                 for j in nbrs:
+                    # Filter after the unchanged neighbor selection so removing
+                    # aa cannot change the retained ad/da/dd neighbors or order.
+                    if self.hetero_aa_mode == 'drop' and indexs[i] == 0 and indexs[j[2]] == 0:
+                        continue
+                    if self.hetero_dd_mode == 'drop' and indexs[i] == 1 and indexs[j[2]] == 1:
+                        continue
                     bond_index[0] += [i]
                     bond_index[1].extend([j[2]])
                     bond_attr.extend([j[1]])
                     bond_vec.append(np.asarray(j.coords) - center)
+
+            if self.hetero_defect_connectivity == 'complete':
+                self._complete_defect_edges(d, pool_types, bond_index, bond_attr, bond_vec)
 
             edge_index = torch.LongTensor(np.array(bond_index))
             x = torch.Tensor(self.atom_converter.convert(d))
@@ -644,6 +702,13 @@ class SimpleCrystalConverter:
             for edge_type_idx, edge_type_name in enumerate(self.EDGE_TYPE_NAMES):
                 edge_count = int((edge_incidies == edge_type_idx).sum().item())
                 data[edge_type_name].bond_batch = MyTensor(np.zeros(edge_count)).long()
+            if self.hetero_aa_mode == 'drop':
+                # Remove the relation itself, including any complete-defect
+                # edges whose endpoints happen to lie in the atom store.
+                del data['atom', 'aa', 'atom']
+            if self.hetero_dd_mode == 'drop':
+                # Drop after complete connectivity too, so it cannot re-add dd.
+                del data['defect', 'dd', 'defect']
             if self.sparse_defect_cutoff is not None:
                 self._attach_sparse_defect_edges(data, d, indexs, pool_types)
             return data

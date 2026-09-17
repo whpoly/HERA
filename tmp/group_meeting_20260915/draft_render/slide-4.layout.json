@@ -1,0 +1,829 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/frguvy",
+    "id": "frguvy",
+    "slide": 4,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/kzqlsz2p",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "75878e6c-2184-40f3-8508-15bd31a078f1",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e54fad8r",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Evaluation protocols",
+      "textPreview": "Evaluation protocols",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Evaluation protocols"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Evaluation protocols",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Evaluation protocols",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/f6dw3i9c",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "Checkpoint selection and learning-rate scheduling use validation data from the training domain.",
+      "textPreview": "Checkpoint selection and learning-rate scheduling use validation data from the training domain.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Checkpoint selection and learning-rate scheduling use validation data from the training domain."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Checkpoint selection and learning-rate scheduling use validation data from the training domain.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Checkpoint selection and learning-rate scheduling use validation data from the training domain.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/s3mx83q1",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "4",
+      "textPreview": "4",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "4"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "4",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "4",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/8nml0rml",
+      "id": "5",
+      "bbox": [
+        50,
+        155,
+        1180,
+        425
+      ],
+      "text": "Experiment | Training / validation | Test set\nLow-domain benchmark | Mixed MoS₂ + WSe₂ low\n7,118 / 2,373 | Held-out low: 2,373\nHigh-domain benchmark | Six-material high\n1,800 / 600 | Held-out high: 600\nSingle-material transfer | One material low\n4,746 / 1,187 | Same material high: 500\nMixed-material transfer | Mixed low checkpoint\nSame low split as above | MoS₂ high: 500\nWSe₂ high: 500",
+      "textPreview": "Experiment | Training / validation | Test set | Low-domain benchmark | Mixed MoS₂ + WSe₂ low | 7,118 / 2,373 | Held-out low: 2,373 | High...",
+      "rows": 5,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            155,
+            320,
+            85
+          ],
+          "text": "Experiment",
+          "textPreview": "Experiment",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Experiment",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Experiment",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            370,
+            155,
+            455,
+            85
+          ],
+          "text": "Training / validation",
+          "textPreview": "Training / validation",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Training / validation",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Training / validation",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            825,
+            155,
+            405,
+            85
+          ],
+          "text": "Test set",
+          "textPreview": "Test set",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Test set",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Test set",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            240,
+            320,
+            85
+          ],
+          "text": "Low-domain benchmark",
+          "textPreview": "Low-domain benchmark",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Low-domain benchmark",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Low-domain benchmark"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            370,
+            240,
+            455,
+            85
+          ],
+          "text": "Mixed MoS₂ + WSe₂ low\n7,118 / 2,373",
+          "textPreview": "Mixed MoS₂ + WSe₂ low | 7,118 / 2,373",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mixed MoS₂ + WSe₂ low",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mixed MoS₂ + WSe₂ low"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "7,118 / 2,373",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "7,118 / 2,373"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            825,
+            240,
+            405,
+            85
+          ],
+          "text": "Held-out low: 2,373",
+          "textPreview": "Held-out low: 2,373",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Held-out low: 2,373",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Held-out low: 2,373"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            325,
+            320,
+            85
+          ],
+          "text": "High-domain benchmark",
+          "textPreview": "High-domain benchmark",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "High-domain benchmark",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "High-domain benchmark"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            370,
+            325,
+            455,
+            85
+          ],
+          "text": "Six-material high\n1,800 / 600",
+          "textPreview": "Six-material high | 1,800 / 600",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Six-material high",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Six-material high"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "1,800 / 600",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "1,800 / 600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            825,
+            325,
+            405,
+            85
+          ],
+          "text": "Held-out high: 600",
+          "textPreview": "Held-out high: 600",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Held-out high: 600",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Held-out high: 600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            410,
+            320,
+            85
+          ],
+          "text": "Single-material transfer",
+          "textPreview": "Single-material transfer",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Single-material transfer",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Single-material transfer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            370,
+            410,
+            455,
+            85
+          ],
+          "text": "One material low\n4,746 / 1,187",
+          "textPreview": "One material low | 4,746 / 1,187",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "One material low",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "One material low"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "4,746 / 1,187",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "4,746 / 1,187"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            825,
+            410,
+            405,
+            85
+          ],
+          "text": "Same material high: 500",
+          "textPreview": "Same material high: 500",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Same material high: 500",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Same material high: 500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "row": 5,
+          "column": 1,
+          "bbox": [
+            50,
+            495,
+            320,
+            85
+          ],
+          "text": "Mixed-material transfer",
+          "textPreview": "Mixed-material transfer",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mixed-material transfer",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mixed-material transfer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "row": 5,
+          "column": 2,
+          "bbox": [
+            370,
+            495,
+            455,
+            85
+          ],
+          "text": "Mixed low checkpoint\nSame low split as above",
+          "textPreview": "Mixed low checkpoint | Same low split as above",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mixed low checkpoint",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mixed low checkpoint"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Same low split as above",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Same low split as above"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "row": 5,
+          "column": 3,
+          "bbox": [
+            825,
+            495,
+            405,
+            85
+          ],
+          "text": "MoS₂ high: 500\nWSe₂ high: 500",
+          "textPreview": "MoS₂ high: 500 | WSe₂ high: 500",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "MoS₂ high: 500",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "MoS₂ high: 500"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "WSe₂ high: 500",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "WSe₂ high: 500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/614f6t8v",
+      "id": "6",
+      "bbox": [
+        60,
+        599,
+        1160,
+        40
+      ],
+      "geometry": "rect",
+      "text": "Low-domain MAE and low-to-high MAE answer different questions.",
+      "textPreview": "Low-domain MAE and low-to-high MAE answer different questions.",
+      "resolvedFontSize": 29,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 29,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Low-domain MAE and low-to-high MAE answer different questions."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Low-domain MAE and low-to-high MAE answer different questions.",
+          "resolvedTextStyle": {
+            "fontSize": 29,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Low-domain MAE and low-to-high MAE answer different questions.",
+              "fontSize": 29,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

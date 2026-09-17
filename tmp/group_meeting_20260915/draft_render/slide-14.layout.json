@@ -1,0 +1,870 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/v0fl1i",
+    "id": "v0fl1i",
+    "slide": 14,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/98b6xovu",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "0c3bcc66-0e67-4711-8d03-7aa325a0836d",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ritkvmhs",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Reproducibility and training sensitivity",
+      "textPreview": "Reproducibility and training sensitivity",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Reproducibility and training sensitivity"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Reproducibility and training sensitivity",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Reproducibility and training sensitivity",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qhkj2hg7",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "MAE: eV/defect. Short-run numerical differences do not explain the full historical accuracy gap.",
+      "textPreview": "MAE: eV/defect. Short-run numerical differences do not explain the full historical accuracy gap.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "MAE: eV/defect. Short-run numerical differences do not explain the full historical accuracy gap."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "MAE: eV/defect. Short-run numerical differences do not explain the full historical accuracy gap.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "MAE: eV/defect. Short-run numerical differences do not explain the full historical accuracy gap.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pgbitwzm",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "14",
+      "textPreview": "14",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "14"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "14",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "14",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/54vid872",
+      "id": "5",
+      "bbox": [
+        50,
+        156,
+        1180,
+        192
+      ],
+      "text": "MoS₂ sparse run | Best low val MAE | High MAE\nLocal saved run | 0.002972 | 0.161786\nNew supplied run | 0.002466 | 0.192789",
+      "textPreview": "MoS₂ sparse run | Best low val MAE | High MAE | Local saved run | 0.002972 | 0.161786 | New supplied run | 0.002466 | 0.192789",
+      "rows": 3,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            156,
+            500,
+            64
+          ],
+          "text": "MoS₂ sparse run",
+          "textPreview": "MoS₂ sparse run",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "MoS₂ sparse run",
+              "resolvedTextStyle": {
+                "fontSize": 28,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "MoS₂ sparse run",
+                  "fontSize": 28,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            550,
+            156,
+            340,
+            64
+          ],
+          "text": "Best low val MAE",
+          "textPreview": "Best low val MAE",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Best low val MAE",
+              "resolvedTextStyle": {
+                "fontSize": 28,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Best low val MAE",
+                  "fontSize": 28,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            890,
+            156,
+            340,
+            64
+          ],
+          "text": "High MAE",
+          "textPreview": "High MAE",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "High MAE",
+              "resolvedTextStyle": {
+                "fontSize": 28,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "High MAE",
+                  "fontSize": 28,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            220,
+            500,
+            64
+          ],
+          "text": "Local saved run",
+          "textPreview": "Local saved run",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Local saved run",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Local saved run"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            550,
+            220,
+            340,
+            64
+          ],
+          "text": "0.002972",
+          "textPreview": "0.002972",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.002972",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.002972"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            890,
+            220,
+            340,
+            64
+          ],
+          "text": "0.161786",
+          "textPreview": "0.161786",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.161786",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.161786"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            284,
+            500,
+            64
+          ],
+          "text": "New supplied run",
+          "textPreview": "New supplied run",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "New supplied run",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "New supplied run"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            550,
+            284,
+            340,
+            64
+          ],
+          "text": "0.002466",
+          "textPreview": "0.002466",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.002466",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.002466"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            890,
+            284,
+            340,
+            64
+          ],
+          "text": "0.192789",
+          "textPreview": "0.192789",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.192789",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.192789"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3et07mhg",
+      "id": "6",
+      "bbox": [
+        60,
+        379,
+        1160,
+        48
+      ],
+      "geometry": "rect",
+      "text": "Lower low-domain validation error accompanied worse high-domain error.",
+      "textPreview": "Lower low-domain validation error accompanied worse high-domain error.",
+      "resolvedFontSize": 29,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 29,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Lower low-domain validation error accompanied worse high-domain error."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Lower low-domain validation error accompanied worse high-domain error.",
+          "resolvedTextStyle": {
+            "fontSize": 29,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Lower low-domain validation error accompanied worse high-domain error.",
+              "fontSize": 29,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/j2t0bypw",
+      "id": "7",
+      "bbox": [
+        50,
+        455,
+        1180,
+        177
+      ],
+      "text": "Independent-process audit | Finding\nFixed checkpoint inference | Exact across repeat GPU runs\n100 training steps on GPU | First gradient differs by up to 7.45 × 10⁻⁹\n100 training steps on CPU, 1 thread | Exact repeat",
+      "textPreview": "Independent-process audit | Finding | Fixed checkpoint inference | Exact across repeat GPU runs | 100 training steps on GPU | First gradi...",
+      "rows": 4,
+      "cols": 2,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            455,
+            570,
+            44.25
+          ],
+          "text": "Independent-process audit",
+          "textPreview": "Independent-process audit",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Independent-process audit",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Independent-process audit",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            620,
+            455,
+            610,
+            44.25
+          ],
+          "text": "Finding",
+          "textPreview": "Finding",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Finding",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Finding",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            499.25,
+            570,
+            44.25
+          ],
+          "text": "Fixed checkpoint inference",
+          "textPreview": "Fixed checkpoint inference",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Fixed checkpoint inference",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Fixed checkpoint inference"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            620,
+            499.25,
+            610,
+            44.25
+          ],
+          "text": "Exact across repeat GPU runs",
+          "textPreview": "Exact across repeat GPU runs",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Exact across repeat GPU runs",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Exact across repeat GPU runs"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            543.5,
+            570,
+            44.25
+          ],
+          "text": "100 training steps on GPU",
+          "textPreview": "100 training steps on GPU",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "100 training steps on GPU",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "100 training steps on GPU"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            620,
+            543.5,
+            610,
+            44.25
+          ],
+          "text": "First gradient differs by up to 7.45 × 10⁻⁹",
+          "textPreview": "First gradient differs by up to 7.45 × 10⁻⁹",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "First gradient differs by up to 7.45 × 10⁻⁹",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "First gradient differs by up to 7.45 × 10⁻⁹"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            587.75,
+            570,
+            44.25
+          ],
+          "text": "100 training steps on CPU, 1 thread",
+          "textPreview": "100 training steps on CPU, 1 thread",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "100 training steps on CPU, 1 thread",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "100 training steps on CPU, 1 thread"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            620,
+            587.75,
+            610,
+            44.25
+          ],
+          "text": "Exact repeat",
+          "textPreview": "Exact repeat",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Exact repeat",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Exact repeat"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "composeRuns": []
+}

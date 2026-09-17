@@ -533,11 +533,16 @@ HeteroALIGNN uses one shared geometric-angle update for every line-graph edge.
 The angle convolution does not distinguish `aa`/`dd`/`ad`/`da` relation
 combinations.
 
-All CGCNN, MEGNet, and ALIGNN heterogeneous graph conversions use only physical
+By default, CGCNN, MEGNet, and ALIGNN heterogeneous graph conversions use only physical
 periodic-neighbor edges. They do not add synthetic zero-distance self-loops
 because the backbones already preserve root/node features internally.
 Consequently, a single-defect graph with no physical defect-defect bond keeps
 the `dd` edge store empty for every backbone.
+For the opt-in HeteroALIGNN all-defect connectivity experiment, use
+`--alignn-hetero-defect-connectivity complete`. This adds missing directed
+actual-defect pairs using periodic minimum images, bypassing the physical
+cutoff and neighbor cap; the added edges also enter the ALIGNN line graph.
+See [the WSe2 low-to-high experiment](docs/hetero_complete_defects.md).
 The directed `ad` and `da` edge stores are both retained for message routing,
 and use separate learnable edge embeddings and convolutional networks at every
 HeteroALIGNN graph-convolution layer. HeteroMEGNet likewise uses a separate
@@ -680,5 +685,11 @@ Useful options:
 
 ## Notes
 
+- HeteroALIGNN can remove the ordinary atom-to-atom relation with
+  `--alignn-hetero-aa drop`; `keep` (or omitting the flag) preserves the original.
+  See [the no-aa ablation and paired training/test commands](docs/hetero_no_aa.md).
+- `--alignn-hetero-dd drop` independently removes the main defect-to-defect
+  relation and can be combined with no-aa. See [the native/semi/imp2d
+  four-variant benchmark](docs/hetero_no_dd_benchmark.md) for runnable commands.
 - Full training depends on external datasets being placed exactly where `data/datasets.py` expects them.
 - Use `python -m HERA.main --help` to inspect all available CLI options.

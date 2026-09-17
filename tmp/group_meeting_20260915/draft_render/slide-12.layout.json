@@ -1,0 +1,875 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/5m6ffe",
+    "id": "5m6ffe",
+    "slide": 12,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/yl0fm1kn",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "c7506c42-c39f-45d5-ae3a-1ad1f8e14a16",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/gvydwrqd",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Hypergraph results depend on the version",
+      "textPreview": "Hypergraph results depend on the version",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Hypergraph results depend on the version"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Hypergraph results depend on the version",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Hypergraph results depend on the version",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hw7epc7y",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "MoS₂ low-to-high, seed 123. Different rows change readout and sometimes other architecture components.",
+      "textPreview": "MoS₂ low-to-high, seed 123. Different rows change readout and sometimes other architecture components.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "MoS₂ low-to-high, seed 123. Different rows change readout and sometimes other architecture components."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "MoS₂ low-to-high, seed 123. Different rows change readout and sometimes other architecture components.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "MoS₂ low-to-high, seed 123. Different rows change readout and sometimes other architecture components.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6pgvqx8b",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "12",
+      "textPreview": "12",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "12"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "12",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "12",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/utg769wr",
+      "id": "5",
+      "bbox": [
+        50,
+        163,
+        1180,
+        362
+      ],
+      "text": "Version | Readout | High MAE (eV/defect)\nOriginal attention reference | Global attention | 0.056992\nHypergraph v2 | Earlier hierarchical readout | 0.168732\nHypergraph v3, earlier run | Hierarchical attention | 0.250031\nHypergraph v3, later run | Defect mean, local + global | 0.068386",
+      "textPreview": "Version | Readout | High MAE (eV/defect) | Original attention reference | Global attention | 0.056992 | Hypergraph v2 | Earlier hierarchi...",
+      "rows": 5,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            163,
+            435,
+            72.4
+          ],
+          "text": "Version",
+          "textPreview": "Version",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Version",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Version",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            485,
+            163,
+            460,
+            72.4
+          ],
+          "text": "Readout",
+          "textPreview": "Readout",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Readout",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Readout",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            945,
+            163,
+            285,
+            72.4
+          ],
+          "text": "High MAE (eV/defect)",
+          "textPreview": "High MAE (eV/defect)",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "High MAE (eV/defect)",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "High MAE (eV/defect)",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            235.4,
+            435,
+            72.4
+          ],
+          "text": "Original attention reference",
+          "textPreview": "Original attention reference",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Original attention reference",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Original attention reference"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            485,
+            235.4,
+            460,
+            72.4
+          ],
+          "text": "Global attention",
+          "textPreview": "Global attention",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Global attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Global attention"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            945,
+            235.4,
+            285,
+            72.4
+          ],
+          "text": "0.056992",
+          "textPreview": "0.056992",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.056992",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.056992"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            307.8,
+            435,
+            72.4
+          ],
+          "text": "Hypergraph v2",
+          "textPreview": "Hypergraph v2",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Hypergraph v2",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Hypergraph v2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            485,
+            307.8,
+            460,
+            72.4
+          ],
+          "text": "Earlier hierarchical readout",
+          "textPreview": "Earlier hierarchical readout",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Earlier hierarchical readout",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Earlier hierarchical readout"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            945,
+            307.8,
+            285,
+            72.4
+          ],
+          "text": "0.168732",
+          "textPreview": "0.168732",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.168732",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.168732"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            380.2,
+            435,
+            72.4
+          ],
+          "text": "Hypergraph v3, earlier run",
+          "textPreview": "Hypergraph v3, earlier run",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Hypergraph v3, earlier run",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Hypergraph v3, earlier run"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            485,
+            380.2,
+            460,
+            72.4
+          ],
+          "text": "Hierarchical attention",
+          "textPreview": "Hierarchical attention",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Hierarchical attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Hierarchical attention"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            945,
+            380.2,
+            285,
+            72.4
+          ],
+          "text": "0.250031",
+          "textPreview": "0.250031",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.250031",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.250031"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "row": 5,
+          "column": 1,
+          "bbox": [
+            50,
+            452.6,
+            435,
+            72.4
+          ],
+          "text": "Hypergraph v3, later run",
+          "textPreview": "Hypergraph v3, later run",
+          "fillColor": "#F7EBED",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Hypergraph v3, later run",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#A32638",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Hypergraph v3, later run",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#A32638",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "row": 5,
+          "column": 2,
+          "bbox": [
+            485,
+            452.6,
+            460,
+            72.4
+          ],
+          "text": "Defect mean, local + global",
+          "textPreview": "Defect mean, local + global",
+          "fillColor": "#F7EBED",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Defect mean, local + global",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#A32638",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Defect mean, local + global",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#A32638",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "row": 5,
+          "column": 3,
+          "bbox": [
+            945,
+            452.6,
+            285,
+            72.4
+          ],
+          "text": "0.068386",
+          "textPreview": "0.068386",
+          "fillColor": "#F7EBED",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "0.068386",
+              "resolvedTextStyle": {
+                "fontSize": 26,
+                "typeface": "Times New Roman",
+                "color": "#A32638",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "0.068386",
+                  "fontSize": 26,
+                  "typeface": "Times New Roman",
+                  "color": "#A32638",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sryds7q1",
+      "id": "6",
+      "bbox": [
+        60,
+        567,
+        1150,
+        43
+      ],
+      "geometry": "rect",
+      "text": "The 0.25 and 0.068 results belong to different trained models.",
+      "textPreview": "The 0.25 and 0.068 results belong to different trained models.",
+      "resolvedFontSize": 31,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 31,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "The 0.25 and 0.068 results belong to different trained models."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "The 0.25 and 0.068 results belong to different trained models.",
+          "resolvedTextStyle": {
+            "fontSize": 31,
+            "typeface": "Times New Roman",
+            "color": "#A32638",
+            "bold": true
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "The 0.25 and 0.068 results belong to different trained models.",
+              "fontSize": 31,
+              "typeface": "Times New Roman",
+              "color": "#A32638",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ts7ulc7m",
+      "id": "7",
+      "bbox": [
+        60,
+        614,
+        1150,
+        34
+      ],
+      "geometry": "rect",
+      "text": "A better readout does not establish a benefit from hypergraph messages.",
+      "textPreview": "A better readout does not establish a benefit from hypergraph messages.",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 27,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "A better readout does not establish a benefit from hypergraph messages."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "A better readout does not establish a benefit from hypergraph messages.",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "A better readout does not establish a benefit from hypergraph messages.",
+              "fontSize": 27,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

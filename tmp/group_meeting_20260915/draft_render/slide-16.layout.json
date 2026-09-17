@@ -1,0 +1,824 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/8b5k6i",
+    "id": "8b5k6i",
+    "slide": 16,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/uhobid47",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "575c87c4-1d13-4217-9543-493038cfafe1",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0zi50z65",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Full benchmark protocol",
+      "textPreview": "Full benchmark protocol",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Full benchmark protocol"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Full benchmark protocol",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Full benchmark protocol",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/10rm947q",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "Prepared command and inference support. The complete benchmark has no new local result table yet.",
+      "textPreview": "Prepared command and inference support. The complete benchmark has no new local result table yet.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Prepared command and inference support. The complete benchmark has no new local result table yet."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Prepared command and inference support. The complete benchmark has no new local result table yet.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Prepared command and inference support. The complete benchmark has no new local result table yet.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qtg3upo3",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "16",
+      "textPreview": "16",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "16"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "16",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "16",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/upg36907",
+      "id": "5",
+      "bbox": [
+        50,
+        161,
+        1180,
+        373
+      ],
+      "text": "Stage | Coverage | Output\n1. Domain benchmarks | CGCNN, MEGNet, ALIGNN\nAll supported modes on low and high | 32 modes × 2 datasets\n64 training runs at seed 123\n2. Low-to-high evaluation | Load only 2dmd_low checkpoints\nEvaluate MoS₂ and WSe₂ separately | 32 models × 2 materials\nPer-model predictions and MAE\n3. Stability follow-up | Repeat selected comparisons\nwith multiple fixed seeds | Mean ± standard deviation\nError and bias by defect count",
+      "textPreview": "Stage | Coverage | Output | 1. Domain benchmarks | CGCNN, MEGNet, ALIGNN | All supported modes on low and high | 32 modes × 2 datasets | ...",
+      "rows": 4,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            161,
+            300,
+            93.25
+          ],
+          "text": "Stage",
+          "textPreview": "Stage",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Stage",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Stage",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            350,
+            161,
+            460,
+            93.25
+          ],
+          "text": "Coverage",
+          "textPreview": "Coverage",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Coverage",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Coverage",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            810,
+            161,
+            420,
+            93.25
+          ],
+          "text": "Output",
+          "textPreview": "Output",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Output",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Output",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            254.25,
+            300,
+            93.25
+          ],
+          "text": "1. Domain benchmarks",
+          "textPreview": "1. Domain benchmarks",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "1. Domain benchmarks",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "1. Domain benchmarks"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            350,
+            254.25,
+            460,
+            93.25
+          ],
+          "text": "CGCNN, MEGNet, ALIGNN\nAll supported modes on low and high",
+          "textPreview": "CGCNN, MEGNet, ALIGNN | All supported modes on low and high",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "CGCNN, MEGNet, ALIGNN",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "CGCNN, MEGNet, ALIGNN"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "All supported modes on low and high",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "All supported modes on low and high"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            810,
+            254.25,
+            420,
+            93.25
+          ],
+          "text": "32 modes × 2 datasets\n64 training runs at seed 123",
+          "textPreview": "32 modes × 2 datasets | 64 training runs at seed 123",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "32 modes × 2 datasets",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "32 modes × 2 datasets"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "64 training runs at seed 123",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "64 training runs at seed 123"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            347.5,
+            300,
+            93.25
+          ],
+          "text": "2. Low-to-high evaluation",
+          "textPreview": "2. Low-to-high evaluation",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "2. Low-to-high evaluation",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "2. Low-to-high evaluation"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            350,
+            347.5,
+            460,
+            93.25
+          ],
+          "text": "Load only 2dmd_low checkpoints\nEvaluate MoS₂ and WSe₂ separately",
+          "textPreview": "Load only 2dmd_low checkpoints | Evaluate MoS₂ and WSe₂ separately",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Load only 2dmd_low checkpoints",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Load only 2dmd_low checkpoints"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Evaluate MoS₂ and WSe₂ separately",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Evaluate MoS₂ and WSe₂ separately"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            810,
+            347.5,
+            420,
+            93.25
+          ],
+          "text": "32 models × 2 materials\nPer-model predictions and MAE",
+          "textPreview": "32 models × 2 materials | Per-model predictions and MAE",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "32 models × 2 materials",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "32 models × 2 materials"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Per-model predictions and MAE",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Per-model predictions and MAE"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            440.75,
+            300,
+            93.25
+          ],
+          "text": "3. Stability follow-up",
+          "textPreview": "3. Stability follow-up",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "3. Stability follow-up",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "3. Stability follow-up"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            350,
+            440.75,
+            460,
+            93.25
+          ],
+          "text": "Repeat selected comparisons\nwith multiple fixed seeds",
+          "textPreview": "Repeat selected comparisons | with multiple fixed seeds",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Repeat selected comparisons",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Repeat selected comparisons"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "with multiple fixed seeds",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "with multiple fixed seeds"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            810,
+            440.75,
+            420,
+            93.25
+          ],
+          "text": "Mean ± standard deviation\nError and bias by defect count",
+          "textPreview": "Mean ± standard deviation | Error and bias by defect count",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mean ± standard deviation",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mean ± standard deviation"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Error and bias by defect count",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Error and bias by defect count"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/svylwz69",
+      "id": "6",
+      "bbox": [
+        60,
+        570,
+        1160,
+        48
+      ],
+      "geometry": "rect",
+      "text": "Freeze the protocol before interpreting the final model ranking.",
+      "textPreview": "Freeze the protocol before interpreting the final model ranking.",
+      "resolvedFontSize": 31,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 31,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Freeze the protocol before interpreting the final model ranking."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Freeze the protocol before interpreting the final model ranking.",
+          "resolvedTextStyle": {
+            "fontSize": 31,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Freeze the protocol before interpreting the final model ranking.",
+              "fontSize": 31,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dwrm5k7e",
+      "id": "7",
+      "bbox": [
+        60,
+        620,
+        1160,
+        28
+      ],
+      "geometry": "rect",
+      "text": "“All” includes supported WAS variants. Duplicate hetero fixed-pool r=0 is skipped.",
+      "textPreview": "“All” includes supported WAS variants. Duplicate hetero fixed-pool r=0 is skipped.",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "“All” includes supported WAS variants. Duplicate hetero fixed-pool r=0 is skipped."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "“All” includes supported WAS variants. Duplicate hetero fixed-pool r=0 is skipped.",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "“All” includes supported WAS variants. Duplicate hetero fixed-pool r=0 is skipped.",
+              "fontSize": 24,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

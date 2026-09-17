@@ -1,0 +1,824 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/v0a0u6",
+    "id": "v0a0u6",
+    "slide": 15,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/7yxwzu5w",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "82c017be-ab9b-4795-84af-4ba34cfc5443",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h4vqlwjm",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Next controlled hetero experiments",
+      "textPreview": "Next controlled hetero experiments",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Next controlled hetero experiments"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Next controlled hetero experiments",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Next controlled hetero experiments",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/w3m9cbih",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "Implemented options. Full low-to-high accuracy results are not yet available locally.",
+      "textPreview": "Implemented options. Full low-to-high accuracy results are not yet available locally.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Implemented options. Full low-to-high accuracy results are not yet available locally."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Implemented options. Full low-to-high accuracy results are not yet available locally.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Implemented options. Full low-to-high accuracy results are not yet available locally.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/j6x8n61s",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "15",
+      "textPreview": "15",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "15"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "15",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "15",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/7e5076lc",
+      "id": "5",
+      "bbox": [
+        50,
+        164,
+        1180,
+        362
+      ],
+      "text": "Variant | Single intended change | Question tested\nCurrent baseline | Shared + rank-8 adapters\nEnergy mean readout | Reference result\nCross-relation attention | Normalize gate logits across\nall incoming relations | Does relation-wise normalization\nlose useful competition?\nSparse residual | Add 12 Å defect–defect messages\nDistance RBF + ordinary mean\nZero-initialized output projection | Does direct defect geometry\nhelp at higher density?",
+      "textPreview": "Variant | Single intended change | Question tested | Current baseline | Shared + rank-8 adapters | Energy mean readout | Reference result...",
+      "rows": 4,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            164,
+            295,
+            90.5
+          ],
+          "text": "Variant",
+          "textPreview": "Variant",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Variant",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Variant",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            345,
+            164,
+            460,
+            90.5
+          ],
+          "text": "Single intended change",
+          "textPreview": "Single intended change",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Single intended change",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Single intended change",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            805,
+            164,
+            425,
+            90.5
+          ],
+          "text": "Question tested",
+          "textPreview": "Question tested",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Question tested",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Question tested",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            254.5,
+            295,
+            90.5
+          ],
+          "text": "Current baseline",
+          "textPreview": "Current baseline",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Current baseline",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Current baseline"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            345,
+            254.5,
+            460,
+            90.5
+          ],
+          "text": "Shared + rank-8 adapters\nEnergy mean readout",
+          "textPreview": "Shared + rank-8 adapters | Energy mean readout",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Shared + rank-8 adapters",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Shared + rank-8 adapters"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Energy mean readout",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Energy mean readout"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            805,
+            254.5,
+            425,
+            90.5
+          ],
+          "text": "Reference result",
+          "textPreview": "Reference result",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Reference result",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Reference result"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            345,
+            295,
+            90.5
+          ],
+          "text": "Cross-relation attention",
+          "textPreview": "Cross-relation attention",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Cross-relation attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Cross-relation attention"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            345,
+            345,
+            460,
+            90.5
+          ],
+          "text": "Normalize gate logits across\nall incoming relations",
+          "textPreview": "Normalize gate logits across | all incoming relations",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Normalize gate logits across",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Normalize gate logits across"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "all incoming relations",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "all incoming relations"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            805,
+            345,
+            425,
+            90.5
+          ],
+          "text": "Does relation-wise normalization\nlose useful competition?",
+          "textPreview": "Does relation-wise normalization | lose useful competition?",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Does relation-wise normalization",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Does relation-wise normalization"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "lose useful competition?",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "lose useful competition?"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            435.5,
+            295,
+            90.5
+          ],
+          "text": "Sparse residual",
+          "textPreview": "Sparse residual",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Sparse residual",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Sparse residual"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            345,
+            435.5,
+            460,
+            90.5
+          ],
+          "text": "Add 12 Å defect–defect messages\nDistance RBF + ordinary mean\nZero-initialized output projection",
+          "textPreview": "Add 12 Å defect–defect messages | Distance RBF + ordinary mean | Zero-initialized output projection",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Add 12 Å defect–defect messages",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Add 12 Å defect–defect messages"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Distance RBF + ordinary mean",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Distance RBF + ordinary mean"
+                }
+              ]
+            },
+            {
+              "index": 3,
+              "text": "Zero-initialized output projection",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Zero-initialized output projection"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            805,
+            435.5,
+            425,
+            90.5
+          ],
+          "text": "Does direct defect geometry\nhelp at higher density?",
+          "textPreview": "Does direct defect geometry | help at higher density?",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Does direct defect geometry",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Does direct defect geometry"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "help at higher density?",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "help at higher density?"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/58fapgjy",
+      "id": "6",
+      "bbox": [
+        60,
+        565,
+        1150,
+        47
+      ],
+      "geometry": "rect",
+      "text": "Compare each change separately with the same split and initialization.",
+      "textPreview": "Compare each change separately with the same split and initialization.",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 30,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Compare each change separately with the same split and initialization."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Compare each change separately with the same split and initialization.",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Compare each change separately with the same split and initialization.",
+              "fontSize": 30,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4769gbid",
+      "id": "7",
+      "bbox": [
+        60,
+        614,
+        1150,
+        35
+      ],
+      "geometry": "rect",
+      "text": "A zero initial residual matches the baseline initially, but gives no accuracy guarantee.",
+      "textPreview": "A zero initial residual matches the baseline initially, but gives no accuracy guarantee.",
+      "resolvedFontSize": 26,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 26,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "A zero initial residual matches the baseline initially, but gives no accuracy guarantee."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "A zero initial residual matches the baseline initially, but gives no accuracy guarantee.",
+          "resolvedTextStyle": {
+            "fontSize": 26,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "A zero initial residual matches the baseline initially, but gives no accuracy guarantee.",
+              "fontSize": 26,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

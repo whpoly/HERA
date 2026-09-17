@@ -333,6 +333,10 @@ def tensor_subset(values, indices):
 
 def mode_display_name(mode):
     mode = str(mode)
+    if '_relations_no_aa' in mode:
+        return mode_display_name(mode.replace('_relations_no_aa', '')) + ' (no A-A relation)'
+    if '_relations_no_dd' in mode:
+        return mode_display_name(mode.replace('_relations_no_dd', '')) + ' (no D-D relation)'
     if '_aggregation_cross_relation_attention' in mode:
         return mode_display_name(mode.replace('_aggregation_cross_relation_attention', '')) + ' (cross-relation attention)'
     if '_defect_residual_sparse_cutoff' in mode:

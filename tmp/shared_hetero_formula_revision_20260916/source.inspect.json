@@ -1,0 +1,26 @@
+{
+  "recordCount": 147,
+  "truncated": false,
+  "metadata": {
+    "revision": "2zdpr6",
+    "target": {
+      "id": "pr/lywvtf"
+    },
+    "kind": {
+      "requested": "slide,textbox,shape,table",
+      "tokens": [
+        "slide",
+        "textbox",
+        "shape",
+        "table"
+      ]
+    },
+    "include": {
+      "tokens": []
+    },
+    "exclude": {
+      "tokens": []
+    },
+    "notices": []
+  }
+}

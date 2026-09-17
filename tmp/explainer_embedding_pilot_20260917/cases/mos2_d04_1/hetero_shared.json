@@ -1,0 +1,199 @@
+{
+  "case": {
+    "id": "MoS2_Mo63Se2S125_0b75ad35-b45c-4439-b35b-fc77960b95bd",
+    "material": "MoS2",
+    "defect_count": 4,
+    "target": 2.592611164999994,
+    "cell": [
+      8,
+      8,
+      1
+    ],
+    "defects": [
+      {
+        "type": "vacancy",
+        "element": "S"
+      },
+      {
+        "type": "vacancy",
+        "element": "Mo"
+      },
+      {
+        "type": "substitution",
+        "from": "S",
+        "to": "Se"
+      },
+      {
+        "type": "substitution",
+        "from": "S",
+        "to": "Se"
+      }
+    ],
+    "path": "C:\\Users\\User\\Desktop\\dataset\\2d-materials-point-defects-all\\high_density_defects\\MoS2_500\\initial\\MoS2_Mo63Se2S125_0b75ad35-b45c-4439-b35b-fc77960b95bd.cif",
+    "key": "mos2_d04_1"
+  },
+  "model": "hetero_shared",
+  "checkpoint_sha256": "aaf4995019b6dbe70d4da0c5aa65ff9eefead9f37e49f4b64c7cc1a048548a49",
+  "protocol": {
+    "explanation": "PyG GNNExplainer, model prediction, one node-state mask per lattice site",
+    "mask_space": "embedding",
+    "cohort": "mixed_low",
+    "geometry_types_and_edges": "fixed",
+    "mask_regularizer": "one mean over all physical lattice sites",
+    "optimization_output": "standardized prediction, identical scaler across models",
+    "epochs": 100,
+    "seeds": [
+      123,
+      456,
+      789
+    ],
+    "lr": 0.03,
+    "node_feat_size": 0.01,
+    "node_feat_ent": 0.001,
+    "selection": "first SHA256(20260917:source_id) per defect-count stratum, independent of errors",
+    "torch": "2.11.0+cu128",
+    "device": "cuda:0",
+    "caveat": "Comparison of existing checkpoints, not an isolated architectural ablation"
+  },
+  "prediction": 2.5887997150421143,
+  "target": 2.592611164999994,
+  "abs_error_mev": 3.8114499578796313,
+  "runs": [
+    {
+      "seed": 123,
+      "seconds": 13.572576500009745,
+      "masked_prediction": 2.5874862670898438,
+      "prediction_preservation_error_mev": 1.3136863708496094,
+      "mask_mean": 0.07965820282697678,
+      "mask_min": 0.06457836925983429,
+      "mask_max": 0.28245750069618225
+    },
+    {
+      "seed": 456,
+      "seconds": 8.178143800003454,
+      "masked_prediction": 2.589076042175293,
+      "prediction_preservation_error_mev": 0.2760887145996094,
+      "mask_mean": 0.07913738489151001,
+      "mask_min": 0.06319384276866913,
+      "mask_max": 0.22185881435871124
+    },
+    {
+      "seed": 789,
+      "seconds": 7.20944290002808,
+      "masked_prediction": 2.5871896743774414,
+      "prediction_preservation_error_mev": 1.6102790832519531,
+      "mask_mean": 0.07915425300598145,
+      "mask_min": 0.06639139354228973,
+      "mask_max": 0.23222854733467102
+    }
+  ],
+  "stability": [
+    {
+      "seed_a": 123,
+      "seed_b": 456,
+      "spearman": 0.26018297479857855,
+      "top10pct_jaccard": 0.25
+    },
+    {
+      "seed_a": 123,
+      "seed_b": 789,
+      "spearman": 0.0802803624230258,
+      "top10pct_jaccard": 0.25
+    },
+    {
+      "seed_a": 456,
+      "seed_b": 789,
+      "spearman": 0.19981926321786075,
+      "top10pct_jaccard": 0.21212121212121213
+    }
+  ],
+  "deletion": [
+    {
+      "fraction": 0.05,
+      "k": 10,
+      "top_change_mev": 61.65003776550293,
+      "bottom_change_mev": 0.06437301635742188,
+      "random_mean_mev": 13.79098892211914,
+      "random_std_mev": 18.670843114311033,
+      "random_changes_mev": [
+        47.515869140625,
+        20.88022232055664,
+        0.45943260192871094,
+        0.07486343383789062,
+        0.024557113647460938
+      ]
+    },
+    {
+      "fraction": 0.1,
+      "k": 20,
+      "top_change_mev": 57.0833683013916,
+      "bottom_change_mev": 580.3267955780029,
+      "random_mean_mev": 2.6968955993652344,
+      "random_std_mev": 4.691630179790782,
+      "random_changes_mev": [
+        0.24509429931640625,
+        0.02384185791015625,
+        1.009225845336914,
+        0.1513957977294922,
+        12.054920196533203
+      ]
+    },
+    {
+      "fraction": 0.2,
+      "k": 39,
+      "top_change_mev": 93.42074394226074,
+      "bottom_change_mev": 580.3251266479492,
+      "random_mean_mev": 197.23000526428223,
+      "random_std_mev": 205.67076761109826,
+      "random_changes_mev": [
+        558.5525035858154,
+        0.3266334533691406,
+        0.7660388946533203,
+        174.09944534301758,
+        252.40540504455566
+      ]
+    }
+  ],
+  "relation_ablation": {
+    "aa": {
+      "ablated_prediction": 2.589038372039795,
+      "delta_mev": 0.2384185791015625
+    },
+    "ad": {
+      "ablated_prediction": 2.1472675800323486,
+      "delta_mev": -441.5323734283447
+    },
+    "da": {
+      "ablated_prediction": 2.500854015350342,
+      "delta_mev": -87.94593811035156
+    },
+    "dd": {
+      "ablated_prediction": 2.5891990661621094,
+      "delta_mev": 0.3991127014160156
+    }
+  },
+  "native_readout": {
+    "kind": "latent_defect_readout",
+    "site_indices": [
+      16,
+      84,
+      110,
+      151
+    ],
+    "values_ev": [
+      7.1102423667907715,
+      2.6540231704711914,
+      0.29882895946502686,
+      0.29210495948791504
+    ],
+    "mean_reconstruction_error_ev": 2.384185791015625e-07
+  },
+  "seconds": 30.15439550008159,
+  "wrapper_parity": "passed",
+  "n_nodes": 192,
+  "raw_zero_feature_sites": [
+    16,
+    84
+  ],
+  "n_edges": 2433
+}

@@ -1,0 +1,904 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/8tg3ic",
+    "id": "8tg3ic",
+    "slide": 3,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/loby1sjq",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "6eb8fc0a-4a32-49cc-8ef5-fc1d40cf9098",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7axovapo",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "2DMD data and prediction target",
+      "textPreview": "2DMD data and prediction target",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2DMD data and prediction target"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2DMD data and prediction target",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2DMD data and prediction target",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m9o7m583",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "Counts below describe each raw MoS₂/WSe₂ material subset. Mixed-low preprocessing retains 11,864 structures.",
+      "textPreview": "Counts below describe each raw MoS₂/WSe₂ material subset. Mixed-low preprocessing retains 11,864 structures.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Counts below describe each raw MoS₂/WSe₂ material subset. Mixed-low preprocessing retains 11,864 structures."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Counts below describe each raw MoS₂/WSe₂ material subset. Mixed-low preprocessing retains 11,864 structures.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Counts below describe each raw MoS₂/WSe₂ material subset. Mixed-low preprocessing retains 11,864 structures.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/l8v6t07i",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "3",
+      "textPreview": "3",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/k7mpkvqx",
+      "id": "5",
+      "bbox": [
+        60,
+        139,
+        1130,
+        62
+      ],
+      "geometry": "rect",
+      "text": "Target:  y = Eformation / Ndefects",
+      "textPreview": "Target:  y = Eformation / Ndefects",
+      "resolvedFontSize": 38,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 38,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Target:  y = Eformation / Ndefects"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Target:  y = Eformation / Ndefects",
+          "resolvedTextStyle": {
+            "fontSize": 38,
+            "typeface": "Times New Roman",
+            "color": "#A32638",
+            "bold": true
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Target:  y = Eformation / Ndefects",
+              "fontSize": 38,
+              "typeface": "Times New Roman",
+              "color": "#A32638",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/utkjy1s3",
+      "id": "6",
+      "bbox": [
+        60,
+        235,
+        550,
+        320
+      ],
+      "text": "Low-density data | Structures per material\n1 defect | 4\n2 defects | 127\n3 defects | 5,802\nTotal | 5,933",
+      "textPreview": "Low-density data | Structures per material | 1 defect | 4 | 2 defects | 127 | 3 defects | 5,802 | Total | 5,933",
+      "rows": 5,
+      "cols": 2,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            60,
+            235,
+            320,
+            64
+          ],
+          "text": "Low-density data",
+          "textPreview": "Low-density data",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Low-density data",
+              "resolvedTextStyle": {
+                "fontSize": 27,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Low-density data",
+                  "fontSize": 27,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            380,
+            235,
+            230,
+            64
+          ],
+          "text": "Structures per material",
+          "textPreview": "Structures per material",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Structures per material",
+              "resolvedTextStyle": {
+                "fontSize": 27,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Structures per material",
+                  "fontSize": 27,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            60,
+            299,
+            320,
+            64
+          ],
+          "text": "1 defect",
+          "textPreview": "1 defect",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "1 defect",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "1 defect"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            380,
+            299,
+            230,
+            64
+          ],
+          "text": "4",
+          "textPreview": "4",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "4",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "4"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            60,
+            363,
+            320,
+            64
+          ],
+          "text": "2 defects",
+          "textPreview": "2 defects",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "2 defects",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "2 defects"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            380,
+            363,
+            230,
+            64
+          ],
+          "text": "127",
+          "textPreview": "127",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "127",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "127"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            60,
+            427,
+            320,
+            64
+          ],
+          "text": "3 defects",
+          "textPreview": "3 defects",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "3 defects",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "3 defects"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            380,
+            427,
+            230,
+            64
+          ],
+          "text": "5,802",
+          "textPreview": "5,802",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "5,802",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "5,802"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 5,
+          "column": 1,
+          "bbox": [
+            60,
+            491,
+            320,
+            64
+          ],
+          "text": "Total",
+          "textPreview": "Total",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Total",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Total"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 5,
+          "column": 2,
+          "bbox": [
+            380,
+            491,
+            230,
+            64
+          ],
+          "text": "5,933",
+          "textPreview": "5,933",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "5,933",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "5,933"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 7,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/vutkr6t8",
+      "id": "7",
+      "bbox": [
+        655,
+        235,
+        565,
+        230
+      ],
+      "text": "High-density data | Structures per material\n4, 9, 14, 19, 24 defects | 100 at each count\nTotal | 500",
+      "textPreview": "High-density data | Structures per material | 4, 9, 14, 19, 24 defects | 100 at each count | Total | 500",
+      "rows": 3,
+      "cols": 2,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            655,
+            235,
+            325,
+            76.67
+          ],
+          "text": "High-density data",
+          "textPreview": "High-density data",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "High-density data",
+              "resolvedTextStyle": {
+                "fontSize": 27,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "High-density data",
+                  "fontSize": 27,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            980,
+            235,
+            240,
+            76.67
+          ],
+          "text": "Structures per material",
+          "textPreview": "Structures per material",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Structures per material",
+              "resolvedTextStyle": {
+                "fontSize": 27,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Structures per material",
+                  "fontSize": 27,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            655,
+            311.67,
+            325,
+            76.67
+          ],
+          "text": "4, 9, 14, 19, 24 defects",
+          "textPreview": "4, 9, 14, 19, 24 defects",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "4, 9, 14, 19, 24 defects",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "4, 9, 14, 19, 24 defects"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            980,
+            311.67,
+            240,
+            76.67
+          ],
+          "text": "100 at each count",
+          "textPreview": "100 at each count",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "100 at each count",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "100 at each count"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            655,
+            388.33,
+            325,
+            76.67
+          ],
+          "text": "Total",
+          "textPreview": "Total",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Total",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Total"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            980,
+            388.33,
+            240,
+            76.67
+          ],
+          "text": "500",
+          "textPreview": "500",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "500",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/x4v6pgrm",
+      "id": "8",
+      "bbox": [
+        665,
+        503,
+        535,
+        90
+      ],
+      "geometry": "rect",
+      "text": "97.8% of low structures have exactly 3 defects.",
+      "textPreview": "97.8% of low structures have exactly 3 defects.",
+      "resolvedFontSize": 31,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 31,
+        "typeface": "Times New Roman",
+        "color": "#A32638",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "97.8% of low structures have exactly 3"
+          },
+          {
+            "index": 2,
+            "text": "defects."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "97.8% of low structures have exactly 3 defects.",
+          "resolvedTextStyle": {
+            "fontSize": 31,
+            "typeface": "Times New Roman",
+            "color": "#A32638"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "97.8% of low structures have exactly 3 defects.",
+              "fontSize": 31,
+              "typeface": "Times New Roman",
+              "color": "#A32638"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

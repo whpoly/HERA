@@ -1,0 +1,11 @@
+import fs from 'node:fs/promises';
+import {PresentationFile,FileBlob} from '@oai/artifact-tool';
+const B='C:/Users/User/Desktop/HERA/tmp/shared_hetero_recap_revision_20260916';
+const P=await PresentationFile.importPptx(await FileBlob.load('C:/Users/User/Desktop/HERA/results/group_meeting_20260915/HERA_group_meeting_20260915_shared_formulas.pptx'));
+const snapshot=await P.inspect({kind:'slide,textbox,shape,table',maxChars:100000});
+await fs.writeFile(`${B}/source.inspect.ndjson`,snapshot.ndjson);
+console.log(snapshot.ndjson.split('\n').filter(x=> /"slide":2[,}]/.test(x)).join('\n'));
+const slide=P.slides.items[1];
+await fs.writeFile(`${B}/before-2.layout.json`,await (await slide.export({format:'layout'})).text());
+const png=await slide.export({format:'png',scale:1});
+await fs.writeFile(`${B}/before-2.png`,new Uint8Array(await png.arrayBuffer()));

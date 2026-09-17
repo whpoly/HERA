@@ -54,6 +54,9 @@ from .config.defaults import (
     ALIGNN_HETERO_RELATION_MODES,
     ALIGNN_HETERO_MESSAGE_MODES, ALIGNN_HETERO_DISTANCE_MODES, ALIGNN_HETERO_ABLATIONS,
     ALIGNN_HETERO_AGGREGATION_MODES, ALIGNN_HETERO_DEFECT_RESIDUAL_MODES,
+    ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES,
+    ALIGNN_HETERO_AA_MODES,
+    ALIGNN_HETERO_DD_MODES,
     apply_alignn_hetero_options, alignn_hetero_run_components,
     HYPERGRAPH_UPDATE_MODES, resolve_hypergraph_updates,
 )
@@ -320,6 +323,9 @@ def apply_training_overrides(config, args, model_name):
             aggregation_mode=getattr(args, 'alignn_hetero_aggregation', None),
             defect_residual=getattr(args, 'alignn_hetero_defect_residual', None),
             defect_cutoff=getattr(args, 'alignn_hetero_defect_cutoff', None),
+            defect_connectivity=getattr(args, 'alignn_hetero_defect_connectivity', None),
+            aa_mode=getattr(args, 'alignn_hetero_aa', None),
+            dd_mode=getattr(args, 'alignn_hetero_dd', None),
         )
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')) and args.hypergraph_radius is not None:
         config['model']['hypergraph_radius'] = args.hypergraph_radius
@@ -858,7 +864,10 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
             f'distance: {config["model"].get("hetero_distance_mode", "independent")}; '
             f'aggregation: {config["model"].get("hetero_aggregation_mode", "relation_mean")}; '
             f'defect residual: {config["model"].get("hetero_defect_residual", "none")}; '
-            f'defect cutoff: {config["model"].get("hetero_defect_cutoff", 12.0)} A',
+            f'defect cutoff: {config["model"].get("hetero_defect_cutoff", 12.0)} A; '
+            f'defect connectivity: {config["model"].get("hetero_defect_connectivity", "physical")}; '
+            f'atom-atom relation: {config["model"].get("hetero_aa_mode", "keep")}; '
+            f'defect-defect relation: {config["model"].get("hetero_dd_mode", "keep")}',
         )
     with open(path, 'w') as f:
         f.write('\n'.join(mode_summary) + '\n')
@@ -1076,6 +1085,13 @@ def main():
                         help='Optional direct sparse defect residual after the local backbone')
     parser.add_argument('--alignn-hetero-defect-cutoff', type=float,
                         help='Auxiliary sparse defect edge cutoff in angstrom (default: 12)')
+    parser.add_argument('--alignn-hetero-defect-connectivity',
+                        choices=ALIGNN_HETERO_DEFECT_CONNECTIVITY_MODES,
+                        help='Complete adds missing directed actual-defect pairs to the main graph using periodic minimum images')
+    parser.add_argument('--alignn-hetero-aa', choices=ALIGNN_HETERO_AA_MODES,
+                        help='Keep (default) or drop the atom-to-atom relation, its parameters and line-graph bonds')
+    parser.add_argument('--alignn-hetero-dd', choices=ALIGNN_HETERO_DD_MODES,
+                        help='Keep (default) or drop the defect-to-defect main relation, its parameters and line-graph bonds')
     parser.add_argument('--alignn-hetero-ablation', nargs='+', choices=tuple(ALIGNN_HETERO_ABLATIONS),
                         help='Sequential independent hetero ablations; cannot combine with explicit '
                              'message/distance/aggregation/defect-residual options')
@@ -1181,7 +1197,8 @@ def main():
         parser.error('--hypergraph-radius must be >= 0')
     if any(value is not None for value in (
             args.alignn_hetero_message, args.alignn_hetero_distance, args.alignn_hetero_ablation,
-            args.alignn_hetero_aggregation, args.alignn_hetero_defect_residual, args.alignn_hetero_defect_cutoff)):
+            args.alignn_hetero_aggregation, args.alignn_hetero_defect_residual, args.alignn_hetero_defect_cutoff,
+            args.alignn_hetero_defect_connectivity, args.alignn_hetero_aa, args.alignn_hetero_dd)):
         if args.model != 'alignn':
             parser.error('Hetero encoder options require --model alignn')
         if args.mode is not None and not any(
@@ -1470,6 +1487,9 @@ def main():
                         f'hetero_aggregation={config["model"].get("hetero_aggregation_mode", "relation_mean")}, '
                         f'hetero_defect_residual={config["model"].get("hetero_defect_residual", "none")}, '
                         f'hetero_defect_cutoff={config["model"].get("hetero_defect_cutoff", 12.0)}, '
+                        f'hetero_defect_connectivity={config["model"].get("hetero_defect_connectivity", "physical")}, '
+                        f'hetero_aa={config["model"].get("hetero_aa_mode", "keep")}, '
+                        f'hetero_dd={config["model"].get("hetero_dd_mode", "keep")}, '
                         f'grad_accum={config["optim"].get("grad_accum_steps", 1)}, '
                         f'amp={config["optim"].get("amp", False)}'
                     )

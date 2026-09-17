@@ -1,0 +1,826 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/1sown1",
+    "id": "1sown1",
+    "slide": 5,
+    "layoutId": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Times New Roman"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "c54bc783-fd02-4db9-820c-f8485a1016a0",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "a65c23c6-5a2a-4bd6-9f58-6a2a656e2d2d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/a9c7yhkf",
+      "id": "1",
+      "bbox": [
+        977,
+        20,
+        278,
+        54
+      ],
+      "alt": "The Hong Kong Polytechnic University logo from the supplied presentation",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "62faddbe-8626-4541-9538-377e31d15fe2",
+        "contentType": "image/png",
+        "byteLength": 64032
+      }
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/cfitcval",
+      "id": "2",
+      "bbox": [
+        50,
+        30,
+        900,
+        100
+      ],
+      "geometry": "rect",
+      "text": "Models compared in the current study",
+      "textPreview": "Models compared in the current study",
+      "resolvedFontSize": 43,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 43,
+        "typeface": "Times New Roman",
+        "color": "#17212A",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Models compared in the current study"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Models compared in the current study",
+          "resolvedTextStyle": {
+            "fontSize": 43,
+            "typeface": "Times New Roman",
+            "color": "#17212A"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Models compared in the current study",
+              "fontSize": 43,
+              "typeface": "Times New Roman",
+              "color": "#17212A"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dgru50r6",
+      "id": "3",
+      "bbox": [
+        50,
+        657,
+        1140,
+        49
+      ],
+      "geometry": "rect",
+      "text": "Architectures below refer to the HERA implementations. These comparisons change more than pooling.",
+      "textPreview": "Architectures below refer to the HERA implementations. These comparisons change more than pooling.",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 19,
+        "typeface": "Times New Roman",
+        "color": "#555C62",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Architectures below refer to the HERA implementations. These comparisons change more than pooling."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Architectures below refer to the HERA implementations. These comparisons change more than pooling.",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "typeface": "Times New Roman",
+            "color": "#555C62"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Architectures below refer to the HERA implementations. These comparisons change more than pooling.",
+              "fontSize": 19,
+              "typeface": "Times New Roman",
+              "color": "#555C62"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2pgb6lsj",
+      "id": "4",
+      "bbox": [
+        1210,
+        666,
+        35,
+        30
+      ],
+      "geometry": "rect",
+      "text": "5",
+      "textPreview": "5",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "Times New Roman",
+        "color": "#7D8891",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "5"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "5",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "Times New Roman",
+            "color": "#7D8891",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "5",
+              "fontSize": 18,
+              "typeface": "Times New Roman",
+              "color": "#7D8891",
+              "alignment": "right"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "table",
+      "scope": "slide",
+      "aid": "tb/ytw321gb",
+      "id": "5",
+      "bbox": [
+        50,
+        153,
+        1180,
+        445
+      ],
+      "text": "Model | Graph / messages | Readout\nMEGNet sparse | Defect-only graph, 12 Å\nCurrent + original species\nMax in message/state blocks | Node + edge Set2Set\nand global state\nALIGNN attention | Atom/bond-angle graph, 6 Å\nType-aware neighbor attention\nShared message network | Type- and context-aware\nglobal attention\nShared ALIGNN hetero | Four directed relation types\nOne message core per layer\nRank-8 relation adapters | Mean of per-defect\nscalar predictions\nDefiNet-style ALIGNN | Marker-pair and distance gates\nScalar branch implemented in HERA | Mean over all nodes,\nthen MLP",
+      "textPreview": "Model | Graph / messages | Readout | MEGNet sparse | Defect-only graph, 12 Å | Current + original species | Max in message/state blocks |...",
+      "rows": 5,
+      "cols": 3,
+      "cells": [
+        {
+          "index": 1,
+          "row": 1,
+          "column": 1,
+          "bbox": [
+            50,
+            153,
+            300,
+            54
+          ],
+          "text": "Model",
+          "textPreview": "Model",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Model",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Model",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "row": 1,
+          "column": 2,
+          "bbox": [
+            350,
+            153,
+            515,
+            54
+          ],
+          "text": "Graph / messages",
+          "textPreview": "Graph / messages",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Graph / messages",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Graph / messages",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "row": 1,
+          "column": 3,
+          "bbox": [
+            865,
+            153,
+            365,
+            54
+          ],
+          "text": "Readout",
+          "textPreview": "Readout",
+          "fillColor": "#A32638",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Readout",
+              "resolvedTextStyle": {
+                "fontSize": 25,
+                "typeface": "Times New Roman",
+                "color": "#FFFFFF",
+                "bold": true
+              },
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Readout",
+                  "fontSize": 25,
+                  "typeface": "Times New Roman",
+                  "color": "#FFFFFF",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "row": 2,
+          "column": 1,
+          "bbox": [
+            50,
+            207,
+            300,
+            97.75
+          ],
+          "text": "MEGNet sparse",
+          "textPreview": "MEGNet sparse",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "MEGNet sparse",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "MEGNet sparse"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "row": 2,
+          "column": 2,
+          "bbox": [
+            350,
+            207,
+            515,
+            97.75
+          ],
+          "text": "Defect-only graph, 12 Å\nCurrent + original species\nMax in message/state blocks",
+          "textPreview": "Defect-only graph, 12 Å | Current + original species | Max in message/state blocks",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Defect-only graph, 12 Å",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Defect-only graph, 12 Å"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Current + original species",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Current + original species"
+                }
+              ]
+            },
+            {
+              "index": 3,
+              "text": "Max in message/state blocks",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Max in message/state blocks"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "row": 2,
+          "column": 3,
+          "bbox": [
+            865,
+            207,
+            365,
+            97.75
+          ],
+          "text": "Node + edge Set2Set\nand global state",
+          "textPreview": "Node + edge Set2Set | and global state",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Node + edge Set2Set",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Node + edge Set2Set"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "and global state",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "and global state"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 7,
+          "row": 3,
+          "column": 1,
+          "bbox": [
+            50,
+            304.75,
+            300,
+            97.75
+          ],
+          "text": "ALIGNN attention",
+          "textPreview": "ALIGNN attention",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "ALIGNN attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "ALIGNN attention"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "row": 3,
+          "column": 2,
+          "bbox": [
+            350,
+            304.75,
+            515,
+            97.75
+          ],
+          "text": "Atom/bond-angle graph, 6 Å\nType-aware neighbor attention\nShared message network",
+          "textPreview": "Atom/bond-angle graph, 6 Å | Type-aware neighbor attention | Shared message network",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Atom/bond-angle graph, 6 Å",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Atom/bond-angle graph, 6 Å"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Type-aware neighbor attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Type-aware neighbor attention"
+                }
+              ]
+            },
+            {
+              "index": 3,
+              "text": "Shared message network",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Shared message network"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "row": 3,
+          "column": 3,
+          "bbox": [
+            865,
+            304.75,
+            365,
+            97.75
+          ],
+          "text": "Type- and context-aware\nglobal attention",
+          "textPreview": "Type- and context-aware | global attention",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Type- and context-aware",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Type- and context-aware"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "global attention",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "global attention"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "row": 4,
+          "column": 1,
+          "bbox": [
+            50,
+            402.5,
+            300,
+            97.75
+          ],
+          "text": "Shared ALIGNN hetero",
+          "textPreview": "Shared ALIGNN hetero",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Shared ALIGNN hetero",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Shared ALIGNN hetero"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "row": 4,
+          "column": 2,
+          "bbox": [
+            350,
+            402.5,
+            515,
+            97.75
+          ],
+          "text": "Four directed relation types\nOne message core per layer\nRank-8 relation adapters",
+          "textPreview": "Four directed relation types | One message core per layer | Rank-8 relation adapters",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Four directed relation types",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Four directed relation types"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "One message core per layer",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "One message core per layer"
+                }
+              ]
+            },
+            {
+              "index": 3,
+              "text": "Rank-8 relation adapters",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Rank-8 relation adapters"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "row": 4,
+          "column": 3,
+          "bbox": [
+            865,
+            402.5,
+            365,
+            97.75
+          ],
+          "text": "Mean of per-defect\nscalar predictions",
+          "textPreview": "Mean of per-defect | scalar predictions",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mean of per-defect",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mean of per-defect"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "scalar predictions",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "scalar predictions"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "row": 5,
+          "column": 1,
+          "bbox": [
+            50,
+            500.25,
+            300,
+            97.75
+          ],
+          "text": "DefiNet-style ALIGNN",
+          "textPreview": "DefiNet-style ALIGNN",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "DefiNet-style ALIGNN",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "DefiNet-style ALIGNN"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "row": 5,
+          "column": 2,
+          "bbox": [
+            350,
+            500.25,
+            515,
+            97.75
+          ],
+          "text": "Marker-pair and distance gates\nScalar branch implemented in HERA",
+          "textPreview": "Marker-pair and distance gates | Scalar branch implemented in HERA",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Marker-pair and distance gates",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Marker-pair and distance gates"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "Scalar branch implemented in HERA",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Scalar branch implemented in HERA"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "row": 5,
+          "column": 3,
+          "bbox": [
+            865,
+            500.25,
+            365,
+            97.75
+          ],
+          "text": "Mean over all nodes,\nthen MLP",
+          "textPreview": "Mean over all nodes, | then MLP",
+          "fillColor": "#FFFFFF",
+          "paragraphs": [
+            {
+              "index": 1,
+              "text": "Mean over all nodes,",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "Mean over all nodes,"
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "text": "then MLP",
+              "runs": [
+                {
+                  "index": 1,
+                  "text": "then MLP"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "composeRuns": []
+}
