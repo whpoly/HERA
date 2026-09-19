@@ -70,7 +70,7 @@ from .training.trainer import MEGNetTrainer
 from .training.history import TrainingLogger
 from .training.results import (
     atomic_write_text, merge_aggregate_summary, merge_mode_losses,
-    prefixed_summary_rows, saved_dataset_rows,
+    prefixed_summary_rows, saved_dataset_rows, completed_split_result,
 )
 
 
@@ -496,7 +496,7 @@ def iter_concentration_transfer_splits(
 
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
-                      run_label=None, cv5=False, resume=False):
+                      run_label=None, cv5=False, resume=False, protect_existing=False):
     """Train a single mode and return per-split test losses."""
     log_mode = run_label or mode
     data = dataset[dataset_index_for_mode(mode)]
@@ -541,7 +541,11 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         )
 
     for split in splits:
-        completed_loss = TrainingLogger.completed_test_mae(log_dir, split['logger_id']) if resume else None
+        completed_loss = completed_split_result(
+            log_dir, split['logger_id'],
+            expected={'config': config, 'model_name': model_name, 'dataset_name': dataset_name, 'mode': mode},
+            protect_existing=protect_existing,
+        ) if resume else None
         if completed_loss is not None:
             print(
                 f'  [{split["display"]}] Resume: completed history found, '
@@ -804,10 +808,10 @@ def expected_split_logger_ids(seeds, cv5):
     return list(seeds)
 
 
-def completed_resume_losses(log_dir, seeds, cv5):
+def completed_resume_losses(log_dir, seeds, cv5, expected=None, protect_existing=False):
     losses = []
     for logger_id in expected_split_logger_ids(seeds, cv5):
-        loss = TrainingLogger.completed_test_mae(log_dir, logger_id)
+        loss = completed_split_result(log_dir, logger_id, expected=expected, protect_existing=protect_existing)
         if loss is None:
             return None
         losses.append(loss)
@@ -1145,7 +1149,9 @@ def main():
     parser.add_argument('--run-dir', default=None,
                         help='Specific run directory to write/read instead of creating logs/run_{timestamp}')
     parser.add_argument('--resume', action='store_true',
-                        help='Skip completed seed/fold tasks whose history CSV already has a TEST result')
+                        help='Reuse final TEST history or matching completed checkpoint results')
+    parser.add_argument('--protect-existing', action='store_true',
+                        help='With --resume, stop instead of restarting existing incomplete or unverified splits')
     parser.add_argument('--r', nargs='+', default=None,
                         help=('Radius values for hetero local/host cutoff sweeps; '
                               'graph edge cutoff stays at the config value. Use all for 0 3 4 5 6 7'))
@@ -1168,6 +1174,8 @@ def main():
                         help='Stop immediately if any sample explanation fails')
 
     args = parser.parse_args()
+    if args.protect_existing and not args.resume:
+        parser.error('--protect-existing requires --resume')
     warnings.filterwarnings('ignore')
     for arg_name in (
             'train_batch_size',
@@ -1434,11 +1442,24 @@ def main():
                     os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
                     run['summary_path'] = os.path.join(mode_dir, 'summary.txt')
+                    run['resume_expected'] = {
+                        'config': run['config'], 'model_name': model_name,
+                        'dataset_name': dataset_name, 'mode': train_mode,
+                    }
                     run_specs.append(run)
+
+            if args.resume and args.protect_existing:
+                # Inspect every requested split before training anything for this dataset.
+                for run in run_specs:
+                    for logger_id in expected_split_logger_ids(args.seeds, args.cv5):
+                        completed_split_result(run['mode_dir'], logger_id,
+                                               expected=run['resume_expected'], protect_existing=True)
 
             def train_run_for_seeds(run, selected_seeds):
                 if args.resume:
-                    completed = completed_resume_losses(run['mode_dir'], selected_seeds, args.cv5)
+                    completed = completed_resume_losses(run['mode_dir'], selected_seeds, args.cv5,
+                                                        expected=run['resume_expected'],
+                                                        protect_existing=args.protect_existing)
                     if completed is not None:
                         print(f'  Resume: {run["label"]}, seeds={selected_seeds} already completed; skipping.')
                         return completed
@@ -1551,6 +1572,7 @@ def main():
                     run_label=run_label,
                     cv5=args.cv5,
                     resume=args.resume,
+                    protect_existing=args.protect_existing,
                 )
 
             results = {}
@@ -1565,6 +1587,7 @@ def main():
                             run['mode_dir'],
                             args.seeds,
                             cv5=False,
+                            expected=run['resume_expected'], protect_existing=args.protect_existing,
                         )
                         if completed_losses is not None:
                             print(
@@ -1616,6 +1639,7 @@ def main():
                             run['mode_dir'],
                             args.seeds,
                             args.cv5,
+                            expected=run['resume_expected'], protect_existing=args.protect_existing,
                         )
                         if completed_losses is not None:
                             print(

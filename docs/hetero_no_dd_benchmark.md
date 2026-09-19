@@ -46,6 +46,27 @@ HERA/logs/hetero_relation_native_semi_imp2d/   <-- --run-dir
 runner's `--run-dir`; passing `.../baseline` or `.../no_dd` would add another
 variant subdirectory and miss the old histories.
 
+**If the old results are under `baseline/`, selecting `--variant no_dd` does
+not search them.** A folder name alone does not establish which relations
+were trained. The standalone merge command below prints `saved AA=..., DD=...`
+from each checkpoint's configuration. `DD=keep` is a baseline model and cannot
+be reused as no_dd; `DD=drop` confirms the DD-deleted model, even if its source
+directory is named baseline. The command preserves both source directories.
+
+Recommended for combining old baseline-directory results and newer no_dd runs:
+
+```bash
+python HERA/scripts/merge_hetero_relation_results.py --run-dir HERA/logs/hetero_relation_native_semi_imp2d --variant baseline no_dd
+```
+
+This separate script has no training entry point. It prints its absolute
+source path and `MERGE ONLY`, reads trusted HERA checkpoints on CPU, audits
+AA/DD settings and merges saved metrics. It can recover a final `test_mae`
+from a checkpoint when no completed history/leaf summary survives. Conflicting
+saved metrics are reported as errors. No dataset, prediction, optimizer step,
+checkpoint move or checkpoint modification is performed. Run by file path as
+shown to select the current checkout rather than another installed HERA package.
+
 To merge previously completed baseline/no_dd results, including all saved
 hetero and hetero_was modes and seeds, **without any training or evaluation**:
 
@@ -75,9 +96,13 @@ python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d
 The runner merges existing results after training as well. Requesting both
 `--mode hetero hetero_was` is also valid: a matching history with a finite
 `TEST` result skips that split, including dataset loading for completed jobs.
-Resume does **not** restore an interrupted epoch/optimizer: incomplete splits
-restart, preserving their old history as a timestamped `.bak`. Use summary-only
-if no training at all is desired. Keep the original experiment protocol/root.
+If the history is missing/incomplete, resume can also reuse a checkpoint with
+a final finite test MAE and matching model/dataset/mode/seed/configuration.
+The benchmark runner now supplies `--protect-existing`: an existing split
+without a verified final result stops instead of restarting. Entirely missing
+splits can still train in an ordinary benchmark command. Resume does **not**
+restore an interrupted epoch/optimizer. Use the standalone merge command if
+no training at all is desired. Keep the original experiment protocol/root.
 
 ### Launch new experiments
 

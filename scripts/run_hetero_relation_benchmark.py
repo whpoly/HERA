@@ -55,7 +55,7 @@ def training_command(args, variant):
         '--seed', *args.seed, '--epochs', str(args.epochs), '--device', args.device,
         '--alignn-train-batch-size', str(args.batch_size), '--alignn-test-batch-size', '1',
         '--atom-init', str(ROOT / 'atom_init.json'),
-        '--run-dir', str(args.run_dir / variant), '--resume',
+        '--run-dir', str(args.run_dir / variant), '--resume', '--protect-existing',
     ]
     if args.cv5:
         command.append('--cv5')
@@ -70,7 +70,7 @@ def reference_command(args):
         '--seed', *args.seed, '--epochs', str(args.epochs), '--device', args.device,
         '--alignn-train-batch-size', str(args.batch_size), '--alignn-test-batch-size', '1',
         '--atom-init', str(ROOT / 'atom_init.json'),
-        '--run-dir', str(args.run_dir / 'references'), '--resume',
+        '--run-dir', str(args.run_dir / 'references'), '--resume', '--protect-existing',
     ]
     if args.cv5:
         command.append('--cv5')
@@ -78,24 +78,8 @@ def reference_command(args):
 
 
 def merge_saved_results(root, variants):
-    from ..training.results import (
-        merge_aggregate_summary, prefixed_summary_rows, rebuild_run_summaries,
-    )
-    for variant in variants:
-        variant_dir = root / variant
-        if not variant_dir.is_dir():
-            print(f'No saved directory: {variant_dir}; skipped (no training).', flush=True)
-            continue
-        count = rebuild_run_summaries(variant_dir)
-        print(f'[{variant}] {count} saved result rows merged.', flush=True)
-    rows = prefixed_summary_rows(root)
-    if rows:
-        merge_aggregate_summary(root / 'summary.txt', [
-            'HETERO RELATION BENCHMARK: accumulated saved results',
-            'Rows: variant, model, dataset, mode, MAE statistics and split results.',
-            '-' * 50, *rows,
-        ])
-        print(f'Combined summary: {root / "summary.txt"}', flush=True)
+    from ..training.results import merge_benchmark_results
+    merge_benchmark_results(root, variants)
 
 
 def main():
