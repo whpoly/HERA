@@ -1,4 +1,4 @@
-# AA/DD ablations on native, semi and imp2d
+# Hetero / hetero_was AA/DD benchmarks on native, semi and imp2d
 
 `--alignn-hetero-dd drop` removes the main `('defect', 'dd', 'defect')`
 relation from graph construction, message passing, radial encoding, residual
@@ -32,28 +32,43 @@ region, which changes the meaning of this ablation.
 ## Ready-to-run benchmark
 
 Sync the modified HERA code to the machine containing all three datasets.
-Activate its HERA Python environment and run from HERA's parent directory:
+Activate its HERA Python environment and run from HERA's parent directory.
+Use `--mode hetero hetero_was` to run every relation variant with both inputs:
 
 ```bash
-python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --variant baseline no_aa no_dd no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero hetero_was --variant baseline no_aa no_dd no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
 ```
 
-This runs 4 variants x 3 datasets x 3 seeds = **36 training/test runs**
+This runs 2 feature modes x 4 variants x 3 datasets x 3 seeds = **72 training/test runs**
 sequentially. Each variant has its own root directory under
 `HERA/logs/hetero_relation_native_semi_imp2d/` and always uses `--resume`.
+Inside a variant, `hetero/r0/...` and `hetero_was/r0/...` are separate folders.
+Previously completed hetero runs are skipped when rerunning this expanded
+command with the same seed and protocol; their checkpoints remain available.
 Checkpoint selection and early stopping use validation MAE; testing happens
 automatically at the end of each run.
+
+`hetero` uses the current element's 92-dimensional features. `hetero_was`
+uses `was_species`, concatenating the current and reference element features
+into 184 dimensions. Graph connectivity, node ordering, geometry, pool masks,
+relation settings and the training protocol are paired between these modes.
+The two node-input projections grow; the rest of the configured architecture
+is unchanged. The WAS/reference label availability caveat below applies.
+
+Use `--mode hetero_was` to run only the 36 WAS jobs, or `--mode hetero` for
+only the 36 ordinary hetero jobs. Omitting `--mode` retains the old hetero-only
+behavior. No `--reference full full_x` flag is needed for hetero_was.
 
 For only the original and DD-deleted model:
 
 ```bash
-python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --variant baseline no_dd --seed 123 11 1245 --epochs 500 --device cuda:0
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero hetero_was --variant baseline no_dd --seed 123 11 1245 --epochs 500 --device cuda:0
 ```
 
 For the AA-deleted model versus deleting BOTH AA and DD:
 
 ```bash
-python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --variant no_aa no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero hetero_was --variant no_aa no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
 ```
 
 For this Windows machine, use the same options with:
@@ -61,7 +76,7 @@ For this Windows machine, use the same options with:
 ```powershell
 Set-Location C:/Users/User/Desktop
 $py = 'C:/Users/User/.conda/envs/hera/python.exe'
-& $py -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --variant baseline no_aa no_dd no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
+& $py -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero hetero_was --variant baseline no_aa no_dd no_aa_dd --seed 123 11 1245 --epochs 500 --device cuda:0
 ```
 
 Add `--dry-run` to print exact underlying HERA.main commands and check data
@@ -72,7 +87,7 @@ training on the first one.
 
 ## Protocol
 
-- Fixed backbone: shared_residual rank 8; LayerNorm; defect_energy_mean;
+- Hetero backbone: shared_residual rank 8; LayerNorm; defect_energy_mean;
   physical graph; r = 0; no auxiliary sparse defect residual; FP32.
 - Batch size 8 for every dataset/variant, test batch size 1. Override training
   size with `--batch-size`, keeping it equal for the paired comparisons.
@@ -82,9 +97,10 @@ training on the first one.
 - Up to 500 epochs, existing early stopping with patience 50 and 0.5% minimum
   relative validation improvement. The three seeds provide repeated-split
   estimates; they are not three folds of cross validation.
-- Use `--seed all` for the repository's ten-seed suite: 120 runs for all four
-  variants and three datasets. For five-fold CV, use `--cv5 --seed 123` and a
-  NEW root such as `--run-dir HERA/logs/hetero_relation_cv5` (60 runs).
+- Use `--seed all` for the repository's ten-seed suite: 240 runs for both
+  feature modes, all four variants and three datasets (120 for one mode).
+  For five-fold CV, use `--cv5 --seed 123` and a NEW root such as
+  `--run-dir HERA/logs/hetero_relation_cv5` (120 runs for both modes).
 - Resume only when using the same protocol; choose a new root if changing
   batch size, precision, split mode or other experiment settings.
 
@@ -136,3 +152,90 @@ Full benchmark accuracy has not been measured. On this local machine:
 The three-dataset command will intentionally stop at preflight until the
 semi and imp2d data are present. Run it on the complete-data machine after
 syncing the code, or restrict the local command to native.
+
+## WAS validation and reference-label availability
+
+The expanded runner calls the existing `alignn_hetero_was` model with
+`atom_features='was_species'`; it does not insert new X nodes or change the
+definition of WAS. The converter uses an explicit site `was` atomic number
+when provided. If that annotation is absent, its existing fallback uses the
+current atomic number for the reference half as well. Thus an untagged normal
+atom receives `[E(current), E(current)]`, and an untagged vacancy X receives
+two zero vectors. This changes feature size/model capacity but supplies no
+additional reference-species information.
+
+The current native/semi/imp2d loaders use `skip_was=True` and do not generate
+reference-species annotations. Two real native samples (Zn vacancy and Al-on-N
+substitution) were inspected; both had zero `was`-annotated sites. Full
+semi/imp2d inputs are unavailable locally, so their site-level coverage was
+not measured. Until reference labels are populated, results from untagged
+inputs must not be described as the benefit of knowing the original species.
+The runner prints the existing fallback behavior whenever WAS is requested.
+
+Validation: 22 related tests passed after adding WAS routing. They cover all
+eight feature/relation combinations, identical topology and geometry across
+the paired modes, 184-dimensional inputs, explicit-reference and missing-label
+semantics, finite backward passes, strict checkpoint restoration, matching
+CLI seeds/configurations, distinct result directories and 72/36 job counts.
+No full training benchmark was launched for this change.
+
+## Add ordinary ALIGNN with vacancy X (2026-09-18)
+
+Hetero vacancy inputs already contain a DummySpecies/X node. Adding a second
+hetero label called "with X" would repeat the same representation. To add the
+existing ordinary ALIGNN full-graph-with-X reference, use `--reference full_x`.
+For a paired test of adding X, include both `full` and `full_x`:
+
+```bash
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --variant baseline no_aa no_dd no_aa_dd --reference full full_x --seed 123 11 1245 --epochs 500 --device cuda:0
+```
+
+Run from HERA's parent in its Python environment. On this Windows machine,
+replace `python` with `& 'C:/Users/User/.conda/envs/hera/python.exe'`.
+
+| Dataset | Ordinary references | Hetero variants | Runs for 3 seeds |
+|---|---|---|---:|
+| native | full, full_x | all four | 18 |
+| semi | full | all four | 15 |
+| imp2d | full | all four | 15 |
+
+Total: **48 training/test runs**. The current semi and imp2d loaders do not
+insert vacancy X nodes, so full_x and full have identical inputs there. When
+both modes are requested, the existing HERA.main policy runs full once.
+No artificial X site is inserted into a structure with no vacancy. Native
+substitution/interstitial samples also retain their ordinary full graph;
+native vacancy samples gain one X at the dataset's central vacancy position.
+
+Reference runs use the same seeds, splits, batch sizes, epoch limit and
+validation-based selection as the hetero runs. They retain the ordinary ALIGNN
+architecture: BatchNorm, whole-graph mean pooling and its existing output
+layer. Hetero retains its own architecture described above. Interpret full
+versus full_x as the X comparison; comparisons to hetero also change the
+backbone/readout design.
+
+The references execute before the hetero variants and are saved separately:
+
+```text
+HERA/logs/hetero_relation_native_semi_imp2d/references/alignn/native/full/
+HERA/logs/hetero_relation_native_semi_imp2d/references/alignn/native/full_x/
+HERA/logs/hetero_relation_native_semi_imp2d/references/alignn/semi/full/
+HERA/logs/hetero_relation_native_semi_imp2d/references/alignn/imp2d/full/
+```
+
+Reusing the same benchmark root resumes/skips completed matching runs. Omitting
+`--reference` retains the previous runner behavior and all previous paths.
+`--seed all` gives 160 total runs for this expanded suite; `--cv5 --seed 123`
+gives 80. Use a separate root when changing the split protocol.
+
+Validation: 27 relevant tests passed, including CLI dispatch to exactly these
+four reference dataset/mode combinations, unchanged no-reference behavior,
+run counts, output separation, X insertion and finite forward/backward passes.
+On the real native `1-ZnO-V_Zn-POSCAR0-Neutral.cif`, the input has 63 real atoms;
+full keeps 63 and full_x keeps all 63 plus one X (64 nodes). Existing hetero
+also contains X, but its historical native vacancy conversion replaces the
+last input site with X (63 total nodes). That pre-existing construction is
+preserved by this runner change; it is another reason not to interpret
+hetero-versus-full_x differences as an isolated X effect.
+
+The local semi/imp2d availability issues above still apply. No full benchmark
+training or new test MAE has been produced by this update.

@@ -1,4 +1,4 @@
-"""Paired AA/DD graph ablations on native, semi and imp2d.
+"""Paired hetero/hetero_was AA/DD ablations and optional ALIGNN references.
 
 Run from HERA's parent; each HERA.main invocation trains and evaluates one
 variant on every requested dataset. All outputs are isolated by variant.
@@ -17,6 +17,8 @@ VARIANTS = {
     'no_dd': ('keep', 'drop'),
     'no_aa_dd': ('drop', 'drop'),
 }
+REFERENCE_MODES = ('full', 'full_x')
+HETERO_MODES = ('hetero', 'hetero_was')
 DATA_LISTS = {
     'native': Path('dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv'),
     'semi': Path('dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv'),
@@ -43,7 +45,7 @@ def training_command(args, variant):
     aa, dd = VARIANTS[variant]
     command = [
         sys.executable, '-m', 'HERA.main', '--model', 'alignn',
-        '--dataset', *args.dataset, '--mode', 'hetero', '--r', '0',
+        '--dataset', *args.dataset, '--mode', *getattr(args, 'mode', ['hetero']), '--r', '0',
         '--alignn-hetero-aa', aa, '--alignn-hetero-dd', dd,
         '--alignn-hetero-feature-norm', 'layernorm',
         '--alignn-hetero-node-norm', 'layernorm',
@@ -60,10 +62,29 @@ def training_command(args, variant):
     return command
 
 
+def reference_command(args):
+    """Ordinary ALIGNN baselines use their own graph modes and output roots."""
+    command = [
+        sys.executable, '-m', 'HERA.main', '--model', 'alignn',
+        '--dataset', *args.dataset, '--mode', *args.reference,
+        '--seed', *args.seed, '--epochs', str(args.epochs), '--device', args.device,
+        '--alignn-train-batch-size', str(args.batch_size), '--alignn-test-batch-size', '1',
+        '--atom-init', str(ROOT / 'atom_init.json'),
+        '--run-dir', str(args.run_dir / 'references'), '--resume',
+    ]
+    if args.cv5:
+        command.append('--cv5')
+    return command
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dataset', nargs='+', choices=tuple(DATA_LISTS), default=list(DATA_LISTS))
     parser.add_argument('--variant', nargs='+', choices=tuple(VARIANTS), default=['baseline', 'no_dd'])
+    parser.add_argument('--mode', nargs='+', choices=HETERO_MODES, default=['hetero'],
+                        help='Input feature modes for every AA/DD variant: hetero and/or hetero_was')
+    parser.add_argument('--reference', nargs='+', choices=REFERENCE_MODES, default=[],
+                        help='Also run ordinary ALIGNN full/full_x references; duplicate no-vacancy graphs are skipped when both are requested')
     parser.add_argument('--seed', nargs='+', default=['123', '11', '1245'])
     parser.add_argument('--cv5', action='store_true')
     parser.add_argument('--epochs', type=int, default=500)
@@ -74,20 +95,36 @@ def main():
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1:
         parser.error('--epochs and --batch-size must be positive')
-    from ..main import parse_seed_values
+    from ..main import parse_seed_values, modes_for_dataset
     seeds = parse_seed_values(args.seed, parser)
     if args.cv5 and len(seeds) != 1:
         parser.error('--cv5 requires exactly one --seed value')
     args.dataset = list(dict.fromkeys(args.dataset))
     args.variant = list(dict.fromkeys(args.variant))
+    args.mode = list(dict.fromkeys(args.mode))
+    args.reference = list(dict.fromkeys(args.reference))
     args.run_dir = args.run_dir.resolve()
     errors = data_errors(args.dataset)
     if errors and not args.dry_run:
         parser.error('Data preflight failed before training:\n' + '\n'.join(errors))
     if errors:
         print('Data unavailable (dry run only):\n' + '\n'.join(errors), flush=True)
-    count = len(args.dataset) * len(args.variant) * (5 if args.cv5 else len(seeds))
-    print(f'{count} training/test runs; variants={args.variant}; datasets={args.dataset}', flush=True)
+    ref_count = sum(len(modes_for_dataset(args.reference, d)) for d in args.dataset)
+    count = (len(args.dataset) * len(args.variant) * len(args.mode) + ref_count) * (5 if args.cv5 else len(seeds))
+    print(f'{count} training/test runs; variants={args.variant}; modes={args.mode}; references={args.reference}; datasets={args.dataset}', flush=True)
+    if 'hetero_was' in args.mode:
+        print('hetero_was uses 184-D current/reference features. Sites without a was annotation '
+              'use the existing fallback to current species; the runner does not infer missing reference labels.', flush=True)
+    if args.reference:
+        print('Hetero vacancy inputs already contain X. full_x is an ordinary ALIGNN reference.', flush=True)
+        for dataset in args.dataset:
+            selected = modes_for_dataset(args.reference, dataset)
+            if selected != args.reference:
+                print(f'{dataset}: full_x equals full (no vacancy X); running {selected} once.', flush=True)
+        command = reference_command(args)
+        print(f'\n[references] {shlex.join(command)}', flush=True)
+        if not args.dry_run:
+            subprocess.run(command, cwd=ROOT.parent, check=True)
     for variant in args.variant:
         command = training_command(args, variant)
         print(f'\n[{variant}] {shlex.join(command)}', flush=True)

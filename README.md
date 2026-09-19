@@ -691,5 +691,11 @@ Useful options:
 - `--alignn-hetero-dd drop` independently removes the main defect-to-defect
   relation and can be combined with no-aa. See [the native/semi/imp2d
   four-variant benchmark](docs/hetero_no_dd_benchmark.md) for runnable commands.
+- Add `--mode hetero hetero_was` to that benchmark runner to evaluate each
+  AA/DD variant with both current-species and WAS features. The documentation
+  describes the existing fallback when site-level reference labels are absent.
+- That benchmark runner also accepts `--reference full full_x` to add ordinary
+  ALIGNN with/without vacancy X. Hetero vacancy inputs already contain X;
+  full_x duplicates full on semi/imp2d and is skipped there when both are selected.
 - Full training depends on external datasets being placed exactly where `data/datasets.py` expects them.
 - Use `python -m HERA.main --help` to inspect all available CLI options.
