@@ -31,6 +31,22 @@ region, which changes the meaning of this ablation.
 
 ## Ready-to-run benchmark
 
+### Add hetero_was to the existing baseline directory
+
+Run this from HERA's parent on the machine holding the existing baseline:
+
+```bash
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero_was --variant baseline --seed 123 11 1245 --epochs 500 --device cuda:0 --run-dir HERA/logs/hetero_relation_native_semi_imp2d
+```
+
+Only `hetero_was` is selected for training (up to nine new dataset/seed runs).
+The existing `baseline/alignn/<dataset>/hetero/` files are not training targets.
+New WAS results go to `baseline/alignn/<dataset>/hetero_was/`, and both modes
+appear in the existing dataset/model summaries. Completed WAS jobs are reused;
+existing incomplete WAS jobs stop under `--protect-existing`. This uses the
+baseline relation configuration, keeping both AA and DD. Pass the common root
+shown above, not a path ending in `/baseline`, because the runner appends it.
+
 ### Reuse existing runs and merge results (2026-09-19)
 
 The original runner and the WAS runner use the same directory layout:
