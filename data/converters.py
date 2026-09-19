@@ -57,9 +57,11 @@ class FlattenGaussianDistanceConverter(GaussianDistanceConverter):
 # ------------------------------------------------------------------ #
 
 class AtomFeaturesExtractor:
-    def __init__(self, atom_features, task):
+    def __init__(self, atom_features, task, native_preprocessing=None, impurity_preprocessing=None):
         self.atom_features = atom_features
         self.task = self._task_family(task)
+        self.native_preprocessing = native_preprocessing
+        self.impurity_preprocessing = impurity_preprocessing
 
     @staticmethod
     def _task_family(task):
@@ -93,6 +95,18 @@ class AtomFeaturesExtractor:
         # elem_embedding must be set globally before use (loaded in main.py)
         from ..data.datasets import elem_embedding
 
+        from .native_was import NATIVE_REFERENCE_VERSION
+        schemas = {site.properties.get('native_preprocessing') for site in structure}
+        if schemas - {None, self.native_preprocessing}:
+            raise ValueError('Native graph preprocessing differs from model/checkpoint config; '
+                             'reload structures using its saved native_preprocessing setting')
+        impurity_schemas = {site.properties.get('impurity_preprocessing') for site in structure}
+        if impurity_schemas - {None, self.impurity_preprocessing}:
+            raise ValueError('Impurity graph preprocessing differs from model/checkpoint config; '
+                             'reload structures using the saved dataset preprocessing version')
+        strict_was = (self.native_preprocessing == NATIVE_REFERENCE_VERSION
+                      or self.impurity_preprocessing is not None)
+
         if self.atom_features == "Z":
             return np.array([
                 [0] * 92 if isinstance(i.specie, DummySpecies)
@@ -110,6 +124,9 @@ class AtomFeaturesExtractor:
             features = []
             for site in structure.sites:
                 current_z = self._current_z(site)
+                if strict_was and site.properties.get('was') is None:
+                    raise ValueError('True reference preprocessing requires a WAS label for every site; '
+                                     'load the dataset with its saved preprocessing version')
                 previous_z = site.properties.get('was', current_z)
                 features.append(
                     self._embedding_from_z(current_z, elem_embedding)

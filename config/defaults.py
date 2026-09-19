@@ -3,6 +3,15 @@
 import copy
 import math
 
+from ..data.native_was import NATIVE_REFERENCE_VERSION
+from ..data.impurity_was import REFERENCE_VERSION
+
+DATASET_REFERENCE_VERSIONS = {
+    'native': NATIVE_REFERENCE_VERSION,
+    'semi': REFERENCE_VERSION,
+    'imp2d': REFERENCE_VERSION,
+}
+
 
 EARLY_STOPPING_PATIENCE = 50
 EARLY_STOPPING_MIN_DELTA_PERCENT = 0.5
@@ -484,6 +493,8 @@ def _definet_attention_config(base_config, mode, model='cgcnn'):
 def _finalize_config(config, model, dataset):
     """Apply model- and dataset-specific defaults."""
     config = copy.deepcopy(config)
+    if dataset in DATASET_REFERENCE_VERSIONS and config['model']['atom_features'] == 'was_species':
+        config[f'{dataset}_preprocessing'] = DATASET_REFERENCE_VERSIONS[dataset]
     config['model']['train_batch_size'] = DEFAULT_TRAIN_BATCH_SIZE
     config['model']['test_batch_size'] = DEFAULT_TEST_BATCH_SIZE
     if model in ('cgcnn', 'megnet'):

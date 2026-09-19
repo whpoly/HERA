@@ -67,6 +67,8 @@ from .data.datasets import (
     representation_for_mode,
 )
 from .training.trainer import MEGNetTrainer
+from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
+from .data.impurity_was import impurity_run_components
 from .training.history import TrainingLogger
 from .training.results import (
     atomic_write_text, merge_aggregate_summary, merge_mode_losses,
@@ -851,6 +853,10 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
         f'Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}',
         f'{split_label}: {losses}',
     ]
+    preprocessing = config.get(f'{dataset_name}_preprocessing')
+    if preprocessing:
+        mode_summary.insert(1, f'{dataset_name} preprocessing: {preprocessing}; '
+                            f'atom features: {config["model"]["atom_features"]}')
     if config['task'].endswith(('_hypergraph', '_hypergraph_was')):
         mode_summary.insert(
             1,
@@ -1028,6 +1034,16 @@ def main():
     )
     parser.add_argument('--mode', nargs='+', default=None, choices=VALID_MODES + ['all'],
                         help='Graph mode(s) to train. Use all for all modes supported by each model')
+    parser.add_argument('--native-preprocessing', choices=NATIVE_PREPROCESSING_CHOICES,
+                        default=None, help='Native only: reference_v1 gives true WAS and correct '
+                        'defect indices/X nodes to every selected mode for paired comparisons. '
+                        'Default: reference_v1 for WAS modes, legacy for ordinary modes. '
+                        'legacy reproduces historical inputs/checkpoints.')
+    for impurity_dataset in ('semi', 'imp2d'):
+        parser.add_argument(f'--{impurity_dataset}-preprocessing', choices=NATIVE_PREPROCESSING_CHOICES,
+                            default=None, help=f'{impurity_dataset}: reference_v1 assigns true WAS '
+                            'and validates defect identity; legacy reproduces historical inputs. '
+                            'Default: reference_v1 for WAS modes, legacy for ordinary modes.')
     parser.add_argument('--device', default='cuda:0',
                         help='Torch device (default: cuda:0)')
     parser.add_argument('--epochs', type=int, default=500,
@@ -1342,24 +1358,35 @@ def main():
 
             dataset_cache = {}
 
-            def dataset_for_run(local_cutoff, mode):
+            def dataset_for_run(local_cutoff, mode, config):
                 representation = representation_for_mode(mode)
-                cache_key = (local_cutoff, representation)
+                preprocessing_key = f'{dataset_name}_preprocessing'
+                preprocessing = config.get(preprocessing_key)
+                cache_key = (local_cutoff, representation, preprocessing)
                 if cache_key not in dataset_cache:
                     dataset_cache[cache_key] = load_dataset(
                         dataset_name,
                         model_name,
                         local_cutoff=local_cutoff,
                         representations=[representation],
+                        **({preprocessing_key: preprocessing} if dataset_name in ('native', 'semi', 'imp2d') else {}),
                     )
                 return dataset_cache[cache_key]
 
             def config_for_mode(mode_name):
-                return apply_training_overrides(
+                config = apply_training_overrides(
                     get_config(model_name, dataset_name, mode_name),
                     args,
                     model_name,
                 )
+                preprocessing_key = f'{dataset_name}_preprocessing'
+                preprocessing = getattr(args, preprocessing_key, None)
+                if preprocessing is not None:
+                    if preprocessing == 'legacy':
+                        config.pop(preprocessing_key, None)
+                    else:
+                        config[preprocessing_key] = preprocessing
+                return config
 
             run_specs = []
             for mode in dataset_modes:
@@ -1427,6 +1454,9 @@ def main():
                         parts = alignn_hetero_run_components(run['config']['model'])
                         if parts:
                             run['label'] += '_' + '_'.join(parts)
+                    preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
+                    if preprocessing_parts:
+                        run['label'] += '_' + '_'.join(preprocessing_parts)
                     run_label = run['label']
                     train_mode = run['mode']
                     mode_parts = [dataset_dir, train_mode]
@@ -1438,6 +1468,7 @@ def main():
                         mode_parts.append(run['norm_label'])
                     if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
                         mode_parts.extend(alignn_hetero_run_components(run['config']['model']))
+                    mode_parts.extend(preprocessing_parts)
                     mode_dir = os.path.join(*mode_parts)
                     os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
@@ -1467,10 +1498,13 @@ def main():
                 train_mode = run['mode']
                 config = run['config']
                 mode_dir = run['mode_dir']
-                run_dataset = dataset_for_run(run['local_cutoff'], train_mode)
+                run_dataset = dataset_for_run(run['local_cutoff'], train_mode, config)
 
                 print(f'\n{"=" * 60}')
                 print(f'  Training {model_name.upper()} - {run_label.upper()} mode')
+                if dataset_name in ('native', 'semi', 'imp2d'):
+                    print(f'  {dataset_name} preprocessing: {config.get(f"{dataset_name}_preprocessing", "legacy")}; '
+                          f'atom features: {config["model"]["atom_features"]}')
                 print(
                     '  Batch size: '
                     f'train={config["model"]["train_batch_size"]}, '
@@ -1544,6 +1578,8 @@ def main():
                             explain_parts.append(run['norm_label'])
                         if model_name == 'alignn' and train_mode in ALIGNN_NODE_NORM_MODES:
                             explain_parts.extend(alignn_hetero_run_components(config['model']))
+                        explain_parts.extend(native_run_components(config))
+                        explain_parts.extend(impurity_run_components(config))
                         explain_root = os.path.join(*explain_parts)
                     else:
                         explain_root = os.path.join(mode_dir, 'explanations')

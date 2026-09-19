@@ -274,7 +274,13 @@ class MEGNetTrainer:
             bond_converter = GaussianDistanceConverter(
                 centers=np.linspace(0, self.config['model']['cutoff'], self.config['model']['edge_embed_size'])
             )
-        atom_converter = AtomFeaturesExtractor(self.config["model"]["atom_features"], self.config['task'])
+        atom_converter = AtomFeaturesExtractor(
+            self.config["model"]["atom_features"], self.config['task'],
+            native_preprocessing=self.config.get('native_preprocessing'),
+            impurity_preprocessing=next((f'{dataset}_{self.config[f"{dataset}_preprocessing"]}'
+                                         for dataset in ('semi', 'imp2d')
+                                         if self.config.get(f'{dataset}_preprocessing') not in (None, 'legacy')), None),
+        )
         hypergraph_schema = self.config['model'].get(
             'hypergraph_schema', 'per_defect_neighborhood_v2',
         )

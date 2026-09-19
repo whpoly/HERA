@@ -1983,13 +1983,15 @@ def run_single_seed(args, run_dir, radii):
 
     def load_dataset_for_run(model_name, run):
         representation = representation_for_mode(run["mode"])
-        cache_key = (model_name, run["local_cutoff"], representation)
+        native_version = run['config'].get('native_preprocessing')
+        cache_key = (model_name, run["local_cutoff"], representation, native_version)
         if cache_key not in dataset_cache:
             datasets, raw_targets, raw_metadata = load_native_with_metadata(
                 model_name,
                 args.native_csv,
                 local_cutoff=run["local_cutoff"],
                 representations=[representation],
+                native_preprocessing=native_version,
             )
             metadata = add_native_targets(raw_metadata, raw_targets)
             dataset_cache[cache_key] = (datasets, raw_targets, metadata)

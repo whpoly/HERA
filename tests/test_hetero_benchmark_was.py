@@ -53,6 +53,7 @@ class HeteroBenchmarkWasTests(unittest.TestCase):
                     first, second = copy.deepcopy(configurations['hetero']), copy.deepcopy(configurations['hetero_was'])
                     first.pop('task'); second.pop('task')
                     first['model'].pop('atom_features'); second['model'].pop('atom_features')
+                    self.assertEqual(second.pop(f'{dataset}_preprocessing'), 'reference_v1')
                     self.assertEqual(first, second)
                     self.assertTrue(all(c.args[4] == [123] for c in calls))
                 paths.extend(c.kwargs['log_dir'] for c in train.call_args_list)

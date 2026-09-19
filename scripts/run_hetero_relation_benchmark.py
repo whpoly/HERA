@@ -59,6 +59,10 @@ def training_command(args, variant):
     ]
     if args.cv5:
         command.append('--cv5')
+    for dataset in ('native', 'semi', 'imp2d'):
+        preprocessing = getattr(args, f'{dataset}_preprocessing', None)
+        if preprocessing:
+            command.extend([f'--{dataset}-preprocessing', preprocessing])
     return command
 
 
@@ -74,6 +78,10 @@ def reference_command(args):
     ]
     if args.cv5:
         command.append('--cv5')
+    for dataset in ('native', 'semi', 'imp2d'):
+        preprocessing = getattr(args, f'{dataset}_preprocessing', None)
+        if preprocessing:
+            command.extend([f'--{dataset}-preprocessing', preprocessing])
     return command
 
 
@@ -88,6 +96,13 @@ def main():
     parser.add_argument('--variant', nargs='+', choices=tuple(VARIANTS), default=['baseline', 'no_dd'])
     parser.add_argument('--mode', nargs='+', choices=HETERO_MODES, default=['hetero'],
                         help='Input feature modes for every AA/DD variant: hetero and/or hetero_was')
+    parser.add_argument('--native-preprocessing', choices=('legacy', 'reference_v1'),
+                        help='Use reference_v1 on both native modes for a fair WAS ablation; '
+                        'versioned directories keep historical checkpoints intact')
+    for dataset in ('semi', 'imp2d'):
+        parser.add_argument(f'--{dataset}-preprocessing', choices=('legacy', 'reference_v1'),
+                            help=f'Use reference_v1 on both {dataset} modes for a paired WAS comparison; '
+                            'new outputs are versioned and historical checkpoints are retained')
     parser.add_argument('--reference', nargs='+', choices=REFERENCE_MODES, default=[],
                         help='Also run ordinary ALIGNN full/full_x references; duplicate no-vacancy graphs are skipped when both are requested')
     parser.add_argument('--seed', nargs='+', default=['123', '11', '1245'])
@@ -134,8 +149,16 @@ def main():
     count = (len(args.dataset) * len(args.variant) * len(args.mode) + ref_count) * (5 if args.cv5 else len(seeds))
     print(f'{count} training/test runs; variants={args.variant}; modes={args.mode}; references={args.reference}; datasets={args.dataset}', flush=True)
     if 'hetero_was' in args.mode:
-        print('hetero_was uses 184-D current/reference features. Sites without a was annotation '
-              'use the existing fallback to current species; the runner does not infer missing reference labels.', flush=True)
+        print('hetero_was uses 184-D current/reference features. Native/semi/imp2d default to true '
+              'original-site labels (reference_v1), with separate versioned outputs. Use each dataset\'s '
+              '--<dataset>-preprocessing reference_v1 on both modes for a paired comparison.', flush=True)
+        for dataset in args.dataset:
+            if getattr(args, f'{dataset}_preprocessing') is None and 'hetero' in args.mode:
+                print(f'For a paired {dataset} comparison use --{dataset}-preprocessing reference_v1. '
+                      'Without it, ordinary hetero keeps its historical inputs/results.', flush=True)
+    for dataset in args.dataset:
+        if getattr(args, f'{dataset}_preprocessing') == 'legacy':
+            print(f'{dataset} legacy requested: historical graphs and WAS fallback.', flush=True)
     if args.reference:
         print('Hetero vacancy inputs already contain X. full_x is an ordinary ALIGNN reference.', flush=True)
         for dataset in args.dataset:

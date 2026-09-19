@@ -9,6 +9,9 @@ from pymatgen.core import Structure
 from pymatgen.core.periodic_table import DummySpecies
 from pymatgen.core.sites import PeriodicSite
 
+from .native_was import NATIVE_REFERENCE_VERSION, native_reference_structure
+from .impurity_was import REFERENCE_VERSION, imp2d_reference_structure, semi_reference_structure
+
 
 # ================================================================== #
 #  Shared helpers
@@ -469,8 +472,26 @@ def add_state_native(structure, unit_cell):
 
 def convert_to_sparse_native(structure, unit_cell, supercell_size, task, state,
                               skip_was=False, copy_unit_cell_properties=False,
-                              local_cutoff=None):
+                              local_cutoff=None, native_preprocessing=None):
     source_structure = structure
+    if native_preprocessing == NATIVE_REFERENCE_VERSION:
+        source_id = getattr(structure, 'source_id', getattr(structure, 'source_path', None))
+        include_vacancy = (is_hetero_task(task) or is_attention_task(task)
+                           or is_full_x_task(task) or is_sparse_task(task) or is_local_task(task))
+        structure = native_reference_structure(structure, source_id, include_vacancy)
+        if is_hetero_task(task):
+            structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
+        elif is_attention_task(task):
+            structure = mark_local_region(structure, local_cutoff)
+        elif is_sparse_task(task):
+            structure = Structure.from_sites([site for site in structure if site_type_flag(site)])
+        elif is_local_task(task):
+            structure = mark_local_region(structure, 5 if local_cutoff is None else local_cutoff)
+        if state is not None or copy_unit_cell_properties:
+            raise ValueError('Native reference_v1 does not support unit-cell state/property copying')
+        return copy_source_metadata(source_structure, structure)
+    if native_preprocessing not in (None, 'legacy'):
+        raise ValueError(f'Unknown native preprocessing: {native_preprocessing}')
     structure = structure.copy()
     if is_hetero_task(task):
         structure = get_hetero_native(structure, unit_cell, supercell_size, state)
@@ -727,8 +748,15 @@ def add_state_imp2d(structure, unit_cell):
 
 def convert_to_sparse_imp2d(structure, unit_cell, supercell_size, task, state,
                              skip_was=False, copy_unit_cell_properties=False,
-                             local_cutoff=None):
+                             local_cutoff=None, imp2d_preprocessing=None):
     source_structure = structure
+    if imp2d_preprocessing == REFERENCE_VERSION:
+        structure = imp2d_reference_structure(
+            structure, get_imp2d_defect_info(unit_cell), get_imp2d_defect_indices(structure, unit_cell))
+        return _convert_impurity_reference(source_structure, structure, task, local_cutoff,
+                                          state, copy_unit_cell_properties)
+    if imp2d_preprocessing not in (None, 'legacy'):
+        raise ValueError(f'Unknown imp2d preprocessing: {imp2d_preprocessing}')
     structure = structure.copy()
     if is_hetero_task(task):
         structure = get_hetero_imp2d(structure, unit_cell, supercell_size, state)
@@ -813,8 +841,14 @@ def add_state_semi(structure, unit_cell):
 
 def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
                             skip_was=False, copy_unit_cell_properties=False,
-                            local_cutoff=None):
+                            local_cutoff=None, semi_preprocessing=None):
     source_structure = structure
+    if semi_preprocessing == REFERENCE_VERSION:
+        structure = semi_reference_structure(structure, unit_cell)
+        return _convert_impurity_reference(source_structure, structure, task, local_cutoff,
+                                          state, copy_unit_cell_properties)
+    if semi_preprocessing not in (None, 'legacy'):
+        raise ValueError(f'Unknown semi preprocessing: {semi_preprocessing}')
     structure = structure.copy()
     unit_cell = unit_cell.copy()
     if is_hetero_task(task):
@@ -837,3 +871,16 @@ def convert_to_sparse_semi(structure, unit_cell, supercell_size, task, state,
     if state is not None:
         structure = add_state_semi(structure, unit_cell)
     return copy_source_metadata(source_structure, structure)
+
+
+def _convert_impurity_reference(source, structure, task, local_cutoff, state, copy_unit_cell_properties):
+    """Use the same marked atoms for plain/WAS; never deduplicate relaxed sites."""
+    if state is not None or copy_unit_cell_properties:
+        raise ValueError('Impurity reference_v1 does not support unit-cell state/property copying')
+    if is_hetero_task(task):
+        structure = mark_hetero_region_if_needed(structure, task, local_cutoff)
+    elif is_attention_task(task) or is_local_task(task):
+        structure = mark_local_region(structure, local_cutoff)
+    elif is_sparse_task(task):
+        structure = Structure.from_sites([site for site in structure if site_type_flag(site)])
+    return copy_source_metadata(source, structure)

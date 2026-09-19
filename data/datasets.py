@@ -570,7 +570,7 @@ def load_data_2dmd_wse2(task_prefix, local_cutoff=None, representations=None):
     )
 
 
-def load_data_native(task_prefix, local_cutoff=None, representations=None):
+def load_data_native(task_prefix, local_cutoff=None, representations=None, native_preprocessing=None):
     representations = _normalize_representations(representations)
     df_descriptors = pd.read_csv('dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
     prep = []
@@ -586,13 +586,13 @@ def load_data_native(task_prefix, local_cutoff=None, representations=None):
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:
         full_task = f'{task_prefix}_full_x' if 'full_x' in representations else f'{task_prefix}_full'
-        dataset_full = [convert_to_sparse_native(p[0], p[1], 1, full_task, None, True, False) for p in tqdm(prep)]
+        dataset_full = [convert_to_sparse_native(p[0], p[1], 1, full_task, None, True, False, native_preprocessing=native_preprocessing) for p in tqdm(prep)]
     dataset_hetero = None
     if 'hetero' in representations:
-        dataset_hetero = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_hetero = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff, native_preprocessing=native_preprocessing) for p in tqdm(prep)]
     dataset_attn = None
     if 'attention' in representations:
-        dataset_attn = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_attn = [convert_to_sparse_native(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff, native_preprocessing=native_preprocessing) for p in tqdm(prep)]
     return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
@@ -622,9 +622,26 @@ def load_data_och(task_prefix, local_cutoff=None, representations=None):
     return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
-def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
+def _read_impurity_manifest(path, dataset):
+    try:
+        frame = pd.read_csv(path, header=None)
+    except (FileNotFoundError, pd.errors.EmptyDataError) as exc:
+        raise ValueError(f'{dataset}: missing or empty data list: {path}') from exc
+    if frame.empty or frame.shape[1] < 2:
+        raise ValueError(f'{dataset}: data list must contain filenames and targets: {path}')
+    targets = pd.to_numeric(frame[1], errors='coerce')
+    bad = ~np.isfinite(targets)
+    if bad.any():
+        examples = frame.loc[bad, 0].astype(str).head(5).tolist()
+        raise ValueError(f'{dataset}: non-finite or invalid targets for {examples}; '
+                         'fix the manifest instead of silently changing the training subset')
+    frame[1] = targets
+    return frame
+
+
+def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_preprocessing=None):
     representations = _normalize_representations(representations)
-    df_descriptors = pd.read_csv('dataset/imp2d/imp2d/id_prop.csv', header=None)
+    df_descriptors = _read_impurity_manifest('dataset/imp2d/imp2d/id_prop.csv', 'imp2d')
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
@@ -644,7 +661,7 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
         prep.append([struct, defect_info])
         targets.append(df_descriptors[1][i])
 
-    if {'hetero', 'attention'} & representations:
+    if {'hetero', 'attention'} & representations or imp2d_preprocessing == 'reference_v1':
         _assign_imp2d_self_defect_indices(
             prep,
             _load_imp2d_self_defect_labels(),
@@ -653,19 +670,19 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None):
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:
         full_task = f'{task_prefix}_full_x' if 'full_x' in representations else f'{task_prefix}_full'
-        dataset_full = [convert_to_sparse_imp2d(p[0], p[1], 1, full_task, None, True, False) for p in tqdm(prep)]
+        dataset_full = [convert_to_sparse_imp2d(p[0], p[1], 1, full_task, None, True, False, imp2d_preprocessing=imp2d_preprocessing) for p in tqdm(prep)]
     dataset_hetero = None
     if 'hetero' in representations:
-        dataset_hetero = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_hetero = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff, imp2d_preprocessing=imp2d_preprocessing) for p in tqdm(prep)]
     dataset_attn = None
     if 'attention' in representations:
-        dataset_attn = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_attn = [convert_to_sparse_imp2d(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff, imp2d_preprocessing=imp2d_preprocessing) for p in tqdm(prep)]
     return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
-def load_data_semi(task_prefix, local_cutoff=None, representations=None):
+def load_data_semi(task_prefix, local_cutoff=None, representations=None, semi_preprocessing=None):
     representations = _normalize_representations(representations)
-    df_descriptors = pd.read_csv('dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', header=None)
+    df_descriptors = _read_impurity_manifest('dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', 'semi')
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
@@ -680,19 +697,20 @@ def load_data_semi(task_prefix, local_cutoff=None, representations=None):
             if len(defect_species - base_species) > 0:
                 prep.append([struct, base_structure])
                 targets.append(df_descriptors[1][i])
-        except Exception:
-            continue
+        except Exception as exc:
+            raise ValueError(f'semi: failed to load {j!r} or its {base} host; '
+                             'no sample was silently skipped') from exc
 
     dataset_full = None
     if 'full' in representations or 'full_x' in representations:
         full_task = f'{task_prefix}_full_x' if 'full_x' in representations else f'{task_prefix}_full'
-        dataset_full = [convert_to_sparse_semi(p[0], p[1], 1, full_task, None, True, False) for p in tqdm(prep)]
+        dataset_full = [convert_to_sparse_semi(p[0], p[1], 1, full_task, None, True, False, semi_preprocessing=semi_preprocessing) for p in tqdm(prep)]
     dataset_hetero = None
     if 'hetero' in representations:
-        dataset_hetero = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_hetero = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_hetero', None, True, False, local_cutoff=local_cutoff, semi_preprocessing=semi_preprocessing) for p in tqdm(prep)]
     dataset_attn = None
     if 'attention' in representations:
-        dataset_attn = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff) for p in tqdm(prep)]
+        dataset_attn = [convert_to_sparse_semi(p[0], p[1], 1, f'{task_prefix}_attention', None, True, False, local_cutoff=local_cutoff, semi_preprocessing=semi_preprocessing) for p in tqdm(prep)]
     return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
@@ -721,6 +739,9 @@ def load_dataset(
         local_cutoff=None,
         representations=None,
         modes=None,
+        native_preprocessing=None,
+        imp2d_preprocessing=None,
+        semi_preprocessing=None,
 ):
     """Load and return the graph representations for a dataset.
 
@@ -732,6 +753,10 @@ def load_dataset(
         local_cutoff: optional local/host boundary radius for hetero and attention structures
         representations: optional subset of full, hetero, attention, sparse to build
         modes: optional training modes; converted to the needed representation subset
+        native_preprocessing: saved config version; None preserves legacy graphs.
+            Pass reference_v1 for original-site labels and corrected native defects.
+        imp2d_preprocessing, semi_preprocessing: analogous dataset-specific
+            original-site label versions; None preserves historical inputs.
 
     Returns:
         (dataset_full, dataset_hetero, dataset_attn, dataset_sparse, targets).
@@ -741,8 +766,16 @@ def load_dataset(
     if dataset_name not in _LOADER_REGISTRY:
         raise ValueError(f"Unknown dataset '{dataset_name}'. Choose from {list(_LOADER_REGISTRY.keys())}")
     representations = _normalize_representations(representations, modes)
+    preprocessing_options = {}
+    if dataset_name == 'native':
+        preprocessing_options['native_preprocessing'] = native_preprocessing
+    elif dataset_name == 'imp2d':
+        preprocessing_options['imp2d_preprocessing'] = imp2d_preprocessing
+    elif dataset_name == 'semi':
+        preprocessing_options['semi_preprocessing'] = semi_preprocessing
     return _LOADER_REGISTRY[dataset_name](
         model_name,
         local_cutoff=local_cutoff,
         representations=representations,
+        **preprocessing_options,
     )

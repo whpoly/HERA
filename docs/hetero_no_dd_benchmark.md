@@ -42,14 +42,25 @@ python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d
 Both `hetero` and `hetero_was` are selected (18 dataset/mode/seed tasks).
 Completed matching `baseline/alignn/<dataset>/hetero/` jobs are reused by resume.
 New WAS results go to `baseline/alignn/<dataset>/hetero_was/`, and both modes
-appear in the existing dataset/model summaries. Completed WAS jobs are reused
-as well; existing incomplete jobs stop under `--protect-existing`. This uses the
+appear in the existing dataset/model summaries. Native/semi/imp2d now add a
+`<dataset>_reference_v1` subdirectory for true WAS: **old WAS results are
+preserved but are not reused as new WAS results**. Completed jobs of the same
+version are reused; existing incomplete jobs stop under `--protect-existing`. This uses the
 baseline relation configuration, keeping both AA and DD. Pass the common root
 shown above, not a path ending in `/baseline`, because the runner appends it.
 
+For a fair native WAS ablation, add `--native-preprocessing reference_v1`.
+This also corrects ordinary hetero's defect indexing and vacancy construction,
+so both native modes need new versioned runs initially. Full instructions:
+[native_true_was.md](native_true_was.md).
+For semi/imp2d use `--semi-preprocessing reference_v1` /
+`--imp2d-preprocessing reference_v1`; see the
+[impurity data audit](imp2d_semi_was_audit_20260920.md) for validation scope and missing semi data.
+
 ### Reuse existing runs and merge results (2026-09-19)
 
-The original runner and the WAS runner use the same directory layout:
+Mode roots retain the original layout; reference_v1 runs add a dataset-specific version
+subdirectory below the graph/configuration components:
 
 ```text
 HERA/logs/hetero_relation_native_semi_imp2d/   <-- --run-dir
@@ -142,7 +153,9 @@ automatically at the end of each run.
 `hetero` uses the current element's 92-dimensional features. `hetero_was`
 uses `was_species`, concatenating the current and reference element features
 into 184 dimensions. Graph connectivity, node ordering, geometry, pool masks,
-relation settings and the training protocol are paired between these modes.
+relation settings and the training protocol are paired between these modes
+when the same preprocessing version is selected. Explicitly use each dataset's
+`--<dataset>-preprocessing reference_v1` for this paired comparison.
 The two node-input projections grow; the rest of the configured architecture
 is unchanged. The WAS/reference label availability caveat below applies.
 
@@ -246,24 +259,25 @@ syncing the code, or restrict the local command to native.
 
 ## WAS validation and reference-label availability
 
-The expanded runner calls the existing `alignn_hetero_was` model with
-`atom_features='was_species'`; it does not insert new X nodes or change the
-definition of WAS. The converter uses an explicit site `was` atomic number
-when provided. If that annotation is absent, its existing fallback uses the
-current atomic number for the reference half as well. Thus an untagged normal
-atom receives `[E(current), E(current)]`, and an untagged vacancy X receives
-two zero vectors. This changes feature size/model capacity but supplies no
-additional reference-species information.
+**Native update (2026-09-20):** new WAS runs default to `reference_v1`, which
+provides original-site element labels and corrects native defect indexing and
+vacancy X construction. Results use a new `native_reference_v1` subdirectory;
+historical checkpoints and results are preserved. For a paired comparison use
+`--mode hetero hetero_was --native-preprocessing reference_v1`, so both modes
+receive the same corrected graphs. Both versioned modes need new training on
+their first run. Without the flag ordinary hetero keeps its historical inputs
+and can reuse its historical results, while WAS uses the new version.
+See [native_true_was.md](native_true_was.md) for semantics, checks and commands.
 
-The current native/semi/imp2d loaders use `skip_was=True` and do not generate
-reference-species annotations. Two real native samples (Zn vacancy and Al-on-N
-substitution) were inspected; both had zero `was`-annotated sites. Full
-semi/imp2d inputs are unavailable locally, so their site-level coverage was
-not measured. Until reference labels are populated, results from untagged
-inputs must not be described as the benefit of knowing the original species.
-The runner prints the existing fallback behavior whenever WAS is requested.
+**Semi/imp2d follow-up:** both now implement true WAS in their own reference_v1
+paths. Imp2d validation passed on 10,302 converged source-database structures;
+the actual training CSV is unavailable. Semi implementation tests passed,
+but all local semi CIFs and its CSV are empty, so real-data validation remains
+incomplete. See [the detailed audit](imp2d_semi_was_audit_20260920.md).
+Explicit `--<dataset>-preprocessing legacy` retains the historical missing-label
+fallback `[E(current), E(current)]` and historical result paths.
 
-Validation: 22 related tests passed after adding WAS routing. They cover all
+Historical routing validation: 22 related tests passed after adding WAS routing. They cover all
 eight feature/relation combinations, identical topology and geometry across
 the paired modes, 184-dimensional inputs, explicit-reference and missing-label
 semantics, finite backward passes, strict checkpoint restoration, matching

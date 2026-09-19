@@ -142,6 +142,7 @@ def load_native_with_metadata(
         csv_path=DEFAULT_NATIVE_CSV,
         local_cutoff=None,
         representations=None,
+        native_preprocessing=None,
 ):
     csv_path = Path(csv_path)
     data_dir = csv_path.parent
@@ -171,7 +172,8 @@ def load_native_with_metadata(
         )
         dataset_full = [
             convert_to_sparse_native(
-                structure, defect, 1, full_task, None, skip_was, False
+                structure, defect, 1, full_task, None, skip_was, False,
+                native_preprocessing=native_preprocessing,
             )
             for structure, defect in tqdm(prep, desc="Converting full graphs")
         ]
@@ -187,6 +189,7 @@ def load_native_with_metadata(
                 skip_was,
                 False,
                 local_cutoff=local_cutoff,
+                native_preprocessing=native_preprocessing,
             )
             for structure, defect in tqdm(prep, desc="Converting hetero graphs")
         ]
@@ -202,6 +205,7 @@ def load_native_with_metadata(
                 skip_was,
                 False,
                 local_cutoff=local_cutoff,
+                native_preprocessing=native_preprocessing,
             )
             for structure, defect in tqdm(prep, desc="Converting attention graphs")
         ]
@@ -270,6 +274,11 @@ def expand_mode_runs(model_name, modes, radii, hetero_feature_norm=None, hetero_
             parts = alignn_hetero_run_components(run['config']['model'])
             if parts:
                 run['label'] += '_' + '_'.join(parts)
+    from .data.native_was import native_run_components
+    for run in runs:
+        parts = native_run_components(run['config'])
+        if parts:
+            run['label'] += '_' + '_'.join(parts)
     return runs
 
 
@@ -1183,13 +1192,15 @@ def run_case_study(
 
     for run in runs:
         representation = representation_for_mode(run["mode"])
-        cache_key = (model_name, run["local_cutoff"], representation)
+        native_version = run['config'].get('native_preprocessing')
+        cache_key = (model_name, run["local_cutoff"], representation, native_version)
         if cache_key not in dataset_cache:
             dataset_cache[cache_key] = load_native_with_metadata(
                 model_name,
                 args.native_csv,
                 local_cutoff=run["local_cutoff"],
                 representations=[representation],
+                native_preprocessing=native_version,
             )
         datasets, targets, metadata = dataset_cache[cache_key]
         data = datasets[dataset_index_for_mode(run["mode"])]
