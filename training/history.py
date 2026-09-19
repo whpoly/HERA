@@ -3,6 +3,9 @@
 import csv
 import math
 import os
+import shutil
+import tempfile
+from datetime import datetime
 
 
 class TrainingLogger:
@@ -47,6 +50,11 @@ class TrainingLogger:
     def __init__(self, log_dir, model_name, dataset_name, mode, seed):
         os.makedirs(log_dir, exist_ok=True)
         self.filepath = self.filepath_for(log_dir, seed)
+        # Restarting an incomplete split is not epoch-level resume. Keep its
+        # previous curve before a new logger begins writing fresh epochs.
+        if os.path.isfile(self.filepath):
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            shutil.copy2(self.filepath, f'{self.filepath}.{stamp}.bak')
         self.rows = []
 
     def log(self, epoch, train_mae, train_mse, val_mae, best_val_mae, lr):
@@ -77,7 +85,17 @@ class TrainingLogger:
         self._flush()
 
     def _flush(self):
-        with open(self.filepath, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=self.HEADER)
-            writer.writeheader()
-            writer.writerows(self.rows)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', newline='',
+                                             dir=os.path.dirname(self.filepath), delete=False) as f:
+                temporary = f.name
+                writer = csv.DictWriter(f, fieldnames=self.HEADER)
+                writer.writeheader()
+                writer.writerows(self.rows)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, self.filepath)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)

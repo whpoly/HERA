@@ -70,8 +70,9 @@ reuse its weights; these commands create and train two distinct architectures.
 Training roots are separate, so the overall summaries, histories, checkpoints
 and predictions of both versions are retained. Drop-aa also gets a
 `relations_no_aa` path component and run-label suffix. Existing logs outside
-this new run directory are untouched. `--resume` skips already completed runs
-or resumes unfinished ones in the matching directory.
+this new run directory are untouched. `--resume` skips splits with a completed
+`TEST` history row. Incomplete splits restart from epoch 1; their old history
+is backed up. It does not restore optimizer/epoch state.
 
 High-test summaries (both models, 500 structures per material) are written to:
 

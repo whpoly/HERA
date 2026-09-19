@@ -77,6 +77,27 @@ def reference_command(args):
     return command
 
 
+def merge_saved_results(root, variants):
+    from ..training.results import (
+        merge_aggregate_summary, prefixed_summary_rows, rebuild_run_summaries,
+    )
+    for variant in variants:
+        variant_dir = root / variant
+        if not variant_dir.is_dir():
+            print(f'No saved directory: {variant_dir}; skipped (no training).', flush=True)
+            continue
+        count = rebuild_run_summaries(variant_dir)
+        print(f'[{variant}] {count} saved result rows merged.', flush=True)
+    rows = prefixed_summary_rows(root)
+    if rows:
+        merge_aggregate_summary(root / 'summary.txt', [
+            'HETERO RELATION BENCHMARK: accumulated saved results',
+            'Rows: variant, model, dataset, mode, MAE statistics and split results.',
+            '-' * 50, *rows,
+        ])
+        print(f'Combined summary: {root / "summary.txt"}', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dataset', nargs='+', choices=tuple(DATA_LISTS), default=list(DATA_LISTS))
@@ -92,6 +113,8 @@ def main():
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--run-dir', type=Path, default=ROOT / 'logs/hetero_relation_native_semi_imp2d')
     parser.add_argument('--dry-run', action='store_true', help='Print commands and data availability without starting training')
+    parser.add_argument('--summary-only', action='store_true',
+                        help='Merge saved results for selected variants; never load datasets or train (includes all saved modes/seeds)')
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1:
         parser.error('--epochs and --batch-size must be positive')
@@ -104,6 +127,20 @@ def main():
     args.mode = list(dict.fromkeys(args.mode))
     args.reference = list(dict.fromkeys(args.reference))
     args.run_dir = args.run_dir.resolve()
+    if args.summary_only:
+        roots = [args.run_dir / variant for variant in args.variant]
+        if args.reference:
+            roots.append(args.run_dir / 'references')
+        existing = [root for root in roots if root.is_dir()]
+        if not existing:
+            parser.error(f'No saved variant directories found under {args.run_dir}. '
+                         '--run-dir must be the parent of baseline/no_dd, not the variant directory itself.')
+        if args.dry_run:
+            for root in existing:
+                print(f'Would merge saved results in {root} (no training).', flush=True)
+        else:
+            merge_saved_results(args.run_dir, [root.name for root in roots])
+        return
     errors = data_errors(args.dataset)
     if errors and not args.dry_run:
         parser.error('Data preflight failed before training:\n' + '\n'.join(errors))
@@ -124,12 +161,21 @@ def main():
         command = reference_command(args)
         print(f'\n[references] {shlex.join(command)}', flush=True)
         if not args.dry_run:
-            subprocess.run(command, cwd=ROOT.parent, check=True)
+            try:
+                subprocess.run(command, cwd=ROOT.parent, check=True)
+            finally:
+                merge_saved_results(args.run_dir, ['references'])
     for variant in args.variant:
         command = training_command(args, variant)
         print(f'\n[{variant}] {shlex.join(command)}', flush=True)
         if not args.dry_run:
-            subprocess.run(command, cwd=ROOT.parent, check=True)
+            try:
+                subprocess.run(command, cwd=ROOT.parent, check=True)
+            finally:
+                # Include older variants even if this call adds only WAS/no_dd.
+                saved_variants = [name for name in (*VARIANTS, 'references')
+                                  if (args.run_dir / name).is_dir()]
+                merge_saved_results(args.run_dir, saved_variants)
 
 
 if __name__ == '__main__':

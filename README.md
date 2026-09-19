@@ -234,8 +234,8 @@ Common arguments:
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
-- `--resume`: skip a completed mode/radius immediately when its per-mode
-  `summary.txt` exists; otherwise skip completed seed/fold tasks inside that mode
+- `--resume`: skip completed seed/fold tasks with a finite final `TEST` row in
+  their history CSV. This does not restore interrupted epochs or optimizer state.
 - The `ReduceLROnPlateau` scheduler monitors validation MAE. Protocols that
   intentionally have no validation split, such as native POSCAR0 fixed-epoch
   training, keep a fixed learning rate.
@@ -637,11 +637,15 @@ Each checkpoint stores `model`, `scaler`, `config`, dataset/mode labels, test
 MAE, best validation MAE, and train/validation/test source metadata so the
 trainer can be reconstructed later for explanations.
 
-When `--resume` is enabled, the CLI first reuses a per-mode `summary.txt` when
-present, which avoids loading the dataset for that mode/radius. If no summary
-exists, it treats a seed/fold CSV as complete only when it contains a valid
-final `TEST` row; completed splits are skipped as-is, while missing or
-incomplete seed/fold tasks are retrained and write fresh checkpoints.
+When `--resume` is enabled, the CLI treats a seed/fold CSV as complete only
+when it contains a finite final `TEST` row. Completed splits are skipped
+without loading their dataset. Missing or incomplete tasks restart training;
+the previous history is backed up before writing fresh epochs. No optimizer
+or epoch state is restored. Per-mode summaries retain earlier seed results,
+and aggregate summaries merge saved modes/datasets instead of dropping rows
+absent from the latest command. Changed summaries receive timestamped backups.
+For the relation benchmark, `--summary-only` rebuilds/merges saved tables with
+zero training; see [the benchmark guide](docs/hetero_no_dd_benchmark.md).
 
 ## Batch Explanations
 

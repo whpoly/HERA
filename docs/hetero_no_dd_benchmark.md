@@ -31,6 +31,56 @@ region, which changes the meaning of this ablation.
 
 ## Ready-to-run benchmark
 
+### Reuse existing runs and merge results (2026-09-19)
+
+The original runner and the WAS runner use the same directory layout:
+
+```text
+HERA/logs/hetero_relation_native_semi_imp2d/   <-- --run-dir
+  baseline/alignn/<dataset>/hetero/...        AA, AD, DA, DD
+  no_dd/alignn/<dataset>/hetero/...           AA, AD, DA
+  no_dd/alignn/<dataset>/hetero_was/...       AA, AD, DA with WAS features
+```
+
+`baseline` and `no_dd` are siblings. Pass their common parent to the benchmark
+runner's `--run-dir`; passing `.../baseline` or `.../no_dd` would add another
+variant subdirectory and miss the old histories.
+
+To merge previously completed baseline/no_dd results, including all saved
+hetero and hetero_was modes and seeds, **without any training or evaluation**:
+
+```bash
+python -m HERA.scripts.run_hetero_relation_benchmark --variant baseline no_dd --run-dir HERA/logs/hetero_relation_native_semi_imp2d --summary-only
+```
+
+For only no_dd, use `--variant no_dd`. `--summary-only` needs no dataset files
+or GPU; mode/dataset/seed training selections do not filter saved results.
+It rebuilds tables from completed `TEST` histories and per-mode summaries,
+retains other existing aggregate rows, and leaves checkpoints/history untouched.
+It does not infer completion from a checkpoint alone. Missing/incomplete
+results are not trained or inserted as zeroes. If the variant root is missing,
+the command reports that rather than creating a new experiment.
+
+Merged output: `<run-dir>/summary.txt`, plus summaries inside each selected
+variant at `summary.txt`, `alignn/summary.txt` and `alignn/<dataset>/summary.txt`.
+Changed summaries receive timestamped `.bak` copies before atomic replacement.
+Old leaf summaries can restore entries removed from an aggregate by old code.
+
+To **add only missing WAS runs** while retaining completed ordinary no_dd runs:
+
+```bash
+python -m HERA.scripts.run_hetero_relation_benchmark --dataset native semi imp2d --mode hetero_was --variant no_dd --seed 123 11 1245 --epochs 500 --device cuda:0 --run-dir HERA/logs/hetero_relation_native_semi_imp2d
+```
+
+The runner merges existing results after training as well. Requesting both
+`--mode hetero hetero_was` is also valid: a matching history with a finite
+`TEST` result skips that split, including dataset loading for completed jobs.
+Resume does **not** restore an interrupted epoch/optimizer: incomplete splits
+restart, preserving their old history as a timestamped `.bak`. Use summary-only
+if no training at all is desired. Keep the original experiment protocol/root.
+
+### Launch new experiments
+
 Sync the modified HERA code to the machine containing all three datasets.
 Activate its HERA Python environment and run from HERA's parent directory.
 Use `--mode hetero hetero_was` to run every relation variant with both inputs:

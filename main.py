@@ -20,7 +20,7 @@ Usage examples:
   # Run the standard 10-seed benchmark
   python -m HERA.main --model cgcnn --dataset native --seed all
 
-  # Resume an existing run; completed mode summaries are skipped
+  # Reuse completed seed/fold results in an existing run
   python -m HERA.main --model cgcnn --dataset native --mode hetero --r 0 --resume --run-dir logs/run_YYYYMMDD_HHMMSS
 
 Supported combinations:
@@ -68,6 +68,10 @@ from .data.datasets import (
 )
 from .training.trainer import MEGNetTrainer
 from .training.history import TrainingLogger
+from .training.results import (
+    atomic_write_text, merge_aggregate_summary, merge_mode_losses,
+    prefixed_summary_rows, saved_dataset_rows,
+)
 
 
 LOCAL_CUTOFF_CHOICES = [0, 3, 4, 5, 6, 7]
@@ -835,6 +839,7 @@ def read_mode_summary_losses(path):
 
 def write_mode_summary(path, model_name, dataset_name, run_label, losses,
                        epochs, seeds, config, radius_label=None, cv5=False):
+    seeds, losses = merge_mode_losses(path, seeds, losses, cv5=cv5)
     split_label = 'Per-fold losses' if cv5 else 'Per-seed losses'
     mode_summary = [
         f'{model_name.upper()} | {dataset_name} | {run_label.upper()}',
@@ -869,8 +874,7 @@ def write_mode_summary(path, model_name, dataset_name, run_label, losses,
             f'atom-atom relation: {config["model"].get("hetero_aa_mode", "keep")}; '
             f'defect-defect relation: {config["model"].get("hetero_dd_mode", "keep")}',
         )
-    with open(path, 'w') as f:
-        f.write('\n'.join(mode_summary) + '\n')
+    atomic_write_text(path, '\n'.join(mode_summary) + '\n', backup=True)
 
 
 def latest_run_dir(log_dir):
@@ -984,7 +988,8 @@ def write_dataset_summary(model_name, dataset_name, modes, results, epochs, seed
     split_label = 'Folds' if cv5 else 'Seeds'
     summary_lines = [
         f'SUMMARY: {model_name.upper()} on {dataset_name}',
-        f'Device: {device} | Epochs: {epochs} | {split_run_summary(seeds, cv5)}',
+        f'Latest invocation: Device: {device} | Epochs: {epochs} | {split_run_summary(seeds, cv5)}',
+        'Accumulated completed results; consult per-mode summaries for training settings.',
         '-' * 50,
     ]
     for mode in modes:
@@ -992,15 +997,13 @@ def write_dataset_summary(model_name, dataset_name, modes, results, epochs, seed
         line = f'  {mode.upper():12s}  Mean={np.mean(losses):.4f}  Std={np.std(losses):.4f}  {split_label}={losses}'
         summary_lines.append(line)
 
-    print(f'\n{"=" * 60}')
-    for line in summary_lines:
-        print(line)
-    print(f'{"=" * 60}')
-    print()
-
     summary_path = os.path.join(out_dir, 'summary.txt')
-    with open(summary_path, 'w') as f:
-        f.write('\n'.join(summary_lines) + '\n')
+    # Leaf summaries/history also restore rows lost by older CLI versions.
+    merge_aggregate_summary(summary_path, summary_lines + saved_dataset_rows(out_dir))
+    print(f'\n{"=" * 60}')
+    with open(summary_path, encoding='utf-8') as stream:
+        print(stream.read(), end='')
+    print(f'{"=" * 60}\n')
     print(f'Summary saved to {summary_path}')
 
 
@@ -1434,6 +1437,11 @@ def main():
                     run_specs.append(run)
 
             def train_run_for_seeds(run, selected_seeds):
+                if args.resume:
+                    completed = completed_resume_losses(run['mode_dir'], selected_seeds, args.cv5)
+                    if completed is not None:
+                        print(f'  Resume: {run["label"]}, seeds={selected_seeds} already completed; skipping.')
+                        return completed
                 run_label = run['label']
                 train_mode = run['mode']
                 config = run['config']
@@ -1652,10 +1660,10 @@ def main():
                 args.epochs, args.seeds, args.device, dataset_dir, cv5=args.cv5,
             )
 
-        if len(dataset_names) > 1:
+        if len(dataset_names) > 1 or os.path.isfile(os.path.join(model_dir, 'summary.txt')):
             summary_lines = [
                 f'SUMMARY: {model_name.upper()} on ALL DATASETS',
-                f'Device: {args.device} | Epochs: {args.epochs} | {split_run_summary(args.seeds, args.cv5)}',
+                'Accumulated completed results; consult per-mode summaries for training settings.',
                 '-' * 50,
             ]
             split_label = 'Folds' if args.cv5 else 'Seeds'
@@ -1668,14 +1676,13 @@ def main():
                     summary_lines.append(line)
 
             summary_path = os.path.join(model_dir, 'summary.txt')
-            with open(summary_path, 'w') as f:
-                f.write('\n'.join(summary_lines) + '\n')
+            merge_aggregate_summary(summary_path, summary_lines + prefixed_summary_rows(model_dir))
             print(f'All-dataset summary saved to {summary_path}')
 
-    if len(model_names) > 1:
+    if len(model_names) > 1 or os.path.isfile(os.path.join(run_dir, 'summary.txt')):
         summary_lines = [
             'SUMMARY: ALL MODELS',
-            f'Device: {args.device} | Epochs: {args.epochs} | {split_run_summary(args.seeds, args.cv5)}',
+            'Accumulated completed results; consult per-mode summaries for training settings.',
             '-' * 50,
         ]
         split_label = 'Folds' if args.cv5 else 'Seeds'
@@ -1688,8 +1695,7 @@ def main():
                 summary_lines.append(line)
 
         summary_path = os.path.join(run_dir, 'summary.txt')
-        with open(summary_path, 'w') as f:
-            f.write('\n'.join(summary_lines) + '\n')
+        merge_aggregate_summary(summary_path, summary_lines + prefixed_summary_rows(run_dir))
         print(f'All-model summary saved to {summary_path}')
 
 
