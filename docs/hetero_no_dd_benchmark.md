@@ -31,6 +31,12 @@ region, which changes the meaning of this ablation.
 
 ## Ready-to-run benchmark
 
+For new experiments, add `--compact-logs` and choose a new `--run-dir` to keep
+outputs directly in `<run-dir>/<variant>/alignn/<dataset>/<mode>/`. Configuration
+is saved and checked in `config.json`. Existing nested results keep their
+original layout; use their original command to resume them. See
+[compact output commands](compact_logs.md).
+
 ### Add hetero_was to the existing baseline directory
 
 Run this from HERA's parent on the machine holding the existing baseline:

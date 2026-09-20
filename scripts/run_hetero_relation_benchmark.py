@@ -59,6 +59,8 @@ def training_command(args, variant):
     ]
     if args.cv5:
         command.append('--cv5')
+    if getattr(args, 'compact_logs', False):
+        command.append('--compact-logs')
     for dataset in ('native', 'semi', 'imp2d'):
         preprocessing = getattr(args, f'{dataset}_preprocessing', None)
         if preprocessing:
@@ -78,6 +80,8 @@ def reference_command(args):
     ]
     if args.cv5:
         command.append('--cv5')
+    if getattr(args, 'compact_logs', False):
+        command.append('--compact-logs')
     for dataset in ('native', 'semi', 'imp2d'):
         preprocessing = getattr(args, f'{dataset}_preprocessing', None)
         if preprocessing:
@@ -111,6 +115,8 @@ def main():
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--run-dir', type=Path, default=ROOT / 'logs/hetero_relation_native_semi_imp2d')
+    parser.add_argument('--compact-logs', action='store_true',
+                        help='Keep each result at variant/model/dataset/mode with a checked config.json')
     parser.add_argument('--dry-run', action='store_true', help='Print commands and data availability without starting training')
     parser.add_argument('--summary-only', action='store_true',
                         help='Merge saved results for selected variants; never load datasets or train (includes all saved modes/seeds)')

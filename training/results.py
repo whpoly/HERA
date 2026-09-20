@@ -2,6 +2,7 @@
 
 import ast
 from collections import defaultdict
+import json
 import math
 import os
 from pathlib import Path
@@ -12,6 +13,57 @@ import tempfile
 from datetime import datetime
 
 from .history import TrainingLogger
+
+
+COMPACT_CONFIG_FILENAME = 'config.json'
+
+
+def read_compact_run_config(log_dir):
+    path = Path(log_dir) / COMPACT_CONFIG_FILENAME
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(record, dict) or record.get('layout') != 'compact_v1':
+            raise ValueError('missing compact_v1 layout marker')
+        if not isinstance(record.get('config'), dict) or not isinstance(record.get('run_label'), str):
+            raise ValueError('missing experiment configuration or run label')
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f'Cannot verify existing experiment configuration: {path}: {exc}') from exc
+    return record
+
+
+def validate_compact_run_config(log_dir, expected):
+    """Require a single experiment per mode directory, including CSV-only resume."""
+    directory = Path(log_dir)
+    saved = read_compact_run_config(directory)
+    if saved is not None:
+        changed = [key for key, value in expected.items() if saved.get(key) != value]
+        if changed:
+            raise RuntimeError(f'Experiment configuration differs in {directory}: {", ".join(changed)}. '
+                               'Existing results were not changed. Use a different --run-dir '
+                               'for a different experiment.')
+    elif directory.exists() and any(directory.iterdir()):
+        raise RuntimeError(f'Existing outputs without {COMPACT_CONFIG_FILENAME} in {directory}. '
+                           'Compact layout cannot adopt or overwrite them. Keep the original '
+                           'layout to resume them, or select a new --run-dir.')
+
+
+def ensure_compact_run_config(log_dir, record):
+    validate_compact_run_config(log_dir, record)
+    directory = Path(log_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / COMPACT_CONFIG_FILENAME
+    # Exclusive creation prevents a second invocation from replacing the
+    # experiment identity between validation and starting training.
+    try:
+        with path.open('x', encoding='utf-8', newline='') as stream:
+            json.dump(record, stream, indent=2, ensure_ascii=False, sort_keys=True)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        validate_compact_run_config(log_dir, record)
 
 
 def read_checkpoint_result(path):
@@ -44,6 +96,8 @@ def read_checkpoint_result(path):
 
 def completed_split_result(log_dir, logger_id, expected=None, protect_existing=False):
     """Reuse a final test result; never restart over an unreadable checkpoint."""
+    if expected is not None and (Path(log_dir) / COMPACT_CONFIG_FILENAME).exists():
+        validate_compact_run_config(log_dir, expected)
     loss = TrainingLogger.completed_test_mae(log_dir, logger_id)
     if loss is not None:
         return loss
@@ -204,7 +258,9 @@ def saved_dataset_rows(dataset_dir, checkpoint_results=None):
             aa, dd = next(iter(relations))
             relation_text = f'  Saved AA={aa}, DD={dd}'
         record = saved.get(leaf)
-        label = record['label'] if record else '_'.join(leaf.relative_to(dataset_dir).parts)
+        compact_config = read_compact_run_config(leaf) if record is None else None
+        label = (record['label'] if record else compact_config['run_label'] if compact_config
+                 else '_'.join(leaf.relative_to(dataset_dir).parts))
         splits = dict(record['splits']) if record else {}
         for path in sorted(leaf.glob('seed*_history.csv')):
             split_id = path.name[len('seed'):-len('_history.csv')]

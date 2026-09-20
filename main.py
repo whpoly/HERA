@@ -73,6 +73,7 @@ from .training.history import TrainingLogger
 from .training.results import (
     atomic_write_text, merge_aggregate_summary, merge_mode_losses,
     prefixed_summary_rows, saved_dataset_rows, completed_split_result,
+    validate_compact_run_config, ensure_compact_run_config,
 )
 
 
@@ -1164,6 +1165,10 @@ def main():
                         help='Directory to save training history CSVs (default: logs)')
     parser.add_argument('--run-dir', default=None,
                         help='Specific run directory to write/read instead of creating logs/run_{timestamp}')
+    parser.add_argument('--compact-logs', action='store_true',
+                        help='Store results under model/dataset/mode with config.json instead of '
+                        'nested configuration directories. Requires one configuration per mode '
+                        '(e.g. --r 0); conflicting configurations stop before training.')
     parser.add_argument('--resume', action='store_true',
                         help='Reuse final TEST history or matching completed checkpoint results')
     parser.add_argument('--protect-existing', action='store_true',
@@ -1460,17 +1465,19 @@ def main():
                     run_label = run['label']
                     train_mode = run['mode']
                     mode_parts = [dataset_dir, train_mode]
-                    if train_mode in HYPERGRAPH_MODES:
-                        mode_parts.extend(hypergraph_run_components(run['config']['model']))
-                    if run['radius_label'] is not None:
-                        mode_parts.append(run['radius_label'])
-                    if run.get('norm_label') is not None:
-                        mode_parts.append(run['norm_label'])
-                    if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
-                        mode_parts.extend(alignn_hetero_run_components(run['config']['model']))
-                    mode_parts.extend(preprocessing_parts)
+                    if not args.compact_logs:
+                        if train_mode in HYPERGRAPH_MODES:
+                            mode_parts.extend(hypergraph_run_components(run['config']['model']))
+                        if run['radius_label'] is not None:
+                            mode_parts.append(run['radius_label'])
+                        if run.get('norm_label') is not None:
+                            mode_parts.append(run['norm_label'])
+                        if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
+                            mode_parts.extend(alignn_hetero_run_components(run['config']['model']))
+                        mode_parts.extend(preprocessing_parts)
                     mode_dir = os.path.join(*mode_parts)
-                    os.makedirs(mode_dir, exist_ok=True)
+                    if not args.compact_logs:
+                        os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
                     run['summary_path'] = os.path.join(mode_dir, 'summary.txt')
                     run['resume_expected'] = {
@@ -1478,6 +1485,22 @@ def main():
                         'dataset_name': dataset_name, 'mode': train_mode,
                     }
                     run_specs.append(run)
+
+            if args.compact_logs:
+                seen_directories = set()
+                for run in run_specs:
+                    if run['mode_dir'] in seen_directories:
+                        parser.error('--compact-logs requires one configuration per mode. '
+                                     'Select one radius/norm/ablation (e.g. --r 0), use separate '
+                                     '--run-dir values, or omit --compact-logs for sweeps.')
+                    seen_directories.add(run['mode_dir'])
+                    run['compact_config'] = {
+                        'layout': 'compact_v1', **run['resume_expected'],
+                        'run_label': run['label'], 'epochs': args.epochs, 'cv5': args.cv5,
+                    }
+                    validate_compact_run_config(run['mode_dir'], run['compact_config'])
+                for run in run_specs:
+                    ensure_compact_run_config(run['mode_dir'], run['compact_config'])
 
             if args.resume and args.protect_existing:
                 # Inspect every requested split before training anything for this dataset.
@@ -1572,14 +1595,15 @@ def main():
                 if args.explain:
                     if args.explain_dir is not None:
                         explain_parts = [args.explain_dir, model_name, dataset_name, train_mode]
-                        if run['radius_label'] is not None:
-                            explain_parts.append(run['radius_label'])
-                        if run.get('norm_label') is not None:
-                            explain_parts.append(run['norm_label'])
-                        if model_name == 'alignn' and train_mode in ALIGNN_NODE_NORM_MODES:
-                            explain_parts.extend(alignn_hetero_run_components(config['model']))
-                        explain_parts.extend(native_run_components(config))
-                        explain_parts.extend(impurity_run_components(config))
+                        if not args.compact_logs:
+                            if run['radius_label'] is not None:
+                                explain_parts.append(run['radius_label'])
+                            if run.get('norm_label') is not None:
+                                explain_parts.append(run['norm_label'])
+                            if model_name == 'alignn' and train_mode in ALIGNN_NODE_NORM_MODES:
+                                explain_parts.extend(alignn_hetero_run_components(config['model']))
+                            explain_parts.extend(native_run_components(config))
+                            explain_parts.extend(impurity_run_components(config))
                         explain_root = os.path.join(*explain_parts)
                     else:
                         explain_root = os.path.join(mode_dir, 'explanations')

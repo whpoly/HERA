@@ -234,6 +234,10 @@ Common arguments:
 - `--atom-init`: path to `atom_init.json`
 - `--log-dir`: output directory for logs
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
+- `--compact-logs`: write directly to `<run-dir>/<model>/<dataset>/<mode>/`,
+  keeping configuration in `config.json` instead of additional subdirectories.
+  Use one configuration per mode, such as `--r 0`; incompatible configurations
+  stop before training. See [compact output commands](docs/compact_logs.md).
 - `--resume`: skip completed seed/fold tasks with a finite final `TEST` history
   row, or reuse final test MAE from a matching saved checkpoint. This does not
   restore interrupted epochs or optimizer state.
