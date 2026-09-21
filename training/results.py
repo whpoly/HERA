@@ -33,6 +33,32 @@ def read_compact_run_config(log_dir):
     return record
 
 
+def compact_mode_directory(dataset_dir, mode, config):
+    """Keep AA/DD ablations beside the baseline, without extra directory levels."""
+    directory = Path(dataset_dir) / mode
+    if config.get('task') not in ('alignn_hetero', 'alignn_hetero_was', 'alignn_hetero_fixed_pool'):
+        return str(directory)
+    model = config['model']
+    removed = [relation for relation in ('aa', 'dd')
+               if model.get(f'hetero_{relation}_mode', 'keep') == 'drop']
+    if not removed:
+        return str(directory)
+    variant_directory = directory.with_name(f'{mode}_no_{"_".join(removed)}')
+    if not variant_directory.exists():
+        # Earlier compact runs could already store a no-DD model in /hetero/.
+        # Keep using that location when its saved relation settings agree;
+        # normal validation still checks every other configuration field.
+        saved = read_compact_run_config(directory)
+        if saved is not None and saved.get('mode') == mode:
+            saved_config = saved['config']
+            saved_model = saved_config.get('model', {})
+            if (saved_config.get('task') == config['task'] and
+                    all(saved_model.get(f'hetero_{relation}_mode', 'keep') ==
+                        model.get(f'hetero_{relation}_mode', 'keep') for relation in ('aa', 'dd'))):
+                return str(directory)
+    return str(variant_directory)
+
+
 def validate_compact_run_config(log_dir, expected):
     """Require a single experiment per mode directory, including CSV-only resume."""
     directory = Path(log_dir)

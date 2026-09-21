@@ -80,13 +80,13 @@ class CompactLogsTests(unittest.TestCase):
             self.assertEqual((directory / 'config.json').read_bytes(), config_bytes)
             self.assertEqual((directory / 'seed123_history.csv').read_bytes(), history_bytes)
 
-    def test_changed_relation_or_protocol_is_rejected_before_csv_resume_or_training(self):
+    def test_changed_radius_or_protocol_is_rejected_before_csv_resume_or_training(self):
         with tempfile.TemporaryDirectory() as temporary:
             _, train = self.run_cli(temporary)
             self.completed_histories(train)
             directory = Path(train.call_args.kwargs['log_dir'])
             before = {p.name: p.read_bytes() for p in directory.iterdir() if p.is_file()}
-            for changed in (['--alignn-hetero-dd', 'drop'], ['--epochs', '500']):
+            for changed in (['--r', '3'], ['--epochs', '500']):
                 with self.subTest(changed=changed), patch('sys.argv', self.command(temporary, changed)), \
                         redirect_stdout(io.StringIO()), patch.object(cli, 'load_dataset') as loader, \
                         patch.object(cli, 'train_single_mode') as repeat:
@@ -95,6 +95,70 @@ class CompactLogsTests(unittest.TestCase):
                     loader.assert_not_called()
                     repeat.assert_not_called()
             self.assertEqual({p.name: p.read_bytes() for p in directory.iterdir() if p.is_file()}, before)
+
+    def test_no_dd_in_same_root_reuses_other_modes_and_preserves_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            options = ['--dataset', 'native', 'semi', 'imp2d', '--mode', *NON_HYPERGRAPH_MODES,
+                       '--semi-preprocessing', 'reference_v1', '--imp2d-preprocessing', 'reference_v1',
+                       '--seed', '123', '11', '1245']
+            _, baseline = self.run_cli(temporary, options)
+            self.assertEqual(baseline.call_count, 75)
+            self.completed_histories(baseline)
+            for call in baseline.call_args_list:
+                seed = call.args[4][0]
+                (Path(call.kwargs['log_dir']) / f'seed{seed}_best_checkpoint.pth').write_bytes(b'original weights')
+            originals = {p: p.read_bytes() for p in Path(temporary).rglob('*')
+                         if p.is_file() and (p.suffix in ('.json', '.pth', '.csv'))}
+            no_dd_options = [*options, '--alignn-hetero-dd', 'drop']
+            _, no_dd = self.run_cli(temporary, no_dd_options)
+            self.assertEqual(no_dd.call_count, 18)
+            for call in no_dd.call_args_list:
+                self.assertIn(call.args[0], ('hetero', 'hetero_was'))
+                self.assertEqual(Path(call.kwargs['log_dir']).relative_to(temporary).parts,
+                                 ('alignn', call.kwargs['dataset_name'], f'{call.args[0]}_no_dd'))
+                self.assertEqual(call.args[1]['model']['hetero_dd_mode'], 'drop')
+                self.assertIn('relations_no_dd', call.kwargs['run_label'])
+            self.assertTrue(all(path.read_bytes() == content for path, content in originals.items()))
+            self.completed_histories(no_dd)
+            loader, repeated = self.run_cli(temporary, no_dd_options)
+            loader.assert_not_called()
+            repeated.assert_not_called()
+            loader, original_again = self.run_cli(temporary, options)
+            loader.assert_not_called()
+            original_again.assert_not_called()
+            rows = saved_dataset_rows(Path(temporary) / 'alignn/native')
+            self.assertEqual(len(rows), 11)
+            self.assertEqual(sum('RELATIONS_NO_DD' in row for row in rows), 2)
+
+    def test_preexisting_no_dd_in_plain_mode_directory_still_resumes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            legacy = str(Path(temporary) / 'alignn/native/hetero')
+            with patch.object(cli, 'compact_mode_directory', return_value=legacy):
+                _, original = self.run_cli(temporary, ['--alignn-hetero-dd', 'drop'])
+            self.completed_histories(original)
+            loader, repeated = self.run_cli(temporary, ['--alignn-hetero-dd', 'drop'])
+            loader.assert_not_called()
+            repeated.assert_not_called()
+            self.assertFalse((Path(temporary) / 'alignn/native/hetero_no_dd').exists())
+
+    def test_no_dd_still_rejects_different_configuration_in_its_own_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _, original = self.run_cli(temporary, ['--alignn-hetero-dd', 'drop'])
+            self.completed_histories(original)
+            with self.assertRaisesRegex(RuntimeError, 'configuration differs'):
+                self.run_cli(temporary, ['--alignn-hetero-dd', 'drop', '--r', '3'])
+
+    def test_relation_variants_keep_their_own_explanation_directories(self):
+        for aa, dd, suffix in (('keep', 'drop', 'no_dd'), ('drop', 'keep', 'no_aa'),
+                               ('drop', 'drop', 'no_aa_dd')):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as temporary:
+                plots = str(Path(temporary) / 'plots')
+                _, train = self.run_cli(temporary, ['--alignn-hetero-aa', aa, '--alignn-hetero-dd', dd,
+                                                  '--explain', '--explain-dir', plots])
+                leaf = f'hetero_{suffix}'
+                self.assertEqual(Path(train.call_args.kwargs['log_dir']).name, leaf)
+                self.assertEqual(Path(train.call_args.kwargs['explain_options']['root_dir']),
+                                 Path(plots) / 'alignn/native' / leaf)
 
     def test_expected_config_is_checked_even_outside_compact_cli_path(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -74,6 +74,7 @@ from .training.results import (
     atomic_write_text, merge_aggregate_summary, merge_mode_losses,
     prefixed_summary_rows, saved_dataset_rows, completed_split_result,
     validate_compact_run_config, ensure_compact_run_config,
+    compact_mode_directory,
 )
 
 
@@ -1167,7 +1168,8 @@ def main():
                         help='Specific run directory to write/read instead of creating logs/run_{timestamp}')
     parser.add_argument('--compact-logs', action='store_true',
                         help='Store results under model/dataset/mode with config.json instead of '
-                        'nested configuration directories. Requires one configuration per mode '
+                        'nested configuration directories; AA/DD ablations use sibling names '
+                        'such as hetero_no_dd. Requires one configuration per mode '
                         '(e.g. --r 0); conflicting configurations stop before training.')
     parser.add_argument('--resume', action='store_true',
                         help='Reuse final TEST history or matching completed checkpoint results')
@@ -1475,7 +1477,8 @@ def main():
                         if model_name == 'alignn' and mode in ALIGNN_NODE_NORM_MODES:
                             mode_parts.extend(alignn_hetero_run_components(run['config']['model']))
                         mode_parts.extend(preprocessing_parts)
-                    mode_dir = os.path.join(*mode_parts)
+                    mode_dir = (compact_mode_directory(dataset_dir, train_mode, run['config'])
+                                if args.compact_logs else os.path.join(*mode_parts))
                     if not args.compact_logs:
                         os.makedirs(mode_dir, exist_ok=True)
                     run['mode_dir'] = mode_dir
@@ -1594,7 +1597,8 @@ def main():
                 explain_options = None
                 if args.explain:
                     if args.explain_dir is not None:
-                        explain_parts = [args.explain_dir, model_name, dataset_name, train_mode]
+                        explain_mode = os.path.basename(mode_dir) if args.compact_logs else train_mode
+                        explain_parts = [args.explain_dir, model_name, dataset_name, explain_mode]
                         if not args.compact_logs:
                             if run['radius_label'] is not None:
                                 explain_parts.append(run['radius_label'])

@@ -236,6 +236,8 @@ Common arguments:
 - `--run-dir`: exact `logs/run_{timestamp}` directory to use instead of creating a new one
 - `--compact-logs`: write directly to `<run-dir>/<model>/<dataset>/<mode>/`,
   keeping configuration in `config.json` instead of additional subdirectories.
+  ALIGNN AA/DD ablations use sibling names such as `hetero_no_dd` and
+  `hetero_was_no_dd`, so they can share a run root with the baseline.
   Use one configuration per mode, such as `--r 0`; incompatible configurations
   stop before training. See [compact output commands](docs/compact_logs.md).
 - `--resume`: skip completed seed/fold tasks with a finite final `TEST` history

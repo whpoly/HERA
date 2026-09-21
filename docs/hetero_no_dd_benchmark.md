@@ -37,6 +37,12 @@ is saved and checked in `config.json`. Existing nested results keep their
 original layout; use their original command to resume them. See
 [compact output commands](compact_logs.md).
 
+With `HERA.main --compact-logs`, adding `--alignn-hetero-dd drop` can keep the
+same run root as an existing baseline: new outputs use `hetero_no_dd` and
+`hetero_was_no_dd` beside the original mode directories. Matching completed
+ordinary modes still resume from their original locations. The benchmark
+runner retains its explicit variant-root organization.
+
 ### Add hetero_was to the existing baseline directory
 
 Run this from HERA's parent on the machine holding the existing baseline:
