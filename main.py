@@ -37,6 +37,7 @@ import ast
 import copy
 import csv
 import os
+import json
 import random
 import warnings
 from datetime import datetime
@@ -68,6 +69,8 @@ from .data.datasets import (
 )
 from .training.trainer import MEGNetTrainer
 from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
+from .data.native_filter import read_manifest, manifest_identity, requested_splits, filtered_splits
+from .data.native_preprocessing import prepare_native_filter
 from .data.impurity_was import impurity_run_components
 from .training.history import TrainingLogger
 from .training.results import (
@@ -500,7 +503,8 @@ def iter_concentration_transfer_splits(
 
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
-                      run_label=None, cv5=False, resume=False, protect_existing=False):
+                      run_label=None, cv5=False, resume=False, protect_existing=False,
+                      native_filter_manifest=None):
     """Train a single mode and return per-split test losses."""
     log_mode = run_label or mode
     data = dataset[dataset_index_for_mode(mode)]
@@ -516,7 +520,15 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     skipped = 0
     trained = 0
 
-    if dataset_name in CONCENTRATION_TRANSFER_DATASETS:
+    if config.get('native_data_filter') is not None:
+        if dataset_name != 'native' or native_filter_manifest is None:
+            raise ValueError('Filtered native training requires its frozen preprocessing manifest')
+        if config['native_data_filter'] != manifest_identity(native_filter_manifest):
+            raise ValueError('Native filter identity differs from the experiment configuration')
+        splits = filtered_splits(data, targets, native_filter_manifest, random_seeds, cv5=cv5)
+    elif native_filter_manifest is not None:
+        raise ValueError('Native filter manifest must be recorded in the experiment configuration')
+    elif dataset_name in CONCENTRATION_TRANSFER_DATASETS:
         low_count = sum(
             getattr(structure, 'concentration', None) == 'low'
             for structure in data
@@ -545,6 +557,11 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         )
 
     for split in splits:
+        if 'native_filter_counts' in split:
+            counts = split['native_filter_counts']
+            print(f'  [{split["display"]}] Native filter (original split membership preserved): '
+                  + ', '.join(f'{part} {counts[part]["original"]}->{counts[part]["kept"]}'
+                              for part in ('train', 'val', 'test')))
         completed_loss = completed_split_result(
             log_dir, split['logger_id'],
             expected={'config': config, 'model_name': model_name, 'dataset_name': dataset_name, 'mode': mode},
@@ -794,6 +811,8 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
                 'train_sources': _structure_source_metadata(split['train_X']),
                 'val_sources': _structure_source_metadata(split['val_X']),
                 'test_sources': _structure_source_metadata(split['test_X']),
+                **({'native_filter_counts': split['native_filter_counts']}
+                   if 'native_filter_counts' in split else {}),
             },
         },
         path,
@@ -1160,6 +1179,11 @@ def main():
     )
     parser.add_argument('--cv5', '--five-fold-cv', action='store_true',
                         help='Use 5-fold cross validation. Requires exactly one --seed value.')
+    native_filter_options = parser.add_mutually_exclusive_group()
+    native_filter_options.add_argument('--native-filter-manifest', default=None,
+                                       help='Frozen native outlier manifest; preserves original split assignments')
+    native_filter_options.add_argument('--native-outlier-filter', choices=['standard','strict'], default=None,
+                                       help='Automatically inspect/filter native data at load time and save the frozen manifest in --run-dir')
     parser.add_argument('--atom-init', default='./HERA/atom_init.json',
                         help='Path to atom_init.json (default: atom_init.json)')
     parser.add_argument('--log-dir', default='logs',
@@ -1291,6 +1315,17 @@ def main():
         dataset_names = list(VALID_DATASETS)
     else:
         dataset_names = list(dict.fromkeys(args.dataset))
+    native_filter_manifest = None
+    if args.native_outlier_filter is not None and 'native' not in dataset_names:
+        parser.error('--native-outlier-filter requires native among the requested datasets')
+    if args.native_filter_manifest is not None:
+        if 'native' not in dataset_names:
+            parser.error('--native-filter-manifest requires native among the requested datasets')
+        try:
+            native_filter_manifest = read_manifest(args.native_filter_manifest)
+            requested_splits(native_filter_manifest, args.seeds, cv5=args.cv5)
+        except (OSError, ValueError, KeyError) as exc:
+            parser.error(str(exc))
     requested_modes = args.mode
     if (
             requested_modes is not None
@@ -1328,6 +1363,15 @@ def main():
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         run_dir = os.path.join(args.log_dir, f'run_{timestamp}')
     os.makedirs(run_dir, exist_ok=True)
+    if native_filter_manifest is not None:
+        manifest_copy = os.path.join(run_dir, 'native_filter_manifest.json')
+        if os.path.exists(manifest_copy):
+            if manifest_identity(read_manifest(manifest_copy)) != manifest_identity(native_filter_manifest):
+                raise RuntimeError('Run directory already uses another native filter; choose a different --run-dir')
+        else:
+            with open(manifest_copy, 'x', encoding='utf-8') as handle:
+                json.dump(native_filter_manifest, handle, indent=2, sort_keys=True)
+                handle.write('\n')
     print(f'Run directory: {run_dir}\n')
 
     all_results = {}
@@ -1363,6 +1407,11 @@ def main():
                         'so it is identical to FULL.'
                     )
 
+            if dataset_name == 'native' and args.native_outlier_filter is not None and native_filter_manifest is None:
+                native_filter_manifest = prepare_native_filter(
+                    run_dir, args.native_outlier_filter, args.seeds, args.cv5, iter_train_val_test_splits,
+                )
+
             dataset_cache = {}
 
             def dataset_for_run(local_cutoff, mode, config):
@@ -1377,6 +1426,8 @@ def main():
                         local_cutoff=local_cutoff,
                         representations=[representation],
                         **({preprocessing_key: preprocessing} if dataset_name in ('native', 'semi', 'imp2d') else {}),
+                        **({'native_filter_manifest': native_filter_manifest}
+                           if dataset_name == 'native' and native_filter_manifest is not None else {}),
                     )
                 return dataset_cache[cache_key]
 
@@ -1393,6 +1444,8 @@ def main():
                         config.pop(preprocessing_key, None)
                     else:
                         config[preprocessing_key] = preprocessing
+                if dataset_name == 'native' and native_filter_manifest is not None:
+                    config['native_data_filter'] = manifest_identity(native_filter_manifest)
                 return config
 
             run_specs = []
@@ -1462,6 +1515,8 @@ def main():
                         if parts:
                             run['label'] += '_' + '_'.join(parts)
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
+                    if run['config'].get('native_data_filter'):
+                        preprocessing_parts.append('clean_' + run['config']['native_data_filter']['sha256'][:8])
                     if preprocessing_parts:
                         run['label'] += '_' + '_'.join(preprocessing_parts)
                     run_label = run['label']
@@ -1637,6 +1692,8 @@ def main():
                     cv5=args.cv5,
                     resume=args.resume,
                     protect_existing=args.protect_existing,
+                    **({'native_filter_manifest': native_filter_manifest}
+                       if dataset_name == 'native' and native_filter_manifest is not None else {}),
                 )
 
             results = {}

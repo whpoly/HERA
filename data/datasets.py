@@ -570,13 +570,24 @@ def load_data_2dmd_wse2(task_prefix, local_cutoff=None, representations=None):
     )
 
 
-def load_data_native(task_prefix, local_cutoff=None, representations=None, native_preprocessing=None):
+def load_data_native(task_prefix, local_cutoff=None, representations=None, native_preprocessing=None,
+                     native_filter_manifest=None):
     representations = _normalize_representations(representations)
     df_descriptors = pd.read_csv('dataset/Dataset_1/Dataset_1/A_rich/Neutral/id_prop_A_rich.csv', header=None)
+    retained = None
+    if native_filter_manifest is not None:
+        from .native_filter import retained_source_ids, verify_source_file, verify_source_table
+        verify_source_table(native_filter_manifest, df_descriptors)
+        retained = retained_source_ids(native_filter_manifest)
+        source_records = {r['source_id']: r for r in native_filter_manifest['records']}
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
+        if retained is not None and j not in retained:
+            continue
         source_path = 'dataset/Dataset_1/Dataset_1/A_rich/Neutral/' + j
+        if retained is not None:
+            verify_source_file(source_path, source_records[j])
         struct = Structure.from_file(source_path)
         tag_structure_source(struct, source_path, j)
         defect = 'vacancy' if j.split('-')[2].split('_')[0] == 'V' else 'others'
@@ -742,6 +753,7 @@ def load_dataset(
         native_preprocessing=None,
         imp2d_preprocessing=None,
         semi_preprocessing=None,
+        native_filter_manifest=None,
 ):
     """Load and return the graph representations for a dataset.
 
@@ -757,6 +769,8 @@ def load_dataset(
             Pass reference_v1 for original-site labels and corrected native defects.
         imp2d_preprocessing, semi_preprocessing: analogous dataset-specific
             original-site label versions; None preserves historical inputs.
+        native_filter_manifest: optional frozen native source selection; verifies
+            raw labels/files and loads the retained union across its splits.
 
     Returns:
         (dataset_full, dataset_hetero, dataset_attn, dataset_sparse, targets).
@@ -769,6 +783,8 @@ def load_dataset(
     preprocessing_options = {}
     if dataset_name == 'native':
         preprocessing_options['native_preprocessing'] = native_preprocessing
+        if native_filter_manifest is not None:
+            preprocessing_options['native_filter_manifest'] = native_filter_manifest
     elif dataset_name == 'imp2d':
         preprocessing_options['imp2d_preprocessing'] = imp2d_preprocessing
     elif dataset_name == 'semi':
