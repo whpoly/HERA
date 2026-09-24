@@ -650,9 +650,11 @@ def _read_impurity_manifest(path, dataset):
     return frame
 
 
-def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_preprocessing=None):
+def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_preprocessing=None,
+                    impurity_filter_manifest=None):
     representations = _normalize_representations(representations)
-    df_descriptors = _read_impurity_manifest('dataset/imp2d/imp2d/id_prop.csv', 'imp2d')
+    df_descriptors, quality_records = _impurity_filtered_table(
+        'dataset/imp2d/imp2d/id_prop.csv', 'imp2d', impurity_filter_manifest)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
@@ -660,6 +662,9 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_
         if df_descriptors[1][i] <= -10 or df_descriptors[1][i] >= 10:
             continue
         source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
+        if quality_records is not None:
+            from .impurity_preprocessing import verify_file
+            verify_file(source_path, quality_records[j])
         struct = Structure.from_file(source_path)
         tag_structure_source(struct, source_path, j)
         is_self = formula_contains_element(base, impurity)
@@ -691,15 +696,35 @@ def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_
     return _filter_invalid_datasets((dataset_full, dataset_hetero, dataset_attn, None), targets)
 
 
-def load_data_semi(task_prefix, local_cutoff=None, representations=None, semi_preprocessing=None):
+def _impurity_filtered_table(path, dataset, manifest):
+    if manifest is None:
+        return _read_impurity_manifest(path, dataset), None
+    from .impurity_preprocessing import read_table, verify_table, retained_ids, validate_manifest
+    validate_manifest(manifest)
+    if manifest['dataset'] != dataset:
+        raise ValueError('Physical filter manifest dataset mismatch')
+    frame = read_table(path)
+    verify_table(manifest, frame)
+    records = {r['source_id']: r for r in manifest['records']}
+    frame = frame.loc[frame[0].astype(str).isin(retained_ids(manifest))].reset_index(drop=True)
+    frame[1] = pd.to_numeric(frame[1], errors='raise')
+    return frame, records
+
+
+def load_data_semi(task_prefix, local_cutoff=None, representations=None, semi_preprocessing=None,
+                   impurity_filter_manifest=None):
     representations = _normalize_representations(representations)
-    df_descriptors = _read_impurity_manifest('dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', 'semi')
+    df_descriptors, quality_records = _impurity_filtered_table(
+        'dataset/Dataset_1/Dataset_1/Neutral/Neutral/id_prop_A_rich.csv', 'semi', impurity_filter_manifest)
     prep = []
     targets = []
     for i, j in tqdm(enumerate(df_descriptors[0])):
         base = j.split('-')[1]
         try:
             source_path = 'dataset/Dataset_1/Dataset_1/Neutral/Neutral/' + j
+            if quality_records is not None:
+                from .impurity_preprocessing import verify_file
+                verify_file(source_path, quality_records[j])
             struct = Structure.from_file(source_path)
             tag_structure_source(struct, source_path, j)
             base_structure = Structure.from_file('dataset/Dataset_1/host_configurations/' + base + '.vasp')
@@ -754,6 +779,7 @@ def load_dataset(
         imp2d_preprocessing=None,
         semi_preprocessing=None,
         native_filter_manifest=None,
+        impurity_filter_manifest=None,
 ):
     """Load and return the graph representations for a dataset.
 
@@ -789,6 +815,10 @@ def load_dataset(
         preprocessing_options['imp2d_preprocessing'] = imp2d_preprocessing
     elif dataset_name == 'semi':
         preprocessing_options['semi_preprocessing'] = semi_preprocessing
+    if impurity_filter_manifest is not None:
+        if dataset_name not in ('imp2d', 'semi'):
+            raise ValueError('Impurity physical filters only support imp2d/semi')
+        preprocessing_options['impurity_filter_manifest'] = impurity_filter_manifest
     return _LOADER_REGISTRY[dataset_name](
         model_name,
         local_cutoff=local_cutoff,

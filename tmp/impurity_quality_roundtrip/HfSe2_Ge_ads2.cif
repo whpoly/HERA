@@ -1,0 +1,54 @@
+# generated using pymatgen
+data_Hf9GeSe18
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   11.31779973
+_cell_length_b   11.31779973
+_cell_length_c   18.14359224
+_cell_angle_alpha   90.00000000
+_cell_angle_beta   90.00000000
+_cell_angle_gamma   120.00000000
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Hf9GeSe18
+_chemical_formula_sum   'Hf9 Ge1 Se18'
+_cell_volume   2012.69477183
+_cell_formula_units_Z   1
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Ge  Ge0  1  0.11228537  0.22461129  0.65721480  1
+  Hf  Hf1  1  0.66411137  0.66775749  0.50017460  1
+  Hf  Hf2  1  0.66632565  0.33272742  0.49831498  1
+  Hf  Hf3  1  0.65356737  -0.00948323  0.49580458  1
+  Hf  Hf4  1  0.33786333  0.67574051  0.49746871  1
+  Hf  Hf5  1  0.34038209  0.33868126  0.49852176  1
+  Hf  Hf6  1  0.33692063  -0.00948397  0.49580787  1
+  Hf  Hf7  1  -0.00235370  -0.00470567  0.49839583  1
+  Hf  Hf8  1  0.00365584  0.66776948  0.50017549  1
+  Hf  Hf9  1  -0.00173438  0.33870446  0.49854019  1
+  Se  Se10  1  0.11183474  0.89064627  0.41390516  1
+  Se  Se11  1  0.88726434  0.77459808  0.58509756  1
+  Se  Se12  1  0.22188585  0.10750354  0.59158451  1
+  Se  Se13  1  0.77862344  0.55731978  0.41447942  1
+  Se  Se14  1  0.88828239  0.44298539  0.58622116  1
+  Se  Se15  1  0.11093825  0.22184025  0.41944006  1
+  Se  Se16  1  0.78004714  0.22253098  0.41416171  1
+  Se  Se17  1  0.88560604  0.10751746  0.59158635  1
+  Se  Se18  1  0.44555100  0.89108639  0.40597050  1
+  Se  Se19  1  0.55665040  0.77871349  0.58616133  1
+  Se  Se20  1  0.22612524  0.45192795  0.59011278  1
+  Se  Se21  1  0.44229089  0.55356270  0.41230307  1
+  Se  Se22  1  0.77884550  0.89064827  0.41391929  1
+  Se  Se23  1  0.11115390  0.55356718  0.41231905  1
+  Se  Se24  1  0.44251343  0.22251501  0.41415213  1
+  Se  Se25  1  0.55566984  0.11125239  0.58327712  1
+  Se  Se26  1  0.22203884  0.77871416  0.58616729  1
+  Se  Se27  1  0.55476633  0.44297388  0.58620667  1

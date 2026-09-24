@@ -1,0 +1,54 @@
+# generated using pymatgen
+data_Sc(NiSe2)9
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   10.62524304
+_cell_length_b   10.62524304
+_cell_length_c   17.48778545
+_cell_angle_alpha   90.00000000
+_cell_angle_beta   90.00000000
+_cell_angle_gamma   120.00000000
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   Sc(NiSe2)9
+_chemical_formula_sum   'Sc1 Ni9 Se18'
+_cell_volume   1709.79165721
+_cell_formula_units_Z   1
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  Ni  Ni0  1  -0.08694904  0.00137714  0.50113467  1
+  Ni  Ni1  1  0.66544044  0.66642108  0.49574162  1
+  Ni  Ni2  1  0.66777707  0.33247243  0.50445275  1
+  Ni  Ni3  1  -0.00144250  0.33264452  0.50458637  1
+  Ni  Ni4  1  0.66661196  -0.00065266  0.50019092  1
+  Ni  Ni5  1  0.33458711  0.66679499  0.49588265  1
+  Ni  Ni6  1  0.00178551  0.67006401  0.48827451  1
+  Ni  Ni7  1  0.33208114  0.33020223  0.51026698  1
+  Ni  Ni8  1  0.42166979  0.00071239  0.50085060  1
+  Sc  Sc9  1  0.16657472  0.00003795  0.49874456  1
+  Se  Se10  1  0.58713575  0.12957549  0.59186030  1
+  Se  Se11  1  0.89977225  0.79488373  0.56435213  1
+  Se  Se12  1  0.25548477  0.18097705  0.62063547  1
+  Se  Se13  1  0.77144433  0.55330814  0.42584553  1
+  Se  Se14  1  0.89705193  0.46087824  0.56953019  1
+  Se  Se15  1  0.10413104  0.20486066  0.43500782  1
+  Se  Se16  1  0.78048158  0.22667558  0.43241832  1
+  Se  Se17  1  0.87562438  0.13041522  0.59172864  1
+  Se  Se18  1  0.21840855  0.44545901  0.57408373  1
+  Se  Se19  1  0.45646785  0.87107311  0.40946970  1
+  Se  Se20  1  0.55314071  0.77248025  0.56790751  1
+  Se  Se21  1  0.11535414  0.55277729  0.42602514  1
+  Se  Se22  1  0.43678462  0.54077841  0.42998183  1
+  Se  Se23  1  0.74834796  0.87094507  0.40997082  1
+  Se  Se24  1  0.22809076  0.79489650  0.56428552  1
+  Se  Se25  1  0.43413310  0.20546666  0.43537315  1
+  Se  Se26  1  0.07523819  0.81822318  0.37759983  1
+  Se  Se27  1  0.56143855  0.44625230  0.57379877  1

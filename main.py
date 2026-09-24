@@ -71,6 +71,8 @@ from .training.trainer import MEGNetTrainer
 from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
 from .data.native_filter import read_manifest, manifest_identity, requested_splits, filtered_splits
 from .data.native_preprocessing import prepare_native_filter
+from .data.impurity_preprocessing import (prepare_impurity_filter, identity as impurity_filter_identity,
+                                          filtered_splits as impurity_filtered_splits)
 from .data.impurity_was import impurity_run_components
 from .training.history import TrainingLogger
 from .training.results import (
@@ -504,7 +506,7 @@ def iter_concentration_transfer_splits(
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
                       run_label=None, cv5=False, resume=False, protect_existing=False,
-                      native_filter_manifest=None):
+                      native_filter_manifest=None, impurity_filter_manifest=None):
     """Train a single mode and return per-split test losses."""
     log_mode = run_label or mode
     data = dataset[dataset_index_for_mode(mode)]
@@ -528,6 +530,15 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         splits = filtered_splits(data, targets, native_filter_manifest, random_seeds, cv5=cv5)
     elif native_filter_manifest is not None:
         raise ValueError('Native filter manifest must be recorded in the experiment configuration')
+    elif config.get('impurity_data_filter') is not None:
+        if (impurity_filter_manifest is None or dataset_name not in ('imp2d', 'semi')
+                or impurity_filter_manifest['dataset'] != dataset_name):
+            raise ValueError('Filtered impurity training requires its frozen preprocessing manifest')
+        if config['impurity_data_filter'] != impurity_filter_identity(impurity_filter_manifest):
+            raise ValueError('Impurity filter identity differs from the experiment configuration')
+        splits = impurity_filtered_splits(data, targets, impurity_filter_manifest, random_seeds, cv5=cv5)
+    elif impurity_filter_manifest is not None:
+        raise ValueError('Impurity filter must be recorded in the experiment configuration')
     elif dataset_name in CONCENTRATION_TRANSFER_DATASETS:
         low_count = sum(
             getattr(structure, 'concentration', None) == 'low'
@@ -557,6 +568,11 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         )
 
     for split in splits:
+        if 'impurity_filter_counts' in split:
+            counts = split['impurity_filter_counts']
+            print(f'  [{split["display"]}] {dataset_name} physical filter (split membership preserved): '
+                  + ', '.join(f'{part} {counts[part]["original"]}->{counts[part]["kept"]}'
+                              for part in ('train', 'val', 'test')))
         if 'native_filter_counts' in split:
             counts = split['native_filter_counts']
             print(f'  [{split["display"]}] Native filter (original split membership preserved): '
@@ -813,6 +829,8 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
                 'test_sources': _structure_source_metadata(split['test_X']),
                 **({'native_filter_counts': split['native_filter_counts']}
                    if 'native_filter_counts' in split else {}),
+                **({'impurity_filter_counts': split['impurity_filter_counts']}
+                   if 'impurity_filter_counts' in split else {}),
             },
         },
         path,
@@ -1184,6 +1202,16 @@ def main():
                                        help='Frozen native outlier manifest; preserves original split assignments')
     native_filter_options.add_argument('--native-outlier-filter', choices=['standard','strict'], default=None,
                                        help='Automatically inspect/filter native data at load time and save the frozen manifest in --run-dir')
+    for impurity_dataset in ('imp2d', 'semi'):
+        parser.add_argument(f'--{impurity_dataset}-quality-filter', choices=['physical'], default=None,
+                            help='Screen raw structures at loading; preserve original splits and save reasons')
+    parser.add_argument('--imp2d-source-db', default=None,
+                        help='Optional override for the original IMP2D ASE database; auto-detects '
+                             'dataset/imp2d/imp2d.db or dataset/imp2d/imp2d/imp2d.db, '
+                             'then the local audit cache; downloads the verified official release if absent')
+    parser.add_argument('--semi-source-policy', choices=['complete', 'legacy_available'], default='complete',
+                        help='With --semi-quality-filter, explicitly preserve the historical readable-source cohort; '
+                             'missing files/hosts are logged separately from physical exclusions')
     parser.add_argument('--atom-init', default='./HERA/atom_init.json',
                         help='Path to atom_init.json (default: atom_init.json)')
     parser.add_argument('--log-dir', default='logs',
@@ -1316,6 +1344,12 @@ def main():
     else:
         dataset_names = list(dict.fromkeys(args.dataset))
     native_filter_manifest = None
+    impurity_manifests = {}
+    if args.semi_source_policy != 'complete' and ('semi' not in dataset_names or args.semi_quality_filter is None):
+        parser.error('--semi-source-policy legacy_available requires --dataset semi and --semi-quality-filter physical')
+    for impurity_dataset in ('imp2d', 'semi'):
+        if getattr(args, f'{impurity_dataset}_quality_filter') and impurity_dataset not in dataset_names:
+            parser.error(f'--{impurity_dataset}-quality-filter requires that dataset')
     if args.native_outlier_filter is not None and 'native' not in dataset_names:
         parser.error('--native-outlier-filter requires native among the requested datasets')
     if args.native_filter_manifest is not None:
@@ -1413,6 +1447,14 @@ def main():
                 )
 
             dataset_cache = {}
+            if dataset_name in ('imp2d', 'semi') and getattr(args, f'{dataset_name}_quality_filter'):
+                if dataset_name not in impurity_manifests:
+                    impurity_manifests[dataset_name] = prepare_impurity_filter(
+                        run_dir, dataset_name, args.seeds, args.cv5, iter_train_val_test_splits,
+                        database_path=args.imp2d_source_db,
+                        **({'semi_source_policy': args.semi_source_policy} if dataset_name == 'semi' else {}),
+                    )
+            impurity_manifest = impurity_manifests.get(dataset_name)
 
             def dataset_for_run(local_cutoff, mode, config):
                 representation = representation_for_mode(mode)
@@ -1428,6 +1470,7 @@ def main():
                         **({preprocessing_key: preprocessing} if dataset_name in ('native', 'semi', 'imp2d') else {}),
                         **({'native_filter_manifest': native_filter_manifest}
                            if dataset_name == 'native' and native_filter_manifest is not None else {}),
+                        **({'impurity_filter_manifest': impurity_manifest} if impurity_manifest is not None else {}),
                     )
                 return dataset_cache[cache_key]
 
@@ -1446,6 +1489,8 @@ def main():
                         config[preprocessing_key] = preprocessing
                 if dataset_name == 'native' and native_filter_manifest is not None:
                     config['native_data_filter'] = manifest_identity(native_filter_manifest)
+                if impurity_manifest is not None:
+                    config['impurity_data_filter'] = impurity_filter_identity(impurity_manifest)
                 return config
 
             run_specs = []
@@ -1517,6 +1562,8 @@ def main():
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
                     if run['config'].get('native_data_filter'):
                         preprocessing_parts.append('clean_' + run['config']['native_data_filter']['sha256'][:8])
+                    if run['config'].get('impurity_data_filter'):
+                        preprocessing_parts.append('physical_' + run['config']['impurity_data_filter']['sha256'][:8])
                     if preprocessing_parts:
                         run['label'] += '_' + '_'.join(preprocessing_parts)
                     run_label = run['label']
@@ -1694,6 +1741,7 @@ def main():
                     protect_existing=args.protect_existing,
                     **({'native_filter_manifest': native_filter_manifest}
                        if dataset_name == 'native' and native_filter_manifest is not None else {}),
+                    **({'impurity_filter_manifest': impurity_manifest} if impurity_manifest is not None else {}),
                 )
 
             results = {}

@@ -1,0 +1,54 @@
+# generated using pymatgen
+data_K(NiSe2)9
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   10.62524304
+_cell_length_b   10.62524304
+_cell_length_c   17.48778545
+_cell_angle_alpha   90.00000000
+_cell_angle_beta   90.00000000
+_cell_angle_gamma   120.00000000
+_symmetry_Int_Tables_number   1
+_chemical_formula_structural   K(NiSe2)9
+_chemical_formula_sum   'K1 Ni9 Se18'
+_cell_volume   1709.79165721
+_cell_formula_units_Z   1
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x, y, z'
+loop_
+ _atom_site_type_symbol
+ _atom_site_label
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+  K  K0  1  0.05535623  0.11058919  0.72504217  1
+  Ni  Ni1  1  0.66696084  0.66672574  0.50042074  1
+  Ni  Ni2  1  0.66677175  0.33346930  0.49964461  1
+  Ni  Ni3  1  0.66544056  -0.00024270  0.50055694  1
+  Ni  Ni4  1  0.33317051  0.66602497  0.50017709  1
+  Ni  Ni5  1  0.33357964  0.33509924  0.50030105  1
+  Ni  Ni6  1  0.33523552  -0.00099130  0.49990917  1
+  Ni  Ni7  1  -0.00123768  -0.00089503  0.50129869  1
+  Ni  Ni8  1  -0.00038926  0.66649347  0.50043195  1
+  Ni  Ni9  1  0.00035202  0.33400847  0.50042537  1
+  Se  Se10  1  0.11341012  0.88794762  0.42907582  1
+  Se  Se11  1  0.88960739  0.77874079  0.57023917  1
+  Se  Se12  1  0.22385990  0.11398291  0.57393359  1
+  Se  Se13  1  0.77789860  0.55569775  0.42964339  1
+  Se  Se14  1  0.88876780  0.44464366  0.57060822  1
+  Se  Se15  1  0.11028140  0.21944615  0.43069073  1
+  Se  Se16  1  0.77864434  0.22309642  0.42953962  1
+  Se  Se17  1  0.88591702  0.11190929  0.57222591  1
+  Se  Se18  1  0.44717353  0.88655973  0.42915971  1
+  Se  Se19  1  0.55578455  0.77782971  0.56998652  1
+  Se  Se20  1  0.22123720  0.44392650  0.57082603  1
+  Se  Se21  1  0.44639010  0.55721747  0.42955652  1
+  Se  Se22  1  0.77437150  0.88755627  0.42867444  1
+  Se  Se23  1  0.11060589  0.55643907  0.43021224  1
+  Se  Se24  1  0.44413417  0.22296660  0.42937029  1
+  Se  Se25  1  0.55535526  0.11125419  0.56967293  1
+  Se  Se26  1  0.22164920  0.77754396  0.56990510  1
+  Se  Se27  1  0.55522748  0.44407169  0.56979578  1

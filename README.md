@@ -83,6 +83,20 @@ CSV described above are used.
 
 If `atom_init.json` is stored elsewhere, pass it with `--atom-init`.
 
+Optional physical quality filtering for `imp2d` and `semi` runs at data loading:
+`--imp2d-quality-filter physical --semi-quality-filter physical`.
+IMP2D automatically locates its original ASE database in `dataset/imp2d/imp2d.db`
+or `dataset/imp2d/imp2d/imp2d.db`, then falls back to the local audit cache.
+`--imp2d-source-db PATH` is only needed to override that location. The database
+provides final-stage convergence and energy provenance. Original files and split
+membership are preserved; each exclusion is recorded in the run directory.
+For a semi download with the historical missing POSCAR0/host files,
+`--semi-source-policy legacy_available` explicitly reproduces that available-source
+cohort and lists unavailable records separately. The default `complete` policy
+stops on missing sources.
+See [the audit, physical criteria and one-command example](docs/impurity_physical_preprocessing.md)
+for verified results and current data-availability limits.
+
 ## Quick Start
 
 Because the CLI uses package-relative imports, run commands from the parent directory of `HERA`:

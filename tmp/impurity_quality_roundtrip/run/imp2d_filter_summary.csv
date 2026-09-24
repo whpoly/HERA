@@ -1,0 +1,4 @@
+logger_id,split,original,kept,removed
+123,train,55,45,10
+123,val,19,14,5
+123,test,19,19,0
