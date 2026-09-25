@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from ase import Atoms
 from ase.db import connect
+from ase.io import write as ase_write
 
 from HERA import main as cli
 from HERA.data import datasets
@@ -42,6 +43,57 @@ class DatabaseInputTests(unittest.TestCase):
             return prepare_impurity_filter(self.root/name, 'imp2d', [123], cv5,
                 cli.iter_train_val_test_splits, database_path=self.db, imp2d_source='db',
                 imp2d_host_filter=host_filter, imp2d_energy_window=energy_window)
+
+    def test_db_and_cif_enforce_the_same_physical_standard(self):
+        # Compare observable decisions for the same records through both loaders,
+        # including accepted boundary values and rejected values just beyond them.
+        folder = self.root/'cif'
+        folder.mkdir()
+        with connect(str(self.db)) as db:
+            def update(i, **values):
+                db.update(db.get(name=f'ZnO_H_ads{i}').id, **values)
+
+            update(2, eform=.02, en2=-10.98)
+            for i, value in ((6,.05),(7,-.05),(8,.050001),(9,-.050001)):
+                update(i, conv2=value)
+            for i, value in ((10,2.),(11,2.000001),(12,0.),(13,-1.)):
+                update(i, extension_factor=value)
+            update(14, delete_keys=['conv2'])
+            update(15, delete_keys=['en2'])
+            for i, residual in ((16,5e-5),(17,2e-4)):
+                row = db.get(name=f'ZnO_H_ads{i}')
+                update(i, en2=row.en2 + residual)
+            for i, position in ((18,[1.1,1,1]),(19,[2,1,1]),(20,[8,8,8])):
+                row = db.get(name=f'ZnO_H_ads{i}')
+                atoms = row.toatoms()
+                atoms.positions[2] = position
+                update(i, atoms=atoms)
+            rows = [db.get(name=f'ZnO_H_ads{i}') for i in range(24)]
+            for row in rows:
+                ase_write(folder/(row.name+'.cif'), row.toatoms(), format='cif')
+        (folder/'id_prop.csv').write_text(
+            ''.join(f'{r.name},{r.eform}\n' for r in rows), encoding='utf-8')
+
+        database = self.prepare(energy_window=(-10,10))
+        with redirect_stdout(io.StringIO()):
+            cif = prepare_impurity_filter(self.root/'cif_run', 'imp2d', [123], False,
+                cli.iter_train_val_test_splits, data_dir=folder, database_path=self.db)
+        db_records = {r['source_id']: r for r in database['records']}
+        cif_records = {r['source_id']: r for r in cif['records']}
+        rejected = {3,4,8,9,11,12,13,14,15,17,18}
+        for i in range(24):
+            sid = f'ZnO_H_ads{i}'
+            with self.subTest(source_id=sid):
+                self.assertEqual(bool(db_records[sid]['physical_quality_reasons']), i in rejected)
+                self.assertEqual(set(db_records[sid]['physical_quality_reasons']),
+                                 set(cif_records[sid]['quality_reasons']))
+                self.assertEqual(db_records[sid]['target'], cif_records[sid]['target'])
+        for records in (db_records, cif_records):
+            self.assertIn('source_converged_flag_differs_from_final_stage',
+                          records['ZnO_H_ads5']['review_flags'])
+            self.assertIn('short_bond_review_only', records['ZnO_H_ads19']['review_flags'])
+            self.assertIn('weakly_bound_or_isolated_atoms_review_only',
+                          records['ZnO_H_ads20']['review_flags'])
 
     def test_energy_window_open_bounds_preserve_labels_and_split_membership(self):
         self.add_reviewed_host()
