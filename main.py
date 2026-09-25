@@ -1209,6 +1209,15 @@ def main():
                         help='Optional override for the original IMP2D ASE database; auto-detects '
                              'dataset/imp2d/imp2d.db or dataset/imp2d/imp2d/imp2d.db, '
                              'then the local audit cache; downloads the verified official release if absent')
+    parser.add_argument('--imp2d-source', choices=['cif', 'db'], default='cif',
+                        help='db reads all original ASE rows without CSV/CIF, physically screens them and '
+                             'splits equivalent structures together; requires --imp2d-quality-filter physical')
+    parser.add_argument('--imp2d-host-filter', choices=['reviewed_v1'], default=None,
+                        help='With --imp2d-source db, exclude the reviewed Ti2CO2 host (CO2Ti2) '
+                             'with a systematic energy offset; record exclusions without trimming individual energies')
+    parser.add_argument('--imp2d-energy-window', nargs=2, type=float, default=None, metavar=('LOW', 'HIGH'),
+                        help='With --imp2d-source db, retain LOW < DFE < HIGH in eV at loading; '
+                             'fixed benchmark scope, not a physical validity test (example: -10 10)')
     parser.add_argument('--semi-source-policy', choices=['complete', 'legacy_available'], default='complete',
                         help='With --semi-quality-filter, explicitly preserve the historical readable-source cohort; '
                              'missing files/hosts are logged separately from physical exclusions')
@@ -1345,6 +1354,15 @@ def main():
         dataset_names = list(dict.fromkeys(args.dataset))
     native_filter_manifest = None
     impurity_manifests = {}
+    if args.imp2d_source == 'db' and ('imp2d' not in dataset_names or args.imp2d_quality_filter != 'physical'):
+        parser.error('--imp2d-source db requires --dataset imp2d and --imp2d-quality-filter physical')
+    if args.imp2d_host_filter is not None and args.imp2d_source != 'db':
+        parser.error('--imp2d-host-filter requires --imp2d-source db')
+    if args.imp2d_energy_window is not None:
+        if args.imp2d_source != 'db':
+            parser.error('--imp2d-energy-window requires --imp2d-source db')
+        if not -float('inf') < args.imp2d_energy_window[0] < args.imp2d_energy_window[1] < float('inf'):
+            parser.error('--imp2d-energy-window requires two finite increasing bounds')
     if args.semi_source_policy != 'complete' and ('semi' not in dataset_names or args.semi_quality_filter is None):
         parser.error('--semi-source-policy legacy_available requires --dataset semi and --semi-quality-filter physical')
     for impurity_dataset in ('imp2d', 'semi'):
@@ -1453,6 +1471,9 @@ def main():
                         run_dir, dataset_name, args.seeds, args.cv5, iter_train_val_test_splits,
                         database_path=args.imp2d_source_db,
                         **({'semi_source_policy': args.semi_source_policy} if dataset_name == 'semi' else {}),
+                        **({'imp2d_source': args.imp2d_source, 'imp2d_host_filter': args.imp2d_host_filter,
+                            'imp2d_energy_window': args.imp2d_energy_window}
+                           if dataset_name == 'imp2d' else {}),
                     )
             impurity_manifest = impurity_manifests.get(dataset_name)
 
@@ -1471,6 +1492,8 @@ def main():
                         **({'native_filter_manifest': native_filter_manifest}
                            if dataset_name == 'native' and native_filter_manifest is not None else {}),
                         **({'impurity_filter_manifest': impurity_manifest} if impurity_manifest is not None else {}),
+                        **({'imp2d_source_db': args.imp2d_source_db}
+                           if dataset_name == 'imp2d' and args.imp2d_source == 'db' else {}),
                     )
                 return dataset_cache[cache_key]
 

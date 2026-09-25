@@ -2,6 +2,16 @@
 
 日期：2026-09-24。原始文件保留；排除发生在训练读取时。没有训练模型或根据预测误差筛样本。
 
+2026-09-25 新增：可使用 `--imp2d-source db` 从完整数据库直接筛选和构图，
+不依赖 CSV/CIF；物理通过 10,992 条，可靠缺陷标记齐全的可训练队列 10,946 条。
+该版本为 imp2d 单独启用结构分组划分，semi 保持现状。
+见 [DB 版本的结果和命令](imp2d_database_preprocessing.md)。下文仍记录此前 CSV/CIF 版本。
+
+**后续划分审计发现：当前 seed123 清单仍存在等价结构跨集合。**
+semi 在 0.001 Å 容差下有 87 对跨集合，imp2d 有 50 对；分别有 32/29 对跨 train/test。
+当前过滤清单和下方命令仍保留旧的按样本随机划分，尚未加入按等价结构分组的划分。
+详情与标签差异复查见 [划分审计](impurity_split_audit.md)。
+
 ## imp2d 已执行的最终预处理
 
 **已生成 `HERA/logs/alignn_physical_clean/imp2d_filter_manifest.json`。**
@@ -196,6 +206,11 @@ semi、imp2d 会自动跳过与 full 重复的 full_x，native 保留 full_x。
 原始数据库自动依次查找 `dataset/imp2d/imp2d.db`、`dataset/imp2d/imp2d/imp2d.db`，最后查找 HERA 本地审计缓存。
 在 `/home/wuhao` 执行时即使用 `/home/wuhao/dataset/imp2d` 下的数据库，无需设置 `--imp2d-source-db`。
 DFT 收敛/能量分项来自原始 `imp2d.db`；CIF 和 `id_prop.csv` 本身不含这些元数据。
+**若本机完全没有数据库，首次开启 imp2d 物理筛查时会自动从官方地址下载到 `dataset/imp2d/imp2d.db`。**
+下载量 71,819,264 字节（约 71.8 MB），验证固定 2022-07-12 版本的 SHA256 后才作为数据库使用。
+临时下载失败或校验不通过会停止；不会省略收敛规则，也不会用不完整文件继续训练。后续运行直接复用。
+本地已实际完成一次官方下载并验证与前述审计数据库的 SHA256 一致，记录在
+`results/imp2d_database_download_verification.json`。下载错误/截断/版本不符/复用/接入测试通过。
 `--resume` 跳过已经验证完成的结果，未完成的 split 从头训练；当前实现不是逐 epoch 断点续训。
 
 补跑之前的 no_aa_dd 时，保留同一 run-dir，将 `--mode` 改成 `hetero hetero_was`，
@@ -212,8 +227,8 @@ python -m HERA.main --model alignn --dataset semi --mode full attention attentio
 
 ### semi 与 imp2d 两组一起运行
 
-在 HERA 的父目录执行，机器上需要有完整 semi/imp2d 训练 CSV/CIF、semi host 和原始 `imp2d.db`。
-数据库按上述默认目录自动查找，不必在命令中设置路径。
+在 HERA 的父目录执行，机器上需要有 semi/imp2d 训练 CSV/CIF 和所需的 semi host。
+数据库按上述默认目录自动查找；缺失时自动下载，不必在命令中设置路径。
 
 ```bash
 python -m HERA.main --model alignn --dataset imp2d semi --mode full attention attention_was hetero hetero_was was_x definet definet_was --imp2d-preprocessing reference_v1 --semi-preprocessing reference_v1 --imp2d-quality-filter physical --semi-quality-filter physical --semi-source-policy legacy_available --alignn-hetero-dd drop --r 0 --alignn-hetero-feature-norm layernorm --alignn-hetero-node-norm layernorm --alignn-hetero-relations shared_residual --alignn-hetero-adapter-rank 8 --alignn-hetero-pooling defect_energy_mean --seed 123 --epochs 500 --device cuda:0 --atom-init HERA/atom_init.json --run-dir HERA/logs/alignn_physical_clean --compact-logs --resume

@@ -186,9 +186,20 @@ No minimum-energy label is silently chosen as the ground truth.
 
 def prepare_impurity_filter(run_dir, dataset, seeds, cv5, split_iterator, data_dir=None,
                             database_path=None, host_dir='dataset/Dataset_1/host_configurations',
-                            semi_source_policy='complete'):
+                            semi_source_policy='complete', imp2d_source='cif', imp2d_host_filter=None,
+                            imp2d_energy_window=None):
     if dataset not in DATA_DIRS:
         raise ValueError(f'Unsupported physical filter dataset: {dataset}')
+    if imp2d_source not in ('cif', 'db'):
+        raise ValueError(f'Unknown IMP2D source: {imp2d_source}')
+    if imp2d_host_filter is not None and (dataset != 'imp2d' or imp2d_source != 'db'):
+        raise ValueError('IMP2D host filtering requires the direct database source')
+    if imp2d_energy_window is not None and (dataset != 'imp2d' or imp2d_source != 'db'):
+        raise ValueError('IMP2D energy window requires the direct database source')
+    if dataset == 'imp2d' and imp2d_source == 'db':
+        from .imp2d_database import prepare_database_filter
+        return prepare_database_filter(run_dir, seeds, cv5, split_iterator, database_path,
+                                       host_filter=imp2d_host_filter, energy_window=imp2d_energy_window)
     data_dir, run_dir, host_dir = Path(data_dir or DATA_DIRS[dataset]), Path(run_dir), Path(host_dir)
     table_path = data_dir/TABLES[dataset]
     frame = read_table(table_path)

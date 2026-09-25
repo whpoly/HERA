@@ -87,6 +87,9 @@ Optional physical quality filtering for `imp2d` and `semi` runs at data loading:
 `--imp2d-quality-filter physical --semi-quality-filter physical`.
 IMP2D automatically locates its original ASE database in `dataset/imp2d/imp2d.db`
 or `dataset/imp2d/imp2d/imp2d.db`, then falls back to the local audit cache.
+If none exists, the physical filter downloads the official 71.8 MB database to
+`dataset/imp2d/imp2d.db` and checks the pinned release size and SHA256 before use.
+Later runs reuse the local file. A download failure stops preprocessing.
 `--imp2d-source-db PATH` is only needed to override that location. The database
 provides final-stage convergence and energy provenance. Original files and split
 membership are preserved; each exclusion is recorded in the run directory.
@@ -94,6 +97,20 @@ For a semi download with the historical missing POSCAR0/host files,
 `--semi-source-policy legacy_available` explicitly reproduces that available-source
 cohort and lists unavailable records separately. The default `complete` policy
 stops on missing sources.
+Use `--imp2d-source db --imp2d-quality-filter physical` to read and screen the entire
+original IMP2D database without CSV/CIF, and keep equivalent structures together
+when splitting. The verified release yields 10,992 rows passing the current physical checks;
+46 lack checked self-impurity identities, leaving 10,946 model-ready rows.
+Add `--imp2d-host-filter reviewed_v1` to exclude Ti2CO2 (`CO2Ti2`) while its
+host-wide energy offset is under review. This leaves 10,715 rows from 43 hosts,
+preserves the remaining split assignments and labels, and does not trim individual
+high-energy samples. Use a new run directory for this dataset version.
+See [the material-filtered dataset and commands](docs/imp2d_host_clean_v1.md).
+For the fixed benchmark range, also pass `--imp2d-energy-window -10 10`.
+The bounds are strict: only `-10 < DFE < 10` eV is retained. Together with the
+reviewed host filter this leaves 10,475 rows; the new run directory is
+`HERA/logs/imp2d_10ev_v1`. See [the current command and verified counts](docs/imp2d_10ev_v1.md).
+See [DB-only results and commands](docs/imp2d_database_preprocessing.md).
 See [the audit, physical criteria and one-command example](docs/impurity_physical_preprocessing.md)
 for verified results and current data-availability limits.
 

@@ -7,39 +7,18 @@ from pathlib import Path
 import warnings
 
 from ase.db import connect
-from ase.geometry import find_mic
 from ase.io import read
 import numpy as np
 import pandas as pd
-from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 
+from ..data.structure_groups import anchor_distances, equivalent
 from ..data.impurity_preprocessing import (DATA_DIRS, default_database, digest, identity,
                                           source_path, validate_manifest)
 
 ROOT = Path(__file__).resolve().parents[1]
 DISTANCE_TOLERANCE = 1e-3
 ENERGY_TOLERANCE = 0.05
-
-
-def anchor_distances(atoms):
-    counts = Counter(atoms.numbers)
-    number, count = min(counts.items(), key=lambda item: (item[1], item[0]))
-    if count != 1:
-        return None
-    anchor = np.flatnonzero(atoms.numbers == number)[0]
-    distances = find_mic(atoms.positions - atoms.positions[anchor], atoms.cell, atoms.pbc)[1]
-    return np.concatenate([np.sort(distances[atoms.numbers == z]) for z in sorted(counts)])
-
-
-def equivalent(left, right, tolerance):
-    # Convert the absolute displacement tolerance to StructureMatcher's scale.
-    length_scale = ((left.volume + right.volume) / (2 * len(left))) ** (1 / 3)
-    matcher = StructureMatcher(ltol=1e-6 if tolerance >= 1e-3 else 1e-8,
-                               stol=tolerance / length_scale,
-                               angle_tol=1e-4 if tolerance >= 1e-3 else 1e-6,
-                               primitive_cell=False, scale=False, attempt_supercell=False)
-    return bool(matcher.fit(left, right, symmetric=True, skip_structure_reduction=True))
 
 
 def audit(dataset, run_dir, data_root, output):
@@ -63,7 +42,7 @@ def audit(dataset, run_dir, data_root, output):
     groups = defaultdict(list)
     for index, row in enumerate(selected, 1):
         path = source_path(folder, dataset, row['source_id'])
-        if digest(path) != row['sha256']:
+        if manifest.get('source_format') != 'ase_database' and digest(path) != row['sha256']:
             raise ValueError(f'CIF differs from frozen source: {path}')
         if dataset == 'imp2d':
             atoms = db_rows[row['source_id']].toatoms()
@@ -87,7 +66,7 @@ def audit(dataset, run_dir, data_root, output):
             if fa is not None and fb is not None and np.max(np.abs(fa-fb)) > 2*DISTANCE_TOLERANCE + 1e-4:
                 continue
             a, b = left['row'], right['row']
-            byte_equal = a['sha256'] == b['sha256']
+            byte_equal = bool(a.get('sha256') and a['sha256'] == b.get('sha256'))
             compared += 1
             near_equal = byte_equal or equivalent(left['structure'], right['structure'], DISTANCE_TOLERANCE)
             if not near_equal:

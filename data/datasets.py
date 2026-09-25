@@ -651,33 +651,39 @@ def _read_impurity_manifest(path, dataset):
 
 
 def load_data_imp2d(task_prefix, local_cutoff=None, representations=None, imp2d_preprocessing=None,
-                    impurity_filter_manifest=None):
+                    impurity_filter_manifest=None, imp2d_source_db=None):
     representations = _normalize_representations(representations)
-    df_descriptors, quality_records = _impurity_filtered_table(
-        'dataset/imp2d/imp2d/id_prop.csv', 'imp2d', impurity_filter_manifest)
-    prep = []
-    targets = []
-    for i, j in tqdm(enumerate(df_descriptors[0])):
-        base, impurity, site = j.split('_')
-        if df_descriptors[1][i] <= -10 or df_descriptors[1][i] >= 10:
-            continue
-        source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
-        if quality_records is not None:
-            from .impurity_preprocessing import verify_file
-            verify_file(source_path, quality_records[j])
-        struct = Structure.from_file(source_path)
-        tag_structure_source(struct, source_path, j)
-        is_self = formula_contains_element(base, impurity)
-        defect_info = {
-            'base': base,
-            'impurity': impurity,
-            'site': site,
-            'is_self': is_self,
-        }
-        prep.append([struct, defect_info])
-        targets.append(df_descriptors[1][i])
+    using_database = (impurity_filter_manifest is not None and
+                      impurity_filter_manifest.get('source_format') == 'ase_database')
+    if using_database:
+        from .imp2d_database import load_database_inputs
+        prep, targets = load_database_inputs(impurity_filter_manifest, imp2d_source_db)
+    else:
+        df_descriptors, quality_records = _impurity_filtered_table(
+            'dataset/imp2d/imp2d/id_prop.csv', 'imp2d', impurity_filter_manifest)
+        prep = []
+        targets = []
+        for i, j in tqdm(enumerate(df_descriptors[0])):
+            base, impurity, site = j.split('_')
+            if df_descriptors[1][i] <= -10 or df_descriptors[1][i] >= 10:
+                continue
+            source_path = 'dataset/imp2d/imp2d/' + j + '.cif'
+            if quality_records is not None:
+                from .impurity_preprocessing import verify_file
+                verify_file(source_path, quality_records[j])
+            struct = Structure.from_file(source_path)
+            tag_structure_source(struct, source_path, j)
+            is_self = formula_contains_element(base, impurity)
+            defect_info = {
+                'base': base,
+                'impurity': impurity,
+                'site': site,
+                'is_self': is_self,
+            }
+            prep.append([struct, defect_info])
+            targets.append(df_descriptors[1][i])
 
-    if {'hetero', 'attention'} & representations or imp2d_preprocessing == 'reference_v1':
+    if not using_database and ({'hetero', 'attention'} & representations or imp2d_preprocessing == 'reference_v1'):
         _assign_imp2d_self_defect_indices(
             prep,
             _load_imp2d_self_defect_labels(),
@@ -780,6 +786,7 @@ def load_dataset(
         semi_preprocessing=None,
         native_filter_manifest=None,
         impurity_filter_manifest=None,
+        imp2d_source_db=None,
 ):
     """Load and return the graph representations for a dataset.
 
@@ -813,6 +820,8 @@ def load_dataset(
             preprocessing_options['native_filter_manifest'] = native_filter_manifest
     elif dataset_name == 'imp2d':
         preprocessing_options['imp2d_preprocessing'] = imp2d_preprocessing
+        if imp2d_source_db is not None:
+            preprocessing_options['imp2d_source_db'] = imp2d_source_db
     elif dataset_name == 'semi':
         preprocessing_options['semi_preprocessing'] = semi_preprocessing
     if impurity_filter_manifest is not None:
