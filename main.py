@@ -71,6 +71,7 @@ from .training.trainer import MEGNetTrainer
 from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
 from .data.native_filter import read_manifest, manifest_identity, requested_splits, filtered_splits
 from .data.native_preprocessing import prepare_native_filter
+from .data.native_splits import ood_splitter, protocol_for as ood_protocol_for
 from .data.impurity_preprocessing import (prepare_impurity_filter, identity as impurity_filter_identity,
                                           filtered_splits as impurity_filtered_splits)
 from .data.impurity_was import impurity_run_components
@@ -650,7 +651,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                 )
                 break
 
-        if dataset_name in CONCENTRATION_TRANSFER_DATASETS:
+        if dataset_name in CONCENTRATION_TRANSFER_DATASETS or 'ood_split' in split:
             loss_test, predictions = trainer.predict_structures(
                 split['test_X'],
                 split['test_y'],
@@ -665,7 +666,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                 predictions,
             )
             print(
-                f'  [{split["display"]}] High-concentration predictions saved: '
+                f'  [{split["display"]}] Test predictions saved: '
                 f'{prediction_path}'
             )
         else:
@@ -745,7 +746,7 @@ def _scalar_float(value):
 
 
 def write_test_predictions(log_dir, logger_id, structures, targets, predictions):
-    """Write per-structure fixed-test predictions for concentration transfer."""
+    """Write per-structure held-out predictions for transfer and grouped OOD."""
     path = os.path.join(
         log_dir,
         f'seed{_checkpoint_safe_id(logger_id)}_test_predictions.csv',
@@ -827,6 +828,7 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
                 'train_sources': _structure_source_metadata(split['train_X']),
                 'val_sources': _structure_source_metadata(split['val_X']),
                 'test_sources': _structure_source_metadata(split['test_X']),
+                **({'ood_split': split['ood_split']} if 'ood_split' in split else {}),
                 **({'native_filter_counts': split['native_filter_counts']}
                    if 'native_filter_counts' in split else {}),
                 **({'impurity_filter_counts': split['impurity_filter_counts']}
@@ -1198,6 +1200,10 @@ def main():
     parser.add_argument('--cv5', '--five-fold-cv', action='store_true',
                         help='Use 5-fold cross validation. Requires exactly one --seed value.')
     native_filter_options = parser.add_mutually_exclusive_group()
+    parser.add_argument('--native-split', choices=['random', 'family', 'material'], default='random',
+                        help='Native only: random retains the existing split; family keeps whole POSCAR '
+                             'series together; material holds out entire hosts. OOD uses 60/20/20 groups '
+                             'and requires the native filter. Other datasets are unaffected.')
     native_filter_options.add_argument('--native-filter-manifest', default=None,
                                        help='Frozen native outlier manifest; preserves original split assignments')
     native_filter_options.add_argument('--native-outlier-filter', choices=['standard','strict'], default=None,
@@ -1352,6 +1358,11 @@ def main():
         dataset_names = list(VALID_DATASETS)
     else:
         dataset_names = list(dict.fromkeys(args.dataset))
+    if args.native_split != 'random':
+        if args.cv5 or 'native' not in dataset_names:
+            parser.error('--native-split family/material requires native and cannot combine with --cv5')
+        if not (args.native_outlier_filter or args.native_filter_manifest):
+            parser.error('--native-split family/material requires --native-outlier-filter or an OOD --native-filter-manifest')
     native_filter_manifest = None
     impurity_manifests = {}
     if args.imp2d_source == 'db' and ('imp2d' not in dataset_names or args.imp2d_quality_filter != 'physical'):
@@ -1376,6 +1387,9 @@ def main():
         try:
             native_filter_manifest = read_manifest(args.native_filter_manifest)
             requested_splits(native_filter_manifest, args.seeds, cv5=args.cv5)
+            expected_ood = ood_protocol_for('native', args.native_split) if args.native_split != 'random' else None
+            if native_filter_manifest['policy'].get('ood_split') != expected_ood:
+                raise ValueError('Native manifest does not match --native-split; use the matching split option or a new manifest')
         except (OSError, ValueError, KeyError) as exc:
             parser.error(str(exc))
     requested_modes = args.mode
@@ -1459,16 +1473,19 @@ def main():
                         'so it is identical to FULL.'
                     )
 
+            split_iterator = (ood_splitter('native', args.native_split)
+                              if dataset_name == 'native' and args.native_split != 'random'
+                              else iter_train_val_test_splits)
             if dataset_name == 'native' and args.native_outlier_filter is not None and native_filter_manifest is None:
                 native_filter_manifest = prepare_native_filter(
-                    run_dir, args.native_outlier_filter, args.seeds, args.cv5, iter_train_val_test_splits,
+                    run_dir, args.native_outlier_filter, args.seeds, args.cv5, split_iterator,
                 )
 
             dataset_cache = {}
             if dataset_name in ('imp2d', 'semi') and getattr(args, f'{dataset_name}_quality_filter'):
                 if dataset_name not in impurity_manifests:
                     impurity_manifests[dataset_name] = prepare_impurity_filter(
-                        run_dir, dataset_name, args.seeds, args.cv5, iter_train_val_test_splits,
+                        run_dir, dataset_name, args.seeds, args.cv5, split_iterator,
                         database_path=args.imp2d_source_db,
                         **({'semi_source_policy': args.semi_source_policy} if dataset_name == 'semi' else {}),
                         **({'imp2d_source': args.imp2d_source, 'imp2d_host_filter': args.imp2d_host_filter,
@@ -1514,6 +1531,10 @@ def main():
                     config['native_data_filter'] = manifest_identity(native_filter_manifest)
                 if impurity_manifest is not None:
                     config['impurity_data_filter'] = impurity_filter_identity(impurity_manifest)
+                for filter_key in ('native_data_filter', 'impurity_data_filter'):
+                    protocol = config.get(filter_key, {}).get('policy', {}).get('ood_split')
+                    if protocol:
+                        config['ood_split'] = protocol
                 return config
 
             run_specs = []
@@ -1583,6 +1604,8 @@ def main():
                         if parts:
                             run['label'] += '_' + '_'.join(parts)
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
+                    if run['config'].get('ood_split'):
+                        preprocessing_parts.append('ood_' + run['config']['ood_split']['grouping'])
                     if run['config'].get('native_data_filter'):
                         preprocessing_parts.append('clean_' + run['config']['native_data_filter']['sha256'][:8])
                     if run['config'].get('impurity_data_filter'):

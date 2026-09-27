@@ -19,6 +19,7 @@ from .native_filter import (DEFAULT_POLICY, SCHEMA, fit_split, validate_manifest
                             read_manifest, requested_splits, verify_source_table, verify_source_file)
 from .native_was import parse_native_defect
 from .native_quality import DEEP_POLICY, configuration_family, geometry_features
+from .native_splits import with_ood_policy, write_ood_tables
 
 
 def native_filter_policy(profile):
@@ -57,7 +58,7 @@ def prepare_native_filter(run_dir, profile, seeds, cv5, split_iterator,
     """Generate or reuse one frozen filter before graph loading/config validation."""
     run_dir, data_dir = Path(run_dir), Path(data_dir)
     path = run_dir/'native_filter_manifest.json'
-    policy = native_filter_policy(profile)
+    policy = with_ood_policy(native_filter_policy(profile), split_iterator)
     if path.exists():
         manifest = read_manifest(path)
         if manifest['policy'] != policy:
@@ -80,6 +81,7 @@ def prepare_native_filter(run_dir, profile, seeds, cv5, split_iterator,
             json.dump(manifest, handle, indent=2, sort_keys=True, allow_nan=False)
             handle.write('\n')
     write_manifest_tables(manifest, run_dir, prefix='native_filter_')
+    write_ood_tables(manifest, run_dir)
     for split in requested_splits(manifest, seeds, cv5=cv5):
         counts = ', '.join(f'{part} {len(split["original"][part])}->{len(split["kept"][part])}'
                            for part in ('train','val','test'))

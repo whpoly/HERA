@@ -70,6 +70,8 @@ def validate_manifest(manifest):
                 raise ValueError('Native filter kept/excluded IDs do not partition the split')
     if len(loggers) != len(set(loggers)):
         raise ValueError('Duplicate split identities in native filter manifest')
+    from .native_splits import validate_ood_manifest
+    validate_ood_manifest(manifest)
     manifest_identity(manifest)  # Reject non-finite JSON numbers.
     return manifest
 
@@ -186,6 +188,10 @@ def filtered_splits(data, targets, manifest, seeds, cv5=False):
         by_id[sid] = (structure, target)
     for saved in requested_splits(manifest, seeds, cv5):
         split = {key: saved[key] for key in ('display', 'logger_id', 'seed', 'explain_id')}
+        if 'ood_split' in manifest['policy']:
+            from .native_splits import validate_ood_manifest
+            validate_ood_manifest(manifest)
+            split['ood_split'] = manifest['policy']['ood_split']
         for part in ('train', 'val', 'test'):
             ids = saved['kept'][part]
             missing = set(ids)-set(by_id)
