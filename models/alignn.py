@@ -1382,6 +1382,8 @@ class HeteroALIGNN(nn.Module):
     cores with small relation-specific residual adapters.
     Optional defect_energy_mean applies the same head to each actual defect
     before averaging its scalar output, with unchanged message parameters.
+    global_mean reads all graph nodes with equal node weight; defect_global_mean
+    concatenates actual-defect and all-node means before the prediction head.
     """
 
     def __init__(
@@ -1481,7 +1483,7 @@ class HeteroALIGNN(nn.Module):
             for _ in range(gcn_blocks)
         ])
         self.readout = nn.Sequential(
-            nn.Linear(2 * hidden_dim if pooling == "type_mean" else hidden_dim, hidden_dim), nn.SiLU(),
+            nn.Linear(2 * hidden_dim if pooling in {"type_mean", "defect_global_mean"} else hidden_dim, hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.SiLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
@@ -1570,6 +1572,20 @@ class HeteroALIGNN(nn.Module):
             reference,
         )
 
+    def _pool_all_nodes(self, x_dict, batch_dict, num_graphs, reference):
+        # Pool the union of stores, not the mean of their means: each node gets
+        # equal weight even when host/defect counts differ between graphs.
+        features, batches = [], []
+        for node_type, nodes in x_dict.items():
+            if nodes is not None and nodes.size(0):
+                features.append(nodes)
+                batches.append(batch_dict[node_type])
+        if not features:
+            return _pool_mean_or_zeros(None, None, num_graphs, self.hidden_dim, reference)
+        return _pool_mean_or_zeros(
+            torch.cat(features), torch.cat(batches), num_graphs, self.hidden_dim, reference,
+        )
+
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch_dict,
                 edge_vec_dict=None, state=None, pool_type=None):
         edge_vec_dict = {} if edge_vec_dict is None else edge_vec_dict
@@ -1611,6 +1627,15 @@ class HeteroALIGNN(nn.Module):
 
         reference = next(value for value in x_dict.values() if value is not None)
         num_graphs = _graph_count(batch_dict=batch_dict, state=state)
+        if self.pooling in {"global_mean", "defect_global_mean"}:
+            global_pool = self._pool_all_nodes(x_dict, batch_dict, num_graphs, reference)
+            if self.pooling == "global_mean":
+                return self.readout(global_pool)
+            defect_pool = self._pool_fixed_type(
+                x_dict, batch_dict, pool_type, 1, num_graphs, reference,
+                require_nonempty=True,
+            )
+            return self.readout(torch.cat([defect_pool, global_pool], dim=-1))
         if self.pooling in {"defect_mean", "defect_energy_mean"}:
             # pool_type retains the actual defects when r > 0 also marks
             # surrounding pristine sites as members of the defect node store.

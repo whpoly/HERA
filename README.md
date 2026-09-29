@@ -141,6 +141,10 @@ Common arguments:
   `vacancy_mos2` and `vacancy_wse2`, even when `sparse` appears later in an
   explicit `--mode` list. Other datasets do not run the sparse representation.
 - `--dataset`: one or more dataset names, or `all` to run every dataset
+- Native readout comparison (`hetero`, optionally `hetero_was`):
+  `python -m HERA.scripts.run_native_readout_benchmark --seed 123 --device cuda:0`.
+  Compares actual defects, all-node mean, and their concatenation with a shared
+  strict filter and matched splits. See [protocol and server commands](docs/native_readout_benchmark.md).
 - `--mode`: one or more of `sparse`, `full`, `full_x`, `hetero`, `hetero_fixed_pool`, `attention`, `was_x`,
   `hetero_was`, `attention_was`, `definet`, `definet_was`, `hypergraph`, `hypergraph_was`, or `all`
 - `--r`: radius values for hetero local/host boundary sweeps; valid values are
