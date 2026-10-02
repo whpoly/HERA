@@ -4,5 +4,6 @@ __pycache__/
 
 logs/
 results/
+/tmp/official_alignn_native/
 
 .vscode/
