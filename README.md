@@ -110,6 +110,11 @@ For the fixed benchmark range, also pass `--imp2d-energy-window -10 10`.
 The bounds are strict: only `-10 < DFE < 10` eV is retained. Together with the
 reviewed host filter this leaves 10,475 rows; the new run directory is
 `HERA/logs/imp2d_10ev_v1`. See [the current command and verified counts](docs/imp2d_10ev_v1.md).
+For the interstitial-only benchmark, additionally pass `--imp2d-defect-type interstitial`
+and use `HERA/logs/imp2d_interstitial_v1`. Selection uses the relaxed, finite
+`abs(depth) < 1`, including initial adsorption sites that relax inside the monolayer;
+initial `int` names alone are not a selection criterion. All modes share the same
+frozen cohort and structure-group splits. See [the interstitial benchmark](docs/imp2d_interstitial_v1.md).
 See [DB-only results and commands](docs/imp2d_database_preprocessing.md).
 See [the audit, physical criteria and one-command example](docs/impurity_physical_preprocessing.md)
 for verified results and current data-availability limits.

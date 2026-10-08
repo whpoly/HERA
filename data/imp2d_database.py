@@ -23,6 +23,15 @@ HOST_FILTERS = {
         'selection': 'Fixed reviewed host list; no individual energy trimming or prediction-error filtering.',
     },
 }
+INTERSTITIAL_FILTER = {
+    'name': 'interstitial',
+    'source': 'relaxed_depth',
+    'absolute_depth_upper_bound': 1.0,
+    'bounds': 'open',
+    'reason': 'outside_interstitial_benchmark',
+    'missing_depth_reason': 'missing_relaxed_depth',
+    'purpose': 'Fixed benchmark scope; not a physical validity criterion.',
+}
 
 
 def resolve_database(database_path=None):
@@ -36,7 +45,7 @@ def resolve_database(database_path=None):
     return path
 
 
-def database_policy(host_filter=None, energy_window=None):
+def database_policy(host_filter=None, energy_window=None, defect_type=None):
     from .impurity_preprocessing import digest
     policy = copy.deepcopy(POLICY)
     policy.update(version='imp2d_database_physical_v1', source_format=SOURCE_FORMAT,
@@ -57,6 +66,11 @@ def database_policy(host_filter=None, energy_window=None):
             'bounds': 'open', 'reason': 'outside_benchmark_energy_window',
             'purpose': 'Fixed benchmark scope; not a physical validity criterion.',
         })
+    if defect_type is not None:
+        if defect_type != 'interstitial':
+            raise ValueError(f'Unknown IMP2D defect type: {defect_type}')
+        policy.update(version='imp2d_database_interstitial_v1',
+                      defect_type_filter=copy.deepcopy(INTERSTITIAL_FILTER))
     return policy
 
 
@@ -69,6 +83,18 @@ def energy_window_reasons(record, policy):
     return []
 
 
+def defect_type_reasons(record, policy):
+    selection = policy.get('defect_type_filter')
+    if not selection:
+        return []
+    depth = finite(record.get('depth'))
+    if depth is None:
+        return [selection['missing_depth_reason']]
+    if abs(depth) >= selection['absolute_depth_upper_bound']:
+        return [selection['reason']]
+    return []
+
+
 def validate_database_manifest(manifest):
     from .impurity_preprocessing import validate_manifest
     validate_manifest(manifest)
@@ -77,20 +103,26 @@ def validate_database_manifest(manifest):
     rows = {r['source_id']: r for r in manifest['records']}
     host_policy = manifest['policy'].get('host_filter')
     window = manifest['policy'].get('energy_window')
+    defect_filter = manifest['policy'].get('defect_type_filter')
+    if defect_filter is not None and defect_filter != INTERSTITIAL_FILTER:
+        raise ValueError('Invalid IMP2D defect-type filter in frozen policy')
     if window and (window.get('bounds') != 'open' or
                    not -float('inf') < window['lower_ev'] < window['upper_ev'] < float('inf')):
         raise ValueError('Invalid IMP2D energy window in frozen policy')
-    if host_policy or window:
+    if host_policy or window or defect_filter:
         for row in rows.values():
             expected = ([host_policy['reason']]
                         if host_policy and row.get('material') in host_policy['excluded_materials'] else [])
             energy_expected = energy_window_reasons(row, manifest['policy'])
+            defect_expected = defect_type_reasons(row, manifest['policy'])
             if (row.get('cohort_exclusion_reasons', []) != expected or
                     row['quality_reasons'] != row['physical_quality_reasons'] +
-                    row['input_quality_reasons'] + expected + energy_expected):
-                raise ValueError('IMP2D host exclusion or energy window disagrees with frozen cohort policy')
+                    row['input_quality_reasons'] + expected + energy_expected + defect_expected):
+                raise ValueError('IMP2D host exclusion, energy window or defect-type filter disagrees with frozen cohort policy')
             if window and row.get('energy_window_exclusion_reasons') != energy_expected:
                 raise ValueError('IMP2D energy window exclusion disagrees with frozen cohort policy')
+            if defect_filter and row.get('defect_type_exclusion_reasons') != defect_expected:
+                raise ValueError('IMP2D defect-type exclusion disagrees with frozen cohort policy')
     for split in manifest['splits']:
         assigned = {}
         for part in ('train', 'val', 'test'):
@@ -102,11 +134,11 @@ def validate_database_manifest(manifest):
 
 
 def prepare_database_filter(run_dir, seeds, cv5, split_iterator, database_path=None, host_filter=None,
-                            energy_window=None):
+                            energy_window=None, defect_type=None):
     from .impurity_preprocessing import (SCHEMA, digest, requested_splits, write_tables)
     database, run_dir = resolve_database(database_path), Path(run_dir)
     database_sha = digest(database)
-    policy = database_policy(host_filter, energy_window)
+    policy = database_policy(host_filter, energy_window, defect_type)
     manifest_path = run_dir/'imp2d_filter_manifest.json'
     if manifest_path.exists():
         manifest = validate_database_manifest(json.loads(manifest_path.read_text(encoding='utf-8')))
@@ -160,7 +192,7 @@ def prepare_database_filter(run_dir, seeds, cv5, split_iterator, database_path=N
                     print(f'IMP2D db physical filter: {len(records)} rows inspected', flush=True)
         groups, pairs = assign_structure_groups(records, atoms_by_id,
                                                 tolerance=policy['structure_tolerance_angstrom'])
-        # Build the same structure groups before applying the host restriction.
+        # Build the same structure groups before applying benchmark restrictions.
         # Remaining samples therefore keep their previous split membership.
         host_policy = policy.get('host_filter')
         if host_policy:
@@ -173,6 +205,11 @@ def prepare_database_filter(run_dir, seeds, cv5, split_iterator, database_path=N
             for record in records:
                 reasons = energy_window_reasons(record, policy)
                 record['energy_window_exclusion_reasons'] = reasons
+                record['quality_reasons'].extend(reasons)
+        if policy.get('defect_type_filter'):
+            for record in records:
+                reasons = defect_type_reasons(record, policy)
+                record['defect_type_exclusion_reasons'] = reasons
                 record['quality_reasons'].extend(reasons)
         grouped = defaultdict(list)
         for record in records:
@@ -220,6 +257,8 @@ def prepare_database_filter(run_dir, seeds, cv5, split_iterator, database_path=N
         write_host_filter_report(manifest, run_dir)
     if policy.get('energy_window'):
         write_energy_window_report(manifest, run_dir)
+    if policy.get('defect_type_filter'):
+        write_defect_type_report(manifest, run_dir)
     for split in requested_splits(manifest, seeds, cv5):
         print(f'IMP2D db grouped split [{split["display"]}]: '+', '.join(
             f'{p} {len(split["kept"][p])}' for p in ('train', 'val', 'test')), flush=True)
@@ -283,6 +322,7 @@ def write_energy_window_report(manifest, run_dir):
     values = [r['target'] for r in retained]
     summary = {'filter_identity': identity(manifest), 'before_energy_window': len(before),
                'additional_excluded_rows': len(removed), 'retained_rows': len(retained),
+               'benchmark_retained_rows': sum(not r['quality_reasons'] for r in manifest['records']),
                'retained_materials': len({r['material'] for r in retained}),
                'minimum_ev': min(values), 'maximum_ev': max(values),
                'splits': [{'logger_id': s['logger_id'], **{p: len(s['kept'][p]) for p in ('train','val','test')}}
@@ -291,6 +331,35 @@ def write_energy_window_report(manifest, run_dir):
         json.dumps(summary, indent=2, sort_keys=True, allow_nan=False)+'\n', encoding='utf-8')
     window = manifest['policy']['energy_window']
     print(f'IMP2D energy window: {window["lower_ev"]} < DFE < {window["upper_ev"]} eV; '
+          f'{len(before)} -> {len(retained)} rows ({len(removed)} excluded; '
+          'before any defect-type restriction)', flush=True)
+
+
+def write_defect_type_report(manifest, run_dir):
+    """Record the final scope restriction, including initial-to-relaxed migration."""
+    from .impurity_preprocessing import identity
+    run_dir = Path(run_dir)
+    before = [r for r in manifest['records'] if not r['physical_quality_reasons'] and
+              not r['input_quality_reasons'] and not r.get('cohort_exclusion_reasons') and
+              not r.get('energy_window_exclusion_reasons')]
+    retained = [r for r in before if not r['defect_type_exclusion_reasons']]
+    removed = [r for r in before if r['defect_type_exclusion_reasons']]
+    pd.DataFrame(removed).to_csv(run_dir/'imp2d_defect_type_excluded.csv', index=False)
+    summary = {
+        'filter_identity': identity(manifest), 'before_defect_type_filter': len(before),
+        'additional_excluded_rows': len(removed), 'retained_rows': len(retained),
+        'retained_materials': len({r['material'] for r in retained}),
+        'retained_initial_ads_rows': sum(r['site'].startswith('ads') for r in retained),
+        'excluded_initial_int_rows': sum(r['site'].startswith('int') for r in removed),
+        'exclusion_reasons': dict(Counter(reason for r in removed
+                                          for reason in r['defect_type_exclusion_reasons'])),
+        'splits': [{'logger_id': s['logger_id'],
+                    **{p: len(s['kept'][p]) for p in ('train', 'val', 'test')}}
+                   for s in manifest['splits']],
+    }
+    (run_dir/'imp2d_defect_type_summary.json').write_text(
+        json.dumps(summary, indent=2, sort_keys=True, allow_nan=False)+'\n', encoding='utf-8')
+    print(f'IMP2D relaxed interstitials (abs(depth) < 1): '
           f'{len(before)} -> {len(retained)} rows ({len(removed)} excluded)', flush=True)
 
 

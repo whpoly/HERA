@@ -1,5 +1,9 @@
 # IMP2D 固定 −10～10 eV 的 benchmark
 
+2026-10-08：主 benchmark 已改为仅使用弛豫后的 interstitial，增加
+`--imp2d-defect-type interstitial` 并使用独立运行目录。
+见 [interstitial benchmark 和最终命令](imp2d_interstitial_v1.md)。本页保留两类混合的历史版本。
+
 2026-09-25。用户选择固定开区间 `−10 < DFE < 10 eV`。
 通过 `--imp2d-energy-window -10 10` 在读取原始 DB 时自动筛选，无需预先生成 CSV/CIF。
 这是研究范围限制，不把区间外记录一概判为物理错误。

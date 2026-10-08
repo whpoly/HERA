@@ -1224,6 +1224,10 @@ def main():
     parser.add_argument('--imp2d-energy-window', nargs=2, type=float, default=None, metavar=('LOW', 'HIGH'),
                         help='With --imp2d-source db, retain LOW < DFE < HIGH in eV at loading; '
                              'fixed benchmark scope, not a physical validity test (example: -10 10)')
+    parser.add_argument('--imp2d-defect-type', choices=['interstitial'], default=None,
+                        help='With --imp2d-source db, restrict the benchmark to relaxed interstitials '
+                             '(finite abs(depth) < 1), regardless of the initial ads/int site; '
+                             'omitting this option retains both types')
     parser.add_argument('--semi-source-policy', choices=['complete', 'legacy_available'], default='complete',
                         help='With --semi-quality-filter, explicitly preserve the historical readable-source cohort; '
                              'missing files/hosts are logged separately from physical exclusions')
@@ -1369,6 +1373,8 @@ def main():
         parser.error('--imp2d-source db requires --dataset imp2d and --imp2d-quality-filter physical')
     if args.imp2d_host_filter is not None and args.imp2d_source != 'db':
         parser.error('--imp2d-host-filter requires --imp2d-source db')
+    if args.imp2d_defect_type is not None and args.imp2d_source != 'db':
+        parser.error('--imp2d-defect-type requires --imp2d-source db')
     if args.imp2d_energy_window is not None:
         if args.imp2d_source != 'db':
             parser.error('--imp2d-energy-window requires --imp2d-source db')
@@ -1489,7 +1495,8 @@ def main():
                         database_path=args.imp2d_source_db,
                         **({'semi_source_policy': args.semi_source_policy} if dataset_name == 'semi' else {}),
                         **({'imp2d_source': args.imp2d_source, 'imp2d_host_filter': args.imp2d_host_filter,
-                            'imp2d_energy_window': args.imp2d_energy_window}
+                            'imp2d_energy_window': args.imp2d_energy_window,
+                            'imp2d_defect_type': args.imp2d_defect_type}
                            if dataset_name == 'imp2d' else {}),
                     )
             impurity_manifest = impurity_manifests.get(dataset_name)

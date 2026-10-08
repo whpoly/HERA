@@ -38,11 +38,101 @@ class DatabaseInputTests(unittest.TestCase):
                      dopant_chemical_potential=-1., conv1=.001, conv2=.001, converged=True,
                      extension_factor=1., site='int0', depth=0., spin=0)
 
-    def prepare(self, cv5=False, name='run', host_filter=None, energy_window=None):
+    def prepare(self, cv5=False, name='run', host_filter=None, energy_window=None, defect_type=None):
         with redirect_stdout(io.StringIO()):
             return prepare_impurity_filter(self.root/name, 'imp2d', [123], cv5,
                 cli.iter_train_val_test_splits, database_path=self.db, imp2d_source='db',
-                imp2d_host_filter=host_filter, imp2d_energy_window=energy_window)
+                imp2d_host_filter=host_filter, imp2d_energy_window=energy_window,
+                imp2d_defect_type=defect_type)
+
+    def add_relaxed_depth_cases(self):
+        with connect(str(self.db)) as db:
+            for i in range(24):
+                db.update(db.get(name=f'ZnO_H_ads{i}').id, depth=0.)
+            # Both migration directions, both boundaries, and missing metadata.
+            db.update(db.get(name='ZnO_H_ads6').id, name='ZnO_H_int6', site='int6', depth=2.)
+            for i, depth in ((7,-1.),(8,1.),(9,-.999),(10,.999)):
+                db.update(db.get(name=f'ZnO_H_ads{i}').id, depth=depth)
+            db.update(db.get(name='ZnO_H_ads11').id, delete_keys=['depth'])
+
+    def test_interstitial_scope_uses_relaxed_depth_preserves_groups_and_splits(self):
+        self.add_relaxed_depth_cases()
+        self.add_reviewed_host()
+        for cv5 in (False, True):
+            original = self.prepare(cv5=cv5, name=f'mixed_{cv5}', host_filter='reviewed_v1',
+                                    energy_window=(-10,10))
+            clean = self.prepare(cv5=cv5, name=f'int_{cv5}', host_filter='reviewed_v1',
+                                 energy_window=(-10,10), defect_type='interstitial')
+            records = {r['source_id']: r for r in clean['records']}
+            for row in original['records']:
+                updated = records[row['source_id']]
+                for key in ('target', 'structure_group', 'physical_quality_reasons', 'input_quality_reasons'):
+                    self.assertEqual(updated[key], row[key])
+            for before, after in zip(original['splits'], clean['splits']):
+                self.assertEqual(before['original'], after['original'])
+                for part in ('train', 'val', 'test'):
+                    expected = [sid for sid in before['kept'][part]
+                                if records[sid]['depth'] is not None and abs(records[sid]['depth']) < 1]
+                    self.assertEqual(after['kept'][part], expected)
+            for sid in ('ZnO_H_int6', 'ZnO_H_ads7', 'ZnO_H_ads8'):
+                self.assertEqual(records[sid]['defect_type_exclusion_reasons'],
+                                 ['outside_interstitial_benchmark'])
+            self.assertEqual(records['ZnO_H_ads11']['defect_type_exclusion_reasons'],
+                             ['missing_relaxed_depth'])
+            for sid in ('ZnO_H_ads0', 'ZnO_H_ads9', 'ZnO_H_ads10'):
+                self.assertFalse(records[sid]['quality_reasons'])
+            summary = json.loads((self.root/f'int_{cv5}'/'imp2d_defect_type_summary.json').read_text())
+            self.assertEqual((summary['before_defect_type_filter'], summary['additional_excluded_rows'],
+                              summary['retained_rows']), (21,4,17))
+            self.assertEqual(summary['retained_initial_ads_rows'], 17)
+            self.assertEqual(summary['excluded_initial_int_rows'], 1)
+            self.assertEqual(identity(clean), identity(self.prepare(cv5=cv5, name=f'int_{cv5}',
+                host_filter='reviewed_v1', energy_window=(-10,10), defect_type='interstitial')))
+
+    def test_interstitial_filter_rejects_invalid_source_changed_policy_and_tampering(self):
+        self.add_relaxed_depth_cases()
+        with self.assertRaisesRegex(ValueError, 'Unknown IMP2D defect type'):
+            database_policy(defect_type='invalid')
+        for dataset, source in (('imp2d','cif'), ('semi','db')):
+            with self.assertRaisesRegex(ValueError, 'direct database'):
+                prepare_impurity_filter(self.root/'bad', dataset, [123], False,
+                    cli.iter_train_val_test_splits, imp2d_source=source, imp2d_defect_type='interstitial')
+        self.prepare()
+        with self.assertRaisesRegex(ValueError, 'policy changed'):
+            self.prepare(defect_type='interstitial')
+        clean = self.prepare(name='int', defect_type='interstitial')
+        next(r for r in clean['records'] if r['source_id']=='ZnO_H_ads7')['defect_type_exclusion_reasons']=[]
+        with self.assertRaisesRegex(ValueError, 'defect-type'):
+            validate_database_manifest(clean)
+        clean = self.prepare(name='int', defect_type='interstitial')
+        next(r for r in clean['records'] if r['source_id']=='ZnO_H_ads0')['depth']=2.
+        with self.assertRaisesRegex(ValueError, 'defect-type'):
+            validate_database_manifest(clean)
+        clean = self.prepare(name='int', defect_type='interstitial')
+        clean['policy']['defect_type_filter']['absolute_depth_upper_bound']=2.
+        with self.assertRaisesRegex(ValueError, 'defect-type'):
+            validate_database_manifest(clean)
+
+    def test_interstitial_all_representations_share_only_selected_structures(self):
+        self.add_relaxed_depth_cases()
+        manifest = self.prepare(defect_type='interstitial', energy_window=(-10,10))
+        expected = {r['source_id'] for r in manifest['records'] if not r['quality_reasons']}
+        self.assertEqual(len(expected), 17)
+        with patch.object(datasets.Structure, 'from_file', side_effect=AssertionError('CIF forbidden')), \
+                patch.object(datasets.pd, 'read_csv', side_effect=AssertionError('CSV forbidden')):
+            full, hetero, attention, _, targets = datasets.load_data_imp2d('alignn', local_cutoff=0,
+                representations=['full','hetero','attention'], imp2d_preprocessing='reference_v1',
+                impurity_filter_manifest=manifest, imp2d_source_db=self.db)
+        for representation in (full, hetero, attention):
+            self.assertEqual({s.source_id for s in representation}, expected)
+            for structure in representation:
+                marked = [s for s in structure if s.properties['type']]
+                self.assertEqual(len(marked), 1)
+                self.assertEqual(marked[0].properties['was'], 0)
+            split = list(filtered_splits(representation, targets, manifest, [123]))[0]
+            for part in ('train', 'val', 'test'):
+                self.assertEqual({s.source_id for s in split[f'{part}_X']},
+                                 set(manifest['splits'][0]['kept'][part]))
 
     def test_db_and_cif_enforce_the_same_physical_standard(self):
         # Compare observable decisions for the same records through both loaders,
@@ -244,10 +334,12 @@ class DatabaseInputTests(unittest.TestCase):
 
     def test_cli_db_source_passes_database_path_and_one_shared_manifest(self):
         self.add_reviewed_host()
+        self.add_relaxed_depth_cases()
         argv = ['hera','--model','alignn','--dataset','imp2d','--mode','attention_was','hetero_was',
                 '--imp2d-source','db','--imp2d-quality-filter','physical','--imp2d-source-db',str(self.db),
                 '--imp2d-host-filter','reviewed_v1',
                 '--imp2d-energy-window','-10','10',
+                '--imp2d-defect-type','interstitial',
                 '--imp2d-preprocessing','reference_v1','--r','0','--epochs','1','--compact-logs',
                 '--run-dir',str(self.root/'cli'),'--atom-init',str(Path(cli.__file__).parent/'atom_init.json')]
         with patch('sys.argv', argv), patch.object(cli,'train_single_mode',return_value=[.2]) as train, \
@@ -261,8 +353,11 @@ class DatabaseInputTests(unittest.TestCase):
         kept = [sid for s in manifests[0]['splits'] for part in ('train','val','test') for sid in s['kept'][part]]
         self.assertFalse(any(sid.startswith('CO2Ti2_') for sid in kept))
         self.assertNotIn('ZnO_H_ads2',kept)
-        self.assertEqual(len(kept),21)
+        self.assertEqual(len(kept),17)
         self.assertEqual(manifests[0]['policy']['energy_window']['lower_ev'],-10.)
+        self.assertEqual(manifests[0]['policy']['defect_type_filter']['name'], 'interstitial')
+        self.assertNotIn('ZnO_H_int6', kept)
+        self.assertIn('ZnO_H_ads0', kept)
 
 
 if __name__ == '__main__':
