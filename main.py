@@ -290,6 +290,14 @@ def expand_hypergraph_update_runs(mode_runs, update_values, enabled):
 
 def apply_training_overrides(config, args, model_name):
     config = copy.deepcopy(config)
+    if getattr(args, 'point_loss', None) == 'huber_ev':
+        config['optim']['point_loss'] = 'huber_ev'
+        delta = getattr(args, 'huber_delta_ev', None)
+        config['optim']['huber_delta_ev'] = 1.0 if delta is None else delta
+    elif getattr(args, 'point_loss', None) == 'mse':
+        # Preserve the historical default configuration identity.
+        config['optim'].pop('point_loss', None)
+        config['optim'].pop('huber_delta_ev', None)
     if args.train_batch_size is not None:
         config['model']['train_batch_size'] = args.train_batch_size
     if args.test_batch_size is not None:
@@ -1162,6 +1170,10 @@ def main():
     parser.add_argument('--early-stopping-patience', type=int, default=None,
                         help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
+    parser.add_argument('--point-loss', choices=['mse', 'huber_ev'], default=None,
+                        help='Point loss override; huber_ev uses 2*Huber with an eV transition')
+    parser.add_argument('--huber-delta-ev', type=float, default=None,
+                        help='Positive physical-energy transition for --point-loss huber_ev (default: 1 eV)')
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=None,
                         help=('Minimum relative validation MAE decrease that resets '
                               'early stopping patience, in percent (default: 0.5)'))
@@ -1268,6 +1280,11 @@ def main():
                         help='Stop immediately if any sample explanation fails')
 
     args = parser.parse_args()
+    if args.huber_delta_ev is not None:
+        if args.point_loss != 'huber_ev':
+            parser.error('--huber-delta-ev requires --point-loss huber_ev')
+        if not np.isfinite(args.huber_delta_ev) or args.huber_delta_ev <= 0:
+            parser.error('--huber-delta-ev must be finite and > 0')
     if args.protect_existing and not args.resume:
         parser.error('--protect-existing requires --resume')
     warnings.filterwarnings('ignore')
@@ -1611,6 +1628,8 @@ def main():
                         if parts:
                             run['label'] += '_' + '_'.join(parts)
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
+                    if run['config']['optim'].get('point_loss') == 'huber_ev':
+                        preprocessing_parts.append(f'huber_ev_d{run["config"]["optim"]["huber_delta_ev"]:g}')
                     if run['config'].get('ood_split'):
                         preprocessing_parts.append('ood_' + run['config']['ood_split']['grouping'])
                     if run['config'].get('native_data_filter'):

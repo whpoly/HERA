@@ -1,7 +1,24 @@
 """Loss functions."""
 
+import math
 import torch
 import torch.nn.functional as F
+
+
+def huber_ev_loss(preds, scaled_targets, target_std, delta_ev=1.0):
+    """2*Huber in scaled space, with a transition specified in physical eV.
+
+    This matches the existing MSE value/gradient for small residuals and caps
+    the per-residual gradient above delta_ev. Match Scaler's constant-target
+    fallback without changing the legacy normalized smooth_l1/huber behavior.
+    """
+    target_std, delta_ev = float(target_std), float(delta_ev)
+    if not math.isfinite(target_std) or target_std < 0:
+        raise ValueError('Target standard deviation must be finite and nonnegative')
+    if not math.isfinite(delta_ev) or delta_ev <= 0:
+        raise ValueError('Huber delta in eV must be finite and positive')
+    scale = target_std if target_std > 1e-7 else 1.0
+    return 2.0 * F.huber_loss(preds, scaled_targets, delta=delta_ev / scale, reduction='mean')
 
 
 def MSELoss(y, preds, weights=None, reduction='mean'):

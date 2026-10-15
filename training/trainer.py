@@ -31,7 +31,7 @@ from ..models.alignn import (
 )
 from ..models.hypergraph import RegionHypergraphNet
 from ..utils.scaler import Scaler
-from .losses import MAELoss, pairwise_rank_loss
+from .losses import MAELoss, pairwise_rank_loss, huber_ev_loss
 
 
 CGCNN_ATTENTION_TASKS = (
@@ -791,6 +791,11 @@ class MEGNetTrainer:
                     ).lower()
                     if point_loss_name == 'mse':
                         point_loss = mse
+                    elif point_loss_name == 'huber_ev':
+                        point_loss = huber_ev_loss(
+                            preds, scaled_targets, self.scaler.std,
+                            self.config['optim'].get('huber_delta_ev', 1.0),
+                        )
                     elif point_loss_name in ('huber', 'smooth_l1'):
                         point_loss = F.smooth_l1_loss(
                             preds,
@@ -800,7 +805,7 @@ class MEGNetTrainer:
                     else:
                         raise ValueError(
                             f"Unknown point loss: {point_loss_name!r}; "
-                            "choose 'mse' or 'smooth_l1'"
+                            "choose 'mse', 'smooth_l1' or 'huber_ev'"
                         )
 
                     rank_weight = float(

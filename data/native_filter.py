@@ -1,4 +1,4 @@
-"""Frozen, train-fitted native outlier manifests with preserved split membership."""
+"""Frozen native manifests for train-fitted and filter-before-split protocols."""
 import hashlib
 import json
 import math
@@ -11,6 +11,7 @@ from .native_quality import configuration_family, fit_family_fences, geometry_ex
 
 
 SCHEMA = 'native_outliers_v1'
+PREFILTER_SCHEMA = 'native_prefiltered_v1'
 DEFAULT_POLICY = {
     'min_distance_angstrom': 1.0,
     'iqr_multiplier': 3.0,
@@ -22,7 +23,7 @@ DEFAULT_POLICY = {
 
 def manifest_identity(manifest):
     encoded = json.dumps(manifest, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
-    return {'schema': SCHEMA, 'sha256': hashlib.sha256(encoded).hexdigest(), 'policy': manifest['policy']}
+    return {'schema': manifest['schema'], 'sha256': hashlib.sha256(encoded).hexdigest(), 'policy': manifest['policy']}
 
 
 def filter_applies_to_source(source_id, policy):
@@ -36,8 +37,8 @@ def filter_applies_to_source(source_id, policy):
 
 
 def validate_manifest(manifest):
-    if manifest.get('schema') != SCHEMA or manifest.get('dataset') != 'native':
-        raise ValueError('Expected a native_outliers_v1 manifest')
+    if manifest.get('schema') not in (SCHEMA, PREFILTER_SCHEMA) or manifest.get('dataset') != 'native':
+        raise ValueError('Expected a supported native filter manifest')
     scope = manifest['policy'].get('filter_poscar_indices')
     if scope is not None and (not isinstance(scope, list) or not scope
                               or any(type(i) is not int or i < 0 for i in scope)
@@ -50,14 +51,25 @@ def validate_manifest(manifest):
     for sid in ids:
         if '/' in sid or '\\' in sid or sid in ('', '.', '..'):
             raise ValueError('Native filter source IDs must be filenames')
+    partition_ids = ids
+    if manifest['schema'] == PREFILTER_SCHEMA:
+        from .native_population import validate_population
+        if manifest['cv5']:
+            raise ValueError('Prefiltered native manifest requires the declared random-split population policy')
+        population = {**manifest['population_filter'], 'records': records, 'policy': manifest['policy']}
+        validate_population(population)
+        partition_ids = population['kept']
     if not manifest['splits']:
         raise ValueError('Native filter manifest has no splits')
     loggers = []
     for split in manifest['splits']:
         loggers.append(str(split['logger_id']))
         original = [sid for part in ('train', 'val', 'test') for sid in split['original'][part]]
-        if len(original) != len(ids) or set(original) != set(ids):
+        if len(original) != len(partition_ids) or set(original) != set(partition_ids):
             raise ValueError('Native filter split must partition every original source exactly once')
+        if manifest['schema'] == PREFILTER_SCHEMA and (
+                split['kept'] != split['original'] or any(split['excluded'][p] for p in ('train', 'val', 'test'))):
+            raise ValueError('Prefiltered native splits cannot perform further exclusions')
         for part in ('train', 'val', 'test'):
             kept = split['kept'][part]
             keep_set = set(kept)
@@ -119,14 +131,14 @@ def verify_source_file(path, record):
         raise ValueError(f'Native CIF changed since preprocessing: {record["source_id"]}')
 
 
-def fit_split(records, original_split, policy):
-    """Fit once on geometry-valid training labels; never fit on val/test labels."""
+def fit_filter_fences(records, fit_ids, policy):
+    """Fit the shared strict rules on an explicitly supplied reference population."""
     def group_key(row):
         return '/'.join(str(row[field]) for field in policy['group_by'])
 
     by_id = {r['source_id']: r for r in records}
     groups = {}
-    for sid in original_split['train']:
+    for sid in fit_ids:
         row = by_id[sid]
         if not row['quality_reasons']:
             key = group_key(row)
@@ -141,40 +153,54 @@ def fit_split(records, original_split, policy):
         bounds[key] = {'n_train': len(values), 'status': 'fitted', 'q1': float(q1), 'q3': float(q3),
                        'lower_ev': float(q1-width), 'upper_ev': float(q3+width)}
     deep_policy = policy.get('deep_checks')
-    family_fences = fit_family_fences(records, original_split['train'], deep_policy) if deep_policy else {}
+    family_fences = fit_family_fences(records, fit_ids, deep_policy) if deep_policy else {}
+    return bounds, family_fences
+
+
+def apply_filter_fences(records, source_ids, policy, bounds, family_fences, scope='train'):
+    """Apply frozen strict bounds without any fitting or split assignment."""
+    by_id = {r['source_id']: r for r in records}
+    deep_policy = policy.get('deep_checks')
+    kept, excluded = [], []
+    for sid in source_ids:
+        row = by_id[sid]
+        if not filter_applies_to_source(sid, policy):
+            kept.append(sid)
+            continue
+        reasons = list(row['quality_reasons'])
+        group = bounds.get('/'.join(str(row[field]) for field in policy['group_by']), {}) if not reasons else {}
+        if not reasons and group.get('status') == 'fitted':
+            if row['target'] < group['lower_ev']:
+                reasons.append(f'energy_below_{scope}_fence')
+            elif row['target'] > group['upper_ev']:
+                reasons.append(f'energy_above_{scope}_fence')
+        if deep_policy and not row['quality_reasons']:
+            reasons.extend(geometry_exclusions(row, deep_policy))
+            fence = family_fences.get(configuration_family(sid), {})
+            if fence.get('status') == 'fitted':
+                if row['target'] < fence['lower_ev']:
+                    reasons.append(f'energy_below_same_family_{scope}_fence')
+                elif row['target'] > fence['upper_ev']:
+                    reasons.append(f'energy_above_same_family_{scope}_fence')
+                if joint_distortion_exclusion(row, fence, deep_policy):
+                    reasons.append(f'compressed_and_high_energy_vs_same_family_{scope}')
+        if reasons:
+            excluded.append({'source_id': sid, 'reasons': reasons})
+        else:
+            kept.append(sid)
+    return kept, excluded
+
+
+def fit_split(records, original_split, policy):
+    """Fit once on geometry-valid training labels; never fit on val/test labels."""
+    bounds, family_fences = fit_filter_fences(records, original_split['train'], policy)
     kept, excluded = {}, {}
     for part in ('train', 'val', 'test'):
-        kept[part], excluded[part] = [], []
-        for sid in original_split[part]:
-            row = by_id[sid]
-            if not filter_applies_to_source(sid, policy):
-                kept[part].append(sid)
-                continue
-            reasons = list(row['quality_reasons'])
-            group = bounds.get(group_key(row), {}) if not reasons else {}
-            if not reasons and group.get('status') == 'fitted':
-                if row['target'] < group['lower_ev']:
-                    reasons.append('energy_below_train_fence')
-                elif row['target'] > group['upper_ev']:
-                    reasons.append('energy_above_train_fence')
-            if deep_policy and not row['quality_reasons']:
-                reasons.extend(geometry_exclusions(row, deep_policy))
-                fence = family_fences.get(configuration_family(sid), {})
-                if fence.get('status') == 'fitted':
-                    if row['target'] < fence['lower_ev']:
-                        reasons.append('energy_below_same_family_train_fence')
-                    elif row['target'] > fence['upper_ev']:
-                        reasons.append('energy_above_same_family_train_fence')
-                    if joint_distortion_exclusion(row, fence, deep_policy):
-                        reasons.append('compressed_and_high_energy_vs_same_family_train')
-            if reasons:
-                excluded[part].append({'source_id': sid, 'reasons': reasons})
-            else:
-                kept[part].append(sid)
+        kept[part], excluded[part] = apply_filter_fences(records, original_split[part], policy, bounds, family_fences)
         if not kept[part]:
             raise ValueError(f'Native filtering emptied {part}; review the policy before training')
     result = {'original': original_split, 'kept': kept, 'excluded': excluded, 'train_fences': bounds}
-    if deep_policy:
+    if policy.get('deep_checks'):
         result['family_train_fences'] = family_fences
     return result
 

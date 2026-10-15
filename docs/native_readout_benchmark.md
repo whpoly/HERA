@@ -3,6 +3,69 @@
 2026-09-29. This is a prepared server experiment. No local training or measured
 readout ranking has been produced by this change.
 
+2026-10-11: the runner also supports a readout × hidden-width experiment via
+`--pooling` and `--embedding-sizes`. The original three-readout, hidden-64
+defaults and output directories are preserved. See the four-variant native
+experiment below; its accuracy remains unmeasured.
+
+## Native improvement experiment: readout and capacity
+
+The existing native audit found very low training error but weaker validation
+performance on POSCAR0 structures, and a 618,595-parameter Hetero-WAS versus
+215,617 parameters for WAS_X. These observations motivate testing a direct
+global readout path and a smaller backbone; they do not establish causation or
+guarantee an accuracy gain.
+
+Use the same strict native data policy, seed 123, 500-epoch budget, no early
+stopping, MSE training and validation-MAE checkpoint selection for four runs:
+
+| Variant | Readout | Hidden width | Change from baseline |
+|---|---|---:|---|
+| defect_energy_mean_h64 | Actual defect | 64 | Current baseline, freshly trained |
+| defect_global_mean_h64 | Actual defect + all-node mean | 64 | Add a direct global readout path |
+| defect_energy_mean_h32 | Actual defect | 32 | Reduce backbone and fusion capacity |
+| defect_global_mean_h32 | Actual defect + all-node mean | 32 | Combine both changes |
+
+From HERA's parent directory on the server:
+
+```bash
+python -m HERA.scripts.run_native_readout_benchmark --mode hetero_was --pooling defect_energy_mean defect_global_mean --embedding-sizes 64 32 --seed 123 --epochs 500 --device cuda:0 --run-dir HERA/logs/native_hetero_capacity_readout_v1
+```
+
+This focuses on the current native model with the lowest test RMSE. Use
+`--mode hetero hetero_was` in a new output directory for eight runs covering both
+feature modes. Use `--dry-run` to print all commands without preprocessing or
+training. The final comparison reports every declared candidate and selects
+the configuration with the lowest mean validation MAE; test values do not
+affect that selection. A lower validation MAE alone does not establish improved
+test MAE or RMSE, and this runner reports MAE, not a new RMSE measurement.
+
+All variants use a common frozen native filter and ordered splits. Width and
+pooling are the only allowed model-config differences within each feature mode.
+The summary also rejects mismatched target scalers, budgets, incomplete variant
+sets or unplanned configuration changes. For width sweeps, directories include
+the width suffix and the protocol records the full planned matrix. Checkpoints
+from different experiment configurations cannot silently resume this sweep.
+
+Changing width changes the entire backbone and its initialization. At a fixed
+width, concatenation adds H² parameters to the prediction head. This experiment
+can assess the two changes separately and jointly; it is not a comparison with
+identical parameter counts. The baseline is retrained in the same environment
+as the candidates, rather than combining a historical score with fresh runs.
+
+Implementation verification: 39 related tests passed, covering validation-only
+selection, the complete four-candidate report, hidden-width identity, scaler
+and non-ablation config checks, distinct output directories and legacy default
+paths, plus the existing readout forward/backward and checkpoint tests.
+An additional synthetic single-defect forward/backward check passed for all
+four configurations in both hetero feature modes using the full native backbone.
+Hetero-WAS parameter counts are 618,595 / 622,691 / 177,795 / 178,819 in the
+table's order. These are implementation checks, not accuracy measurements;
+the record is `results/native_hetero_capacity_readout_20261011_smoke.json`.
+The historical diagnostic is
+`results/native_hetero_vs_was_x_20260928/report.md`. No new model accuracy is
+claimed before completing training.
+
 ## What changes
 
 All three variants use HeteroALIGNN, with the same node/edge construction,
