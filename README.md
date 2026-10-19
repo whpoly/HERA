@@ -46,6 +46,11 @@ training, explanation, and visualization.
 
 ## Data Preparation
 
+For the separate YBCO CP2K trial, see [the YBCO formation-energy instructions](docs/ybco_formation_trial.md).
+Its dedicated `HERA.scripts.run_ybco_formation` entry point predicts unrelaxed
+configuration formation energies relative to fixed references; it is not a
+relaxed defect-energy or high-concentration interaction benchmark.
+
 This repository does not include the raw datasets or `atom_init.json`.
 
 Before training, make sure the following resources are available in the paths expected by the code:

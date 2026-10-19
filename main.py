@@ -515,7 +515,8 @@ def iter_concentration_transfer_splits(
 def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
                       model_name, dataset_name, log_dir='logs', explain_options=None,
                       run_label=None, cv5=False, resume=False, protect_existing=False,
-                      native_filter_manifest=None, impurity_filter_manifest=None):
+                      native_filter_manifest=None, impurity_filter_manifest=None,
+                      split_iterator=None):
     """Train a single mode and return per-split test losses."""
     log_mode = run_label or mode
     data = dataset[dataset_index_for_mode(mode)]
@@ -531,7 +532,13 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     skipped = 0
     trained = 0
 
-    if config.get('native_data_filter') is not None:
+    if split_iterator is not None:
+        if (native_filter_manifest is not None or impurity_filter_manifest is not None
+                or config.get('native_data_filter') is not None
+                or config.get('impurity_data_filter') is not None):
+            raise ValueError('A custom split iterator cannot override a frozen data filter')
+        splits = split_iterator(data, targets, random_seeds, cv5=cv5)
+    elif config.get('native_data_filter') is not None:
         if dataset_name != 'native' or native_filter_manifest is None:
             raise ValueError('Filtered native training requires its frozen preprocessing manifest')
         if config['native_data_filter'] != manifest_identity(native_filter_manifest):
@@ -608,7 +615,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             split['train_y'],
             split['val_X'],
             split['val_y'],
-            'formation_energy',
+            config.get('target_name', 'formation_energy'),
         )
 
         logger = TrainingLogger(log_dir, model_name, dataset_name, log_mode, split['logger_id'])
