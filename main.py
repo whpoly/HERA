@@ -304,6 +304,8 @@ def apply_training_overrides(config, args, model_name):
         config['model']['test_batch_size'] = args.test_batch_size
     if args.early_stopping_patience is not None:
         config['optim']['early_stopping_patience'] = args.early_stopping_patience
+    if getattr(args, 'early_stopping_monitor_only', False):
+        config['optim']['early_stopping_monitor_only'] = True
     if args.early_stopping_min_delta_percent is not None:
         config['optim']['early_stopping_min_delta_percent'] = (
             args.early_stopping_min_delta_percent
@@ -373,6 +375,40 @@ def cpu_state_dict(model):
         key: value.detach().cpu().clone()
         for key, value in model.state_dict().items()
     }
+
+
+def predict_preserving_training_state(trainer, structures, targets, model_state_dict):
+    """Evaluate a snapshot without rewinding training or replacing validation data."""
+    current_weights = cpu_state_dict(trainer.model)
+    module_modes = [(module, module.training) for module in trainer.model.modules()]
+    validation_structures = trainer.test_structures
+    python_rng, numpy_rng = random.getstate(), np.random.get_state()
+    cuda_devices = sorted({
+        tensor.device.index
+        for tensor in (*trainer.model.parameters(), *trainer.model.buffers())
+        if tensor.device.type == 'cuda'
+    })
+    # predict_structures creates a DataLoader, which also consumes CPU RNG state.
+    with torch.random.fork_rng(devices=cuda_devices):
+        try:
+            return trainer.predict_structures(
+                structures, targets, model_state_dict, return_predictions=True,
+            )
+        finally:
+            trainer.model.load_state_dict(current_weights)
+            trainer.test_structures = validation_structures
+            for module, was_training in module_modes:
+                module.training = was_training
+            random.setstate(python_rng)
+            np.random.set_state(numpy_rng)
+
+
+def write_evaluation_comparison(log_dir, logger_id, record):
+    path = os.path.join(
+        log_dir, f'seed{_checkpoint_safe_id(logger_id)}_evaluation_comparison.json',
+    )
+    atomic_write_text(path, json.dumps(record, indent=2, allow_nan=False) + '\n')
+    return path
 
 
 def is_meaningful_relative_improvement(value, reference, min_delta_percent):
@@ -531,6 +567,9 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
     losses = []
     skipped = 0
     trained = 0
+    monitor_only = bool(config['optim'].get('early_stopping_monitor_only', False))
+    if monitor_only and int(config['optim'].get('early_stopping_patience', 0)) <= 0:
+        raise ValueError('Early-stopping monitoring requires a positive patience')
 
     if split_iterator is not None:
         if (native_filter_manifest is not None or impurity_filter_manifest is not None
@@ -631,6 +670,30 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         epochs_without_improvement = 0
         epochs_completed = 0
         stopped_early = False
+        early_stopping_result = None
+        evaluation_record = {
+            'schema': 'early_stopping_comparison_v1',
+            'model': model_name, 'dataset': dataset_name, 'mode': mode,
+            'run_label': log_mode, 'seed': int(split['seed']),
+            'logger_id': split['logger_id'], 'epochs_requested': int(epochs),
+            'patience': early_stopping_patience,
+            'min_delta_percent': early_stopping_min_delta_percent,
+            'selection': 'minimum validation MAE up to each evaluation stage',
+            'early_stopping': None, 'final': None,
+        }
+        if monitor_only:
+            # An incomplete split restarts from epoch one. Preserve previous
+            # monitoring artifacts so a new attempt cannot expose stale results.
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            for suffix in ('early_stopping_checkpoint.pth',
+                           'early_stopping_test_predictions.csv',
+                           'evaluation_comparison.json'):
+                old_path = os.path.join(
+                    log_dir, f'seed{_checkpoint_safe_id(split["logger_id"])}_{suffix}',
+                )
+                if os.path.isfile(old_path):
+                    os.replace(old_path, f'{old_path}.{stamp}.bak')
+            write_evaluation_comparison(log_dir, split['logger_id'], evaluation_record)
         for epoch in range(epochs):
             mae, mse = trainer.train_one_epoch()
             loss = trainer.evaluate_on_test()
@@ -655,18 +718,50 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             if (
                     early_stopping_patience > 0
                     and epochs_without_improvement >= early_stopping_patience
+                    and early_stopping_result is None
             ):
-                stopped_early = True
                 print(
-                    f'  [{split["display"]}] Early stopping at epoch '
+                    f'  [{split["display"]}] Early-stopping condition at epoch '
                     f'{epochs_completed}/{epochs}: no validation MAE improvement '
                     f'> {early_stopping_min_delta_percent:g}% for '
                     f'{early_stopping_patience} epochs '
                     f'(best={min_loss:.4f} at epoch {best_epoch}).'
                 )
-                break
+                if not monitor_only:
+                    stopped_early = True
+                    break
+                early_mae, predictions = predict_preserving_training_state(
+                    trainer, split['test_X'], split['test_y'], model_best,
+                )
+                early_stopping_result = {
+                    'trigger_epoch': epochs_completed, 'best_epoch': best_epoch,
+                    'best_val_mae': float(min_loss), 'test_mae': float(early_mae),
+                }
+                early_path = os.path.join(
+                    log_dir,
+                    f'seed{_checkpoint_safe_id(split["logger_id"])}_early_stopping_checkpoint.pth',
+                )
+                save_best_checkpoint(
+                    early_path, trainer, model_best, config, split,
+                    model_name, dataset_name, mode, log_mode, min_loss, early_mae,
+                    epochs, epochs_completed, best_epoch, False,
+                    early_stopping_patience, early_stopping_min_delta_percent,
+                    evaluation_stage='early_stopping',
+                    early_stopping_result=early_stopping_result,
+                )
+                write_test_predictions(
+                    log_dir, split['logger_id'], split['test_X'], split['test_y'],
+                    predictions, stage='early_stopping',
+                )
+                logger.log_early_stopping_result(early_mae, min_loss)
+                evaluation_record['early_stopping'] = early_stopping_result
+                write_evaluation_comparison(log_dir, split['logger_id'], evaluation_record)
+                print(
+                    f'  [{split["display"]}] Early-stop snapshot Test MAE: '
+                    f'{early_mae:.6f}; saved {early_path}; continuing training.'
+                )
 
-        if dataset_name in CONCENTRATION_TRANSFER_DATASETS or 'ood_split' in split:
+        if monitor_only or dataset_name in CONCENTRATION_TRANSFER_DATASETS or 'ood_split' in split:
             loss_test, predictions = trainer.predict_structures(
                 split['test_X'],
                 split['test_y'],
@@ -688,7 +783,6 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             loss_test = trainer.predict_structures(
                 split['test_X'], split['test_y'], model_best
             )
-        logger.log_test_result(loss_test)
         checkpoint_path = split_checkpoint_path(log_dir, split['logger_id'])
         save_best_checkpoint(
             checkpoint_path,
@@ -708,7 +802,19 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             stopped_early,
             early_stopping_patience,
             early_stopping_min_delta_percent,
+            **({'evaluation_stage': 'final',
+                'early_stopping_result': early_stopping_result} if monitor_only else {}),
         )
+        if monitor_only:
+            evaluation_record['final'] = {
+                'epochs_completed': epochs_completed, 'best_epoch': best_epoch,
+                'best_val_mae': float(min_loss), 'test_mae': float(loss_test),
+            }
+            comparison_path = write_evaluation_comparison(
+                log_dir, split['logger_id'], evaluation_record,
+            )
+            print(f'  [{split["display"]}] Evaluation comparison saved: {comparison_path}')
+        logger.log_test_result(loss_test)
         print(f'  [{split["display"]}] Best checkpoint saved: {checkpoint_path}')
         print(f'  [{split["display"]}] Test MAE: {loss_test:.4f}')
         trained += 1
@@ -760,11 +866,12 @@ def _scalar_float(value):
     return float(value)
 
 
-def write_test_predictions(log_dir, logger_id, structures, targets, predictions):
+def write_test_predictions(log_dir, logger_id, structures, targets, predictions, stage=None):
     """Write per-structure held-out predictions for transfer and grouped OOD."""
     path = os.path.join(
         log_dir,
-        f'seed{_checkpoint_safe_id(logger_id)}_test_predictions.csv',
+        f'seed{_checkpoint_safe_id(logger_id)}_'
+        f'{stage + "_" if stage else ""}test_predictions.csv',
     )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fields = (
@@ -816,7 +923,8 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
                          model_name, dataset_name, mode, run_label,
                          best_val_mae, test_mae, epochs, epochs_completed,
                          best_epoch, stopped_early, early_stopping_patience,
-                         early_stopping_min_delta_percent):
+                         early_stopping_min_delta_percent, *,
+                         evaluation_stage=None, early_stopping_result=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(
         {
@@ -836,6 +944,9 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
             'stopped_early': bool(stopped_early),
             'early_stopping_patience': int(early_stopping_patience),
             'early_stopping_min_delta_percent': float(early_stopping_min_delta_percent),
+            **({'evaluation_stage': evaluation_stage,
+                'early_stopping_result': copy.deepcopy(early_stopping_result)}
+               if evaluation_stage is not None else {}),
             'split': {
                 'display': split['display'],
                 'logger_id': split['logger_id'],
@@ -1177,6 +1288,9 @@ def main():
     parser.add_argument('--early-stopping-patience', type=int, default=None,
                         help=('Stop any model after this many epochs without meaningful '
                               'validation improvement (default: 50; 0 disables)'))
+    parser.add_argument('--early-stopping-monitor-only', action='store_true',
+                        help='At the first early-stopping trigger, test/save the best-so-far '
+                             'validation checkpoint, then continue to --epochs and test again')
     parser.add_argument('--point-loss', choices=['mse', 'huber_ev'], default=None,
                         help='Point loss override; huber_ev uses 2*Huber with an eV transition')
     parser.add_argument('--huber-delta-ev', type=float, default=None,
@@ -1315,6 +1429,8 @@ def main():
             and args.early_stopping_patience < 0
     ):
         parser.error('--early-stopping-patience must be >= 0')
+    if args.early_stopping_monitor_only and args.early_stopping_patience == 0:
+        parser.error('--early-stopping-monitor-only requires a positive patience')
     if (
             args.early_stopping_min_delta_percent is not None
             and not 0 <= args.early_stopping_min_delta_percent < 100
@@ -1766,7 +1882,8 @@ def main():
                 early_stopping_patience = config['optim'].get('early_stopping_patience', 0)
                 if early_stopping_patience:
                     print(
-                        '  Early stopping: '
+                        '  Early stopping'
+                        f'{" (monitor only; training continues)" if config["optim"].get("early_stopping_monitor_only") else ""}: '
                         f'patience={early_stopping_patience}, '
                         'minimum relative improvement='
                         f'{config["optim"].get("early_stopping_min_delta_percent", 0):g}%'

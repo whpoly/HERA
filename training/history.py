@@ -73,12 +73,19 @@ class TrainingLogger:
 
     def log_test_result(self, test_mae):
         """Append a final summary row with the test MAE."""
+        self._log_evaluation("TEST", test_mae)
+
+    def log_early_stopping_result(self, test_mae, best_val_mae):
+        """Record an intermediate test; it must never mark the run complete."""
+        self._log_evaluation("EARLY_STOP_TEST", test_mae, best_val_mae)
+
+    def _log_evaluation(self, stage, test_mae, best_val_mae=None):
         self.rows.append({
-            "epoch": "TEST",
+            "epoch": stage,
             "train_mae": "",
             "train_mse": "",
             "val_mae": "",
-            "best_val_mae": "",
+            "best_val_mae": "" if best_val_mae is None else f"{best_val_mae:.6f}",
             "lr": "",
             "test_mae": f"{test_mae:.6f}",
         })
