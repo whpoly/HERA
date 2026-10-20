@@ -14,7 +14,52 @@ has 43 distinct dataset/mode combinations and 129 training runs across three see
 The loss remains MSE; Huber is optional with `--point-loss huber_ev
 --huber-delta-ev 1.0`. Nothing trains locally merely by preparing this command.
 
-## Automatic Huber calibration
+## Automatic thresholds without extra training
+
+Use `train_mad` to compute thresholds directly from training labels, with no
+reference-model initialization, forward/backward passes or extra training epochs:
+
+```bash
+python -m HERA.scripts.run_all_dataset_benchmark --seed 11 42 1245 --epochs 500 --point-loss huber_ev --huber-auto-calibrate --huber-calibration-method train_mad --early-stopping-patience 50 --early-stopping-min-delta-percent 0.5 --device cuda:0 --native-preparation-dir HERA/logs/native_filter_le15_no_poscar0_3seeds --run-dir HERA/logs/all5_3seeds_huber_train_mad_v1
+```
+
+For each dataset and outer split seed, this computes:
+
+```text
+scale = median(abs(train_y - median(train_y))) / 0.6744897501960817
+delta = max(1e-6, 1.345 * scale)
+```
+
+The multiplier is configurable with `--huber-calibration-multiplier`. The value
+1.345 is a starting heuristic here, not a validated optimum for label-based
+thresholds. The rule estimates **label spread**, not prediction-error/noise
+spread. Between-material energy differences can therefore make delta too large,
+leaving most prediction errors in the MSE region. No MAE improvement is promised.
+
+If MAD is zero, use IQR/1.3489795003921634, then population standard deviation,
+then the positive floor. These fallbacks preserve invariance to shifts in the
+energy zero. The manifest records the method used and the training-label median,
+quartiles, range, scale and delta.
+
+Only the training labels determine the threshold. All modes within the same
+dataset/seed share the frozen value; different seeds may have different values.
+Thresholds use the original target units (eV, or eV/site for 2DMD). There are no
+fold predictions or reference fits; `--huber-calibration-folds` and
+`--huber-calibration-epochs` do not apply and can be omitted.
+
+The preparation stage still reads structures through the existing data loader
+and split/filter code to preserve sample membership. This has data-reading
+overhead, but it does not train a model. The 129 formal benchmark runs are
+unchanged: 500 epochs, monitor-only early stopping, no Hypergraph, DD dropped
+for native/semi/imp2d Hetero modes and retained only for 2DMD-low/high.
+
+The existing manifest/config/checkpoint checks and threshold summary apply.
+Use a new run directory rather than mixing this method with OOF or manual delta
+results. OOF remains the default method for compatibility with earlier commands;
+the explicit `--huber-calibration-method train_mad` selects the no-extra-training
+method above.
+
+## Automatic Huber calibration using OOF reference fits
 
 After syncing the source to the server, run this from HERA's parent directory:
 

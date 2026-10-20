@@ -36,7 +36,9 @@ def parse_args(argv=None):
                         metavar='DATASET=EV',
                         help='Per-dataset transitions, e.g. native=1 2dmd_low=0.01; requires huber_ev')
     parser.add_argument('--huber-auto-calibrate', action='store_true',
-                        help='Calibrate shared per-seed thresholds from training-only MSE OOF residuals')
+                        help='Compute shared per-seed thresholds using the selected calibration method')
+    parser.add_argument('--huber-calibration-method', choices=('oof', 'train_mad'), default='oof',
+                        help='oof fits reference models; train_mad uses training labels without fitting')
     parser.add_argument('--huber-calibration-folds', type=int, default=3)
     parser.add_argument('--huber-calibration-epochs', type=int, default=200)
     parser.add_argument('--huber-calibration-multiplier', type=float, default=1.345)
@@ -57,7 +59,10 @@ def parse_args(argv=None):
                                      or args.huber_delta_ev is not None
                                      or args.huber_delta_ev_by_dataset):
         parser.error('--huber-auto-calibrate requires huber_ev and no manual thresholds')
-    if (args.huber_calibration_folds < 2 or args.huber_calibration_epochs < 1
+    if args.huber_calibration_method != 'oof' and not args.huber_auto_calibrate:
+        parser.error('--huber-calibration-method requires --huber-auto-calibrate')
+    if ((args.huber_calibration_method == 'oof'
+         and (args.huber_calibration_folds < 2 or args.huber_calibration_epochs < 1))
             or not math.isfinite(args.huber_calibration_multiplier)
             or args.huber_calibration_multiplier <= 0):
         parser.error('Calibration requires folds >= 2 and finite positive epochs/multiplier')
@@ -108,11 +113,17 @@ def benchmark_protocol(args):
     )
     deltas = huber_deltas(args)
     if args.huber_auto_calibrate:
-        protocol['huber_calibration'] = dict(
-            method='huber_training_oof_v1', reference='alignn/was_x',
-            folds=args.huber_calibration_folds, epochs=args.huber_calibration_epochs,
-            multiplier=args.huber_calibration_multiplier,
-        )
+        if args.huber_calibration_method == 'train_mad':
+            protocol['huber_calibration'] = dict(
+                method='huber_training_target_mad_v1', fit_scope='outer training labels only',
+                multiplier=args.huber_calibration_multiplier,
+            )
+        else:
+            protocol['huber_calibration'] = dict(
+                method='huber_training_oof_v1', reference='alignn/was_x',
+                folds=args.huber_calibration_folds, epochs=args.huber_calibration_epochs,
+                multiplier=args.huber_calibration_multiplier,
+            )
     if deltas:
         if len(set(deltas.values())) == 1:
             # Keep existing uniform-Huber protocol files compatible.
@@ -149,8 +160,9 @@ def calibration_directory(args, dataset):
 def calibration_command(command, args, dataset):
     """Keep reference data/graph settings, removing irrelevant Hetero options."""
     output, i = [], 0
-    replacements = {'--point-loss': 'mse', '--epochs': str(args.huber_calibration_epochs),
-                    '--early-stopping-patience': '0'}
+    replacements = {'--point-loss': 'mse', '--early-stopping-patience': '0'}
+    if args.huber_calibration_method == 'oof':
+        replacements['--epochs'] = str(args.huber_calibration_epochs)
     while i < len(command):
         token = command[i]
         if token == '--mode':
@@ -169,8 +181,10 @@ def calibration_command(command, args, dataset):
             output.append(token)
             i += 1
     output += ['--calibrate-huber-only', str(calibration_directory(args, dataset)),
-               '--huber-calibration-folds', str(args.huber_calibration_folds),
+               '--huber-calibration-method', args.huber_calibration_method,
                '--huber-calibration-multiplier', str(args.huber_calibration_multiplier)]
+    if args.huber_calibration_method == 'oof':
+        output += ['--huber-calibration-folds', str(args.huber_calibration_folds)]
     return output
 
 
@@ -287,9 +301,12 @@ def summarize(args):
             path = calibration_directory(args, dataset) / 'manifest.json'
             if path.exists():
                 manifest = read_calibration(path)
-                expected = dict(dataset=dataset, seeds=args.seed, folds=args.huber_calibration_folds,
-                                epochs=args.huber_calibration_epochs,
+                expected = dict(dataset=dataset, seeds=args.seed,
+                                schema=protocol['huber_calibration']['method'],
                                 multiplier=args.huber_calibration_multiplier)
+                if args.huber_calibration_method == 'oof':
+                    expected.update(folds=args.huber_calibration_folds,
+                                    epochs=args.huber_calibration_epochs)
                 if any(manifest['protocol'].get(key) != value for key, value in expected.items()):
                     raise ValueError(f'Calibration protocol mismatch: {path}')
                 calibrations[dataset] = manifest
@@ -394,8 +411,12 @@ def main(argv=None):
     print(f'Datasets: {args.dataset}; seeds: {args.seed}; epochs: {args.epochs}; '
           f'loss: {args.point_loss}; Hypergraph disabled; early stopping only records/tests.', flush=True)
     if args.huber_auto_calibrate:
-        print(f'Huber: training-only {args.huber_calibration_folds}-fold calibration; '
-              f'{args.huber_calibration_epochs} epochs/fold; shared across all modes.', flush=True)
+        if args.huber_calibration_method == 'train_mad':
+            print('Huber: training-label MAD; no reference-model training; '
+                  'shared across all modes for each dataset/seed.', flush=True)
+        else:
+            print(f'Huber: training-only {args.huber_calibration_folds}-fold calibration; '
+                  f'{args.huber_calibration_epochs} epochs/fold; shared across all modes.', flush=True)
     elif args.point_loss == 'huber_ev':
         print(f'Huber transitions (eV): {huber_deltas(args)}', flush=True)
     if args.dry_run:

@@ -69,7 +69,8 @@ from .data.datasets import (
 )
 from .training.trainer import MEGNetTrainer
 from .training.huber_calibration import (
-    calibrate as calibrate_huber, calibration_identity, read_calibration, resolved_delta,
+    calibrate as calibrate_huber, calibrate_train_targets, TARGET_SCHEMA,
+    calibration_identity, read_calibration, resolved_delta,
 )
 from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
 from .data.native_filter import read_manifest, manifest_identity, requested_splits, filtered_splits
@@ -1321,9 +1322,11 @@ def main():
     parser.add_argument('--huber-delta-ev', type=float, default=None,
                         help='Positive physical-energy transition for --point-loss huber_ev (default: 1 eV)')
     parser.add_argument('--huber-calibration-manifest',
-                        help='Frozen training-only OOF calibration, shared across modes for each seed')
+                        help='Frozen training-only threshold calibration, shared across modes for each seed')
     parser.add_argument('--calibrate-huber-only', metavar='OUTPUT_DIR',
-                        help='Calibrate with ALIGNN WAS-X/MSE on training-only folds, then exit')
+                        help='Compute shared thresholds with the selected calibration method, then exit')
+    parser.add_argument('--huber-calibration-method', choices=('oof', 'train_mad'), default='oof',
+                        help='oof fits reference models; train_mad uses training labels without fitting')
     parser.add_argument('--huber-calibration-folds', type=int, default=3)
     parser.add_argument('--huber-calibration-multiplier', type=float, default=1.345)
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=None,
@@ -1440,7 +1443,8 @@ def main():
         if (args.model != 'alignn' or args.mode != ['was_x'] or args.cv5
                 or args.point_loss not in (None, 'mse') or args.early_stopping_monitor_only):
             parser.error('Calibration requires ALIGNN --mode was_x, MSE, no cv5 or monitor-only')
-        if (args.epochs < 1 or args.huber_calibration_folds < 2
+        if ((args.huber_calibration_method == 'oof'
+             and (args.epochs < 1 or args.huber_calibration_folds < 2))
                 or not np.isfinite(args.huber_calibration_multiplier)
                 or args.huber_calibration_multiplier <= 0):
             parser.error('Calibration requires positive epochs/multiplier and at least two folds')
@@ -1808,8 +1812,10 @@ def main():
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
                     if run['config']['optim'].get('point_loss') == 'huber_ev':
                         calibration = run['config']['optim'].get('huber_calibration')
+                        calibration_tag = ('train_mad' if calibration
+                                           and calibration['schema'] == TARGET_SCHEMA else 'oof')
                         preprocessing_parts.append(
-                            f'huber_oof_{calibration["sha256"][:8]}' if calibration else
+                            f'huber_{calibration_tag}_{calibration["sha256"][:8]}' if calibration else
                             f'huber_ev_d{run["config"]["optim"]["huber_delta_ev"]:g}'
                         )
                     if run['config'].get('ood_split'):
@@ -1855,6 +1861,12 @@ def main():
                     native_filter_manifest=native_filter_manifest,
                     impurity_filter_manifest=impurity_manifest,
                 )
+                if args.huber_calibration_method == 'train_mad':
+                    calibrate_train_targets(
+                        splits, run['config'], dataset_name, args.calibrate_huber_only,
+                        args.huber_calibration_multiplier,
+                    )
+                    return
                 groups = {str(r['source_id']): str(r['structure_group'])
                           for r in (impurity_manifest or {}).get('records', [])
                           if r.get('structure_group') is not None}

@@ -1,4 +1,4 @@
-"""Shared Huber thresholds from training-only, out-of-fold MSE residuals."""
+"""Shared Huber thresholds from training targets or training-only OOF residuals."""
 
 import copy
 import hashlib
@@ -12,6 +12,7 @@ from .results import atomic_write_text
 
 
 SCHEMA = 'huber_training_oof_v1'
+TARGET_SCHEMA = 'huber_training_target_mad_v1'
 
 
 def digest(value):
@@ -65,6 +66,67 @@ def residual_threshold(residuals, multiplier=1.345, floor_ev=1e-6):
                 floor_applied=multiplier * scale < floor_ev)
 
 
+def target_threshold(targets, multiplier=1.345, floor_ev=1e-6):
+    """A label-scale heuristic, not an estimate of prediction error or noise."""
+    values = np.asarray([float(y) for y in targets], dtype=float).reshape(-1)
+    if not len(values) or not np.isfinite(values).all():
+        raise ValueError('Calibration needs nonempty, finite training targets')
+    if not all(math.isfinite(v) and v > 0 for v in (multiplier, floor_ev)):
+        raise ValueError('Calibration multiplier and floor must be finite and positive')
+    q0, q25, median, q75, q100 = map(float, np.quantile(values, [0., .25, .5, .75, 1.]))
+    mad = float(np.median(np.abs(values - median)))
+    scale, method = mad / 0.6744897501960817, 'normal_consistent_target_mad'
+    if scale == 0:
+        scale, method = (q75 - q25) / 1.3489795003921634, 'normal_consistent_target_iqr'
+    if scale == 0:
+        scale, method = float(np.std(values)), 'target_standard_deviation'
+    delta = max(multiplier * scale, floor_ev)
+    if not math.isfinite(delta):
+        raise ValueError('Non-finite training-label Huber threshold')
+    return dict(delta_ev=delta, scale_ev=scale, scale_method=method, n=len(values),
+                median_target_ev=median, mad_ev=mad, q25_ev=q25, q75_ev=q75,
+                min_ev=q0, max_ev=q100, floor_applied=multiplier * scale < floor_ev)
+
+
+def calibrate_train_targets(splits, config, dataset_name, output, multiplier=1.345):
+    """Compute and freeze per-split thresholds without instantiating any model."""
+    target_threshold([0.], multiplier)
+    splits = list(splits)
+    if not splits or len({int(s['seed']) for s in splits}) != len(splits):
+        raise ValueError('Calibration requires distinct, nonempty seeded splits')
+    protocol = dict(
+        schema=TARGET_SCHEMA, dataset=dataset_name, seeds=[int(s['seed']) for s in splits],
+        multiplier=multiplier, floor_ev=1e-6, fit_scope='outer training labels only',
+        formula='max(floor_ev, multiplier * MAD(train_y) / 0.6744897501960817)',
+        fallback='IQR / 1.3489795003921634, then population std, then floor',
+        data_config={key: copy.deepcopy(config[key]) for key in (
+            'native_data_filter', 'impurity_data_filter', 'native_preprocessing',
+            'semi_preprocessing', 'imp2d_preprocessing', 'target_name',
+        ) if key in config},
+    )
+    output = Path(output)
+    protocol_path = output / 'protocol.json'
+    if protocol_path.exists() and json.loads(protocol_path.read_text(encoding='utf-8')) != protocol:
+        raise ValueError('Existing Huber calibration protocol differs; use a new run directory')
+    records = {}
+    for split in splits:
+        identity = split_identity(split)
+        statistics = target_threshold(split['train_y'], multiplier)
+        records[str(identity['seed'])] = dict(identity=identity, statistics=statistics)
+        print(f'  Training-label Huber delta: {dataset_name} seed={identity["seed"]}: '
+              f'{statistics["delta_ev"]:.8g} (no calibration training)', flush=True)
+    manifest = dict(schema=TARGET_SCHEMA, dataset=dataset_name, protocol=protocol, splits=records,
+                    target_unit='eV/site' if dataset_name.startswith('2dmd_') else 'eV')
+    manifest['sha256'] = digest(manifest)
+    calibration_identity(manifest)
+    path = output / 'manifest.json'
+    if path.exists() and read_calibration(path) != manifest:
+        raise ValueError('Completed Huber calibration changed; use a new run directory')
+    atomic_write_text(protocol_path, json.dumps(protocol, indent=2, allow_nan=False) + '\n')
+    atomic_write_text(path, json.dumps(manifest, indent=2, allow_nan=False) + '\n')
+    return manifest
+
+
 def grouped_folds(groups, n_splits, seed):
     """Seeded, size-balanced group assignment, preserving known equivalences."""
     if n_splits < 2:
@@ -106,7 +168,7 @@ def inner_partition(pool, groups, seed):
 
 
 def calibration_identity(manifest):
-    if manifest.get('schema') != SCHEMA or not manifest.get('splits'):
+    if manifest.get('schema') not in (SCHEMA, TARGET_SCHEMA) or not manifest.get('splits'):
         raise ValueError('Invalid or incomplete Huber calibration manifest')
     if manifest.get('sha256') != digest({k: v for k, v in manifest.items() if k != 'sha256'}):
         raise ValueError('Huber calibration manifest checksum mismatch')
@@ -114,7 +176,7 @@ def calibration_identity(manifest):
         delta = record['statistics']['delta_ev']
         if not math.isfinite(delta) or delta <= 0 or key != str(record['identity']['seed']):
             raise ValueError('Invalid calibrated threshold or seed')
-    return dict(schema=SCHEMA, dataset=manifest['dataset'], sha256=manifest['sha256'],
+    return dict(schema=manifest['schema'], dataset=manifest['dataset'], sha256=manifest['sha256'],
                 splits={key: dict(identity=record['identity'],
                                   delta_ev=record['statistics']['delta_ev'])
                         for key, record in manifest['splits'].items()})

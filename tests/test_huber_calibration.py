@@ -102,6 +102,85 @@ class HuberCalibrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 calibration.residual_threshold(residuals)
 
+    def test_target_mad_is_translation_invariant_and_has_label_scale_fallbacks(self):
+        labels = np.array([-2., -1., 0., 1., 2.])
+        delta = calibration.target_threshold(labels)['delta_ev']
+        self.assertAlmostEqual(delta, 1.345 / .6744897501960817)
+        self.assertAlmostEqual(calibration.target_threshold(labels + 100)['delta_ev'], delta)
+        self.assertAlmostEqual(calibration.target_threshold(labels * .01)['delta_ev'], delta * .01)
+        # One remote outlier does not inflate MAD in this example.
+        self.assertAlmostEqual(calibration.target_threshold([-2., -1., 0., 1., 10000.])['delta_ev'], delta)
+        self.assertEqual(calibration.target_threshold([5., 5., 5.])['delta_ev'], 1e-6)
+        self.assertEqual(calibration.target_threshold([0., 0., 0., 1.])['scale_method'],
+                         'normal_consistent_target_iqr')
+        self.assertEqual(calibration.target_threshold([0., 0., 0., 0., 1.])['scale_method'],
+                         'target_standard_deviation')
+        for labels in ([], [float('nan')], [float('inf')]):
+            with self.assertRaises(ValueError):
+                calibration.target_threshold(labels)
+
+    def test_target_calibration_uses_train_labels_only_and_preserves_frozen_result(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            split = example_split()
+            split['val_y'], split['test_y'] = object(), object()
+            manifest = calibration.calibrate_train_targets([split], {}, 'native', directory)
+            expected = calibration.target_threshold(split['train_y'])['delta_ev']
+            self.assertEqual(manifest['splits']['11']['statistics']['delta_ev'], expected)
+            self.assertEqual(manifest['schema'], calibration.TARGET_SCHEMA)
+            self.assertEqual(manifest, calibration.calibrate_train_targets([split], {}, 'native', directory))
+            self.assertFalse(list(Path(directory).rglob('fold*.json')))
+            original = (Path(directory) / 'manifest.json').read_bytes()
+            split['train_y'][0] += 1.
+            with self.assertRaisesRegex(ValueError, 'calibration changed'):
+                calibration.calibrate_train_targets([split], {}, 'native', directory)
+            self.assertEqual((Path(directory) / 'manifest.json').read_bytes(), original)
+
+    def test_target_calibration_cli_never_constructs_trainer_and_modes_share_delta(self):
+        data, y = example_data()
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args = runner.parse_args([
+                '--dataset', '2dmd_low', '--seed', '11', '--point-loss', 'huber_ev',
+                '--huber-auto-calibrate', '--huber-calibration-method', 'train_mad',
+                '--run-dir', directory, '--device', 'cpu',
+            ])
+            preparation, training = runner.build_commands(args)
+            self.assertNotIn('--huber-calibration-folds', preparation)
+            with patch('sys.argv', preparation[3:]), \
+                    patch.object(cli, 'load_dataset', return_value=(*([data] * 4), y)), \
+                    patch.object(cli, 'MEGNetTrainer', side_effect=AssertionError('No extra training')) as trainer, \
+                    patch.object(cli, 'train_single_mode') as train:
+                cli.main()
+                trainer.assert_not_called()
+                train.assert_not_called()
+            manifest = calibration.read_calibration(
+                runner.calibration_directory(args, '2dmd_low') / 'manifest.json')
+            self.assertEqual(manifest['schema'], calibration.TARGET_SCHEMA)
+            with patch('sys.argv', training[3:]), \
+                    patch.object(cli, 'load_dataset', return_value=(*([data] * 4), y)), \
+                    patch.object(cli, 'train_single_mode', return_value=[.1]) as train:
+                cli.main()
+            self.assertEqual(train.call_count, 9)
+            for call in train.call_args_list:
+                config = call.args[1]
+                self.assertEqual(config['optim']['huber_calibration']['sha256'], manifest['sha256'])
+                self.assertEqual(calibration.resolved_delta(config, example_split(), '2dmd_low'),
+                                 manifest['splits']['11']['statistics']['delta_ev'])
+            summary = runner.summarize(args)
+            self.assertEqual(summary['huber_calibrations']['2dmd_low']['schema'], calibration.TARGET_SCHEMA)
+
+    def test_label_and_oof_calibrations_cannot_share_a_run_directory(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            manifest = self.calibrate(directory)
+            with self.assertRaisesRegex(ValueError, 'protocol differs'):
+                calibration.calibrate_train_targets([example_split()], {}, 'native', directory)
+            self.assertEqual(calibration.read_calibration(Path(directory) / 'manifest.json'), manifest)
+        oof = runner.parse_args(['--point-loss', 'huber_ev', '--huber-auto-calibrate'])
+        labels = runner.parse_args([
+            '--point-loss', 'huber_ev', '--huber-auto-calibrate', '--huber-calibration-method', 'train_mad'])
+        self.assertNotEqual(runner.benchmark_protocol(oof), runner.benchmark_protocol(labels))
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            runner.parse_args(['--huber-calibration-method', 'train_mad'])
+
     def test_all_training_samples_get_out_of_fold_predictions_without_outer_holdouts(self):
         split = example_split()
         split['val_y'], split['test_y'] = object(), object()  # Reading these must fail.
