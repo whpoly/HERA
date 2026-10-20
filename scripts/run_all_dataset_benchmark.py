@@ -30,11 +30,16 @@ def parse_args(argv=None):
     parser.add_argument('--early-stopping-patience', type=int, default=50)
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=0.5)
     parser.add_argument('--point-loss', choices=('mse', 'huber_ev'), default='mse')
-    parser.add_argument('--huber-delta-ev', type=float, default=1.0,
+    parser.add_argument('--huber-delta-ev', type=float,
                         help='Global Huber transition in eV; fallback for datasets without an override')
     parser.add_argument('--huber-delta-ev-by-dataset', nargs='+', action='extend', default=[],
                         metavar='DATASET=EV',
                         help='Per-dataset transitions, e.g. native=1 2dmd_low=0.01; requires huber_ev')
+    parser.add_argument('--huber-auto-calibrate', action='store_true',
+                        help='Calibrate shared per-seed thresholds from training-only MSE OOF residuals')
+    parser.add_argument('--huber-calibration-folds', type=int, default=3)
+    parser.add_argument('--huber-calibration-epochs', type=int, default=200)
+    parser.add_argument('--huber-calibration-multiplier', type=float, default=1.345)
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--run-dir', type=Path,
                         default=ROOT / 'logs/all5_3seeds_early_stop_monitor')
@@ -48,6 +53,15 @@ def parse_args(argv=None):
         parser.error('Seeds must be nonnegative; epochs and monitoring patience must be positive')
     if not 0 <= args.early_stopping_min_delta_percent < 100:
         parser.error('--early-stopping-min-delta-percent must be in [0, 100)')
+    if args.huber_auto_calibrate and (args.point_loss != 'huber_ev'
+                                     or args.huber_delta_ev is not None
+                                     or args.huber_delta_ev_by_dataset):
+        parser.error('--huber-auto-calibrate requires huber_ev and no manual thresholds')
+    if (args.huber_calibration_folds < 2 or args.huber_calibration_epochs < 1
+            or not math.isfinite(args.huber_calibration_multiplier)
+            or args.huber_calibration_multiplier <= 0):
+        parser.error('Calibration requires folds >= 2 and finite positive epochs/multiplier')
+    args.huber_delta_ev = 1.0 if args.huber_delta_ev is None else args.huber_delta_ev
     if not math.isfinite(args.huber_delta_ev) or args.huber_delta_ev <= 0:
         parser.error('--huber-delta-ev must be finite and positive')
     args.seed = list(dict.fromkeys(args.seed))
@@ -79,7 +93,7 @@ def parse_args(argv=None):
 
 def huber_deltas(args):
     """Resolve physical thresholds once per dataset, shared by all modes/seeds."""
-    if args.point_loss != 'huber_ev':
+    if args.point_loss != 'huber_ev' or args.huber_auto_calibrate:
         return {}
     return {dataset: args.huber_delta_ev_by_dataset.get(dataset, args.huber_delta_ev)
             for dataset in args.dataset}
@@ -93,6 +107,12 @@ def benchmark_protocol(args):
         huber_delta_ev=None,
     )
     deltas = huber_deltas(args)
+    if args.huber_auto_calibrate:
+        protocol['huber_calibration'] = dict(
+            method='huber_training_oof_v1', reference='alignn/was_x',
+            folds=args.huber_calibration_folds, epochs=args.huber_calibration_epochs,
+            multiplier=args.huber_calibration_multiplier,
+        )
     if deltas:
         if len(set(deltas.values())) == 1:
             # Keep existing uniform-Huber protocol files compatible.
@@ -111,13 +131,47 @@ def validate_protocol(args):
 
 
 def modes_for_dataset(dataset):
-    # Full-X is identical to Full for these two vacancy-free datasets.
-    return [mode for mode in MODES if mode != 'full_x' or dataset not in ('semi', 'imp2d')]
+    # At r=0 fixed pooling duplicates Hetero and main.py already skips it.
+    # Full-X also duplicates Full on these two vacancy-free datasets.
+    return [mode for mode in MODES if mode != 'hetero_fixed_pool'
+            and (mode != 'full_x' or dataset not in ('semi', 'imp2d'))]
 
 
 def mode_directory(args, dataset, mode):
     label = f'{mode}_no_dd' if dataset in ('native', 'semi', 'imp2d') and mode in HETERO_MODES else mode
     return args.run_dir / 'alignn' / dataset / label
+
+
+def calibration_directory(args, dataset):
+    return args.run_dir / 'huber_calibration' / dataset
+
+
+def calibration_command(command, args, dataset):
+    """Keep reference data/graph settings, removing irrelevant Hetero options."""
+    output, i = [], 0
+    replacements = {'--point-loss': 'mse', '--epochs': str(args.huber_calibration_epochs),
+                    '--early-stopping-patience': '0'}
+    while i < len(command):
+        token = command[i]
+        if token == '--mode':
+            output += ['--mode', 'was_x']
+            i += 1
+            while i < len(command) and not command[i].startswith('--'):
+                i += 1
+        elif token.startswith('--alignn-hetero-'):
+            i += 2
+        elif token == '--early-stopping-monitor-only':
+            i += 1
+        elif token in replacements:
+            output += [token, replacements[token]]
+            i += 2
+        else:
+            output.append(token)
+            i += 1
+    output += ['--calibrate-huber-only', str(calibration_directory(args, dataset)),
+               '--huber-calibration-folds', str(args.huber_calibration_folds),
+               '--huber-calibration-multiplier', str(args.huber_calibration_multiplier)]
+    return output
 
 
 def build_commands(args):
@@ -148,7 +202,7 @@ def build_commands(args):
             '--device', args.device, '--atom-init', str(ROOT / 'atom_init.json'),
             '--run-dir', str(args.run_dir), '--compact-logs', '--resume',
         ]
-        if args.point_loss == 'huber_ev':
+        if args.point_loss == 'huber_ev' and not args.huber_auto_calibrate:
             command += ['--huber-delta-ev', str(deltas[dataset])]
         if dataset in ('native', 'semi', 'imp2d'):
             command += [
@@ -177,6 +231,10 @@ def build_commands(args):
                 '--imp2d-host-filter', 'reviewed_v1', '--imp2d-energy-window', '-10', '10',
                 '--imp2d-defect-type', 'interstitial',
             ]
+        if args.huber_auto_calibrate:
+            commands.append(calibration_command(command, args, dataset))
+            command += ['--huber-calibration-manifest',
+                        str(calibration_directory(args, dataset) / 'manifest.json')]
         commands.append(command)
     return commands
 
@@ -197,6 +255,9 @@ def _checkpoint_record(path):
         min_delta_percent=optim['early_stopping_min_delta_percent'],
         early_stopping=saved.get('early_stopping_result'),
         final={key: saved[key] for key in ('epochs_completed', 'best_epoch', 'best_val_mae', 'test_mae')},
+        **({'huber_delta_ev': saved['resolved_huber_delta_ev'],
+            'huber_calibration_sha256': optim['huber_calibration']['sha256']}
+           if 'huber_calibration' in optim else {}),
     )
 
 
@@ -219,6 +280,19 @@ def summarize(args):
 
     protocol = validate_protocol(args)
     deltas = huber_deltas(args)
+    calibrations = {}
+    if args.huber_auto_calibrate:
+        from ..training.huber_calibration import read_calibration
+        for dataset in args.dataset:
+            path = calibration_directory(args, dataset) / 'manifest.json'
+            if path.exists():
+                manifest = read_calibration(path)
+                expected = dict(dataset=dataset, seeds=args.seed, folds=args.huber_calibration_folds,
+                                epochs=args.huber_calibration_epochs,
+                                multiplier=args.huber_calibration_multiplier)
+                if any(manifest['protocol'].get(key) != value for key, value in expected.items()):
+                    raise ValueError(f'Calibration protocol mismatch: {path}')
+                calibrations[dataset] = manifest
     records, missing = [], []
     groups = defaultdict(list)
     for dataset in args.dataset:
@@ -233,6 +307,13 @@ def summarize(args):
                 if record is None or record.get('final') is None:
                     missing.append(dict(dataset=dataset, mode=mode, seed=seed))
                     continue
+                if args.huber_auto_calibrate:
+                    calibration = calibrations.get(dataset)
+                    calibrated_split = (calibration or {}).get('splits', {}).get(str(seed))
+                    if (calibrated_split is None
+                            or record.get('huber_calibration_sha256') != calibration['sha256']
+                            or record.get('huber_delta_ev') != calibrated_split['statistics']['delta_ev']):
+                        raise ValueError(f'Result does not use the shared Huber threshold: {path}')
                 if (record.get('schema') != 'early_stopping_comparison_v1'
                         or record.get('model') != 'alignn'
                         or (record['dataset'], record['mode'], record['seed']) != (dataset, mode, seed)
@@ -255,6 +336,7 @@ def summarize(args):
             ]),
         ))
     output = dict(schema='all_dataset_early_stopping_summary_v1', protocol=protocol,
+                  huber_calibrations=calibrations,
                   records=records, summary=rows, missing=missing)
     atomic_write_text(args.run_dir / 'early_stopping_comparison.json',
                       json.dumps(output, indent=2, allow_nan=False) + '\n')
@@ -263,7 +345,8 @@ def summarize(args):
         f'Point loss: `{args.point_loss}`.',
         'Huber transitions (eV): ' + (
             ', '.join(f'{dataset}={delta:g}' for dataset, delta in deltas.items())
-            if deltas else 'not used'
+            if deltas else ('calibrated per dataset/seed (see table below)'
+                            if args.huber_auto_calibrate else 'not used')
         ) + '.', '',
         'Both stages select weights using validation MAE only. Test scores do not affect training.',
         'Final means the best validation checkpoint over the entire training budget, not the last-epoch weights.',
@@ -284,6 +367,15 @@ def summarize(args):
                        if early is not None else '— | — | —')
         lines.append(f'| {record["dataset"]} | {record["mode"]} | {record["seed"]} | '
                      f'{early_cells} | {final["best_epoch"]} | {final["test_mae"]:.6f} |')
+    if args.huber_auto_calibrate:
+        lines += ['', '| Dataset | Seed | Shared Huber delta | Target unit |',
+                  '|---|---:|---:|---|']
+        for dataset, manifest in calibrations.items():
+            for seed in args.seed:
+                item = manifest['splits'].get(str(seed))
+                if item:
+                    lines.append(f'| {dataset} | {seed} | {item["statistics"]["delta_ev"]:.8g} | '
+                                 f'{manifest["target_unit"]} |')
     lines += ['', f'Incomplete/missing runs: {len(missing)}.', '']
     path = args.run_dir / 'early_stopping_comparison.md'
     atomic_write_text(path, '\n'.join(lines))
@@ -301,7 +393,10 @@ def main(argv=None):
     commands = build_commands(args)
     print(f'Datasets: {args.dataset}; seeds: {args.seed}; epochs: {args.epochs}; '
           f'loss: {args.point_loss}; Hypergraph disabled; early stopping only records/tests.', flush=True)
-    if args.point_loss == 'huber_ev':
+    if args.huber_auto_calibrate:
+        print(f'Huber: training-only {args.huber_calibration_folds}-fold calibration; '
+              f'{args.huber_calibration_epochs} epochs/fold; shared across all modes.', flush=True)
+    elif args.point_loss == 'huber_ev':
         print(f'Huber transitions (eV): {huber_deltas(args)}', flush=True)
     if args.dry_run:
         for command in commands:

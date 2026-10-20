@@ -8,10 +8,78 @@ python -m HERA.scripts.run_all_dataset_benchmark --seed 11 42 1245 --epochs 500 
 
 This sequentially runs native, semi, imp2d, 2dmd_low and 2dmd_high. Each selected
 mode trains for all 500 epochs. Hypergraph and Hypergraph-WAS are excluded.
-Full-X is skipped for semi/imp2d, where it duplicates Full. The default suite
-has 48 dataset/mode combinations and 144 training runs across three seeds.
+Full-X is skipped for semi/imp2d, where it duplicates Full. At r=0,
+Hetero-fixed-pool duplicates Hetero and is also skipped. The default suite
+has 43 distinct dataset/mode combinations and 129 training runs across three seeds.
 The loss remains MSE; Huber is optional with `--point-loss huber_ev
 --huber-delta-ev 1.0`. Nothing trains locally merely by preparing this command.
+
+## Automatic Huber calibration
+
+After syncing the source to the server, run this from HERA's parent directory:
+
+```bash
+python -m HERA.scripts.run_all_dataset_benchmark --seed 11 42 1245 --epochs 500 --point-loss huber_ev --huber-auto-calibrate --huber-calibration-folds 3 --huber-calibration-epochs 200 --early-stopping-patience 50 --early-stopping-min-delta-percent 0.5 --device cuda:0 --native-preparation-dir HERA/logs/native_filter_le15_no_poscar0_3seeds --run-dir HERA/logs/all5_3seeds_huber_auto_v1
+```
+
+This prepares the filtered native cohort, then calibrates and benchmarks each
+of native, semi, interstitial imp2d, 2DMD-low and 2DMD-high. Native/semi/imp2d
+Hetero modes drop DD; only the two 2DMD datasets keep DD. Hypergraph is excluded.
+
+For **each dataset and each outer split seed**, calibration uses every retained
+training sample once as an out-of-fold prediction target. Outer validation and
+test labels never enter calibration or reference-model selection:
+
+1. Partition the outer training set into three seeded folds. Known equivalent
+   structure groups in the IMP2D manifest stay together. Other samples use their
+   source identities as groups; this does not discover new structural duplicates.
+2. Fit the fixed ALIGNN/WAS-X reference using MSE on the remaining folds. Reserve
+   approximately 10% of that fitting pool for inner validation. Fit the target
+   scaler on the fitting samples only; use inner validation MAE for scheduling
+   and checkpoint selection. The OOF fold is not used for either.
+3. Train each reference for 200 epochs, then predict its OOF fold using the
+   best inner-validation checkpoint. Combine the three held-out residual sets.
+4. Set `delta = max(1e-6, 1.345 * median(abs(r - median(r))) / 0.6744897501960817)`.
+   If MAD is exactly zero, fall back to median absolute residual, then RMS
+   residual, then the positive floor. Record the selected method.
+5. Freeze that threshold and use it for **all benchmark modes on that same
+   dataset and split**. Different seeds can produce different thresholds.
+   Formal benchmark models start fresh; reference weights are not reused.
+
+Thresholds are in the original target's units: eV for native/semi/imp2d and
+eV per site for the existing 2DMD targets. No target normalization needs to
+be supplied manually. The loss remains the existing `2 * Huber`.
+
+This adds 45 reference fits (5 datasets × 3 seeds × 3 folds), followed by the
+129 benchmark runs. `--huber-calibration-epochs`, `--huber-calibration-folds`,
+and `--huber-calibration-multiplier` (default 1.345) control calibration.
+The method is a reproducible scale heuristic, not a guarantee of optimal delta
+or improved MAE: the reference has less fitting data and a shorter budget than
+the final models. Do not choose these settings from test results.
+
+`--huber-auto-calibrate` cannot be combined with manual delta flags.
+The final training budget and monitor-only early-stopping behavior are unchanged.
+
+Calibration artifacts live in `<run-dir>/huber_calibration/<dataset>/`:
+
+- `protocol.json`: reference config, seeds, folds, epoch budget and scale rule.
+- `seed11/fold1.json`: split identity, fit/inner-validation/OOF indices,
+  selected epoch, history and physical-unit predictions, protected by a checksum.
+- `seed11/oof_predictions.json`: source identities, targets, predictions and residuals.
+- `manifest.json`: frozen per-seed thresholds, diagnostics and provenance hash.
+
+Each mode's config and checkpoints carry the same calibration identity; each
+checkpoint/evaluation JSON also records its resolved delta. Training checks
+ordered split memberships and training labels against calibration before fitting.
+This verifies sample/label alignment, not equality of graph tensors across modes.
+The aggregate comparison reports the thresholds and verifies shared identities.
+
+Reruns verify and reuse completed reference folds. An interrupted reference fold
+restarts, while completed folds are retained. Completed benchmark runs are skipped.
+Changed calibration settings or data identities are rejected. Use a fresh
+`--run-dir` for a different experiment. Adding `--dry-run` previews every stage
+without calibration/training or file writes. For `--summary-only`, retain the
+same auto-calibration and protocol flags.
 
 ## Per-dataset Huber thresholds
 

@@ -68,6 +68,9 @@ from .data.datasets import (
     representation_for_mode,
 )
 from .training.trainer import MEGNetTrainer
+from .training.huber_calibration import (
+    calibrate as calibrate_huber, calibration_identity, read_calibration, resolved_delta,
+)
 from .data.native_was import NATIVE_PREPROCESSING_CHOICES, native_run_components
 from .data.native_filter import read_manifest, manifest_identity, requested_splits, filtered_splits
 from .data.native_preprocessing import prepare_native_filter
@@ -298,6 +301,9 @@ def apply_training_overrides(config, args, model_name):
         # Preserve the historical default configuration identity.
         config['optim'].pop('point_loss', None)
         config['optim'].pop('huber_delta_ev', None)
+    if getattr(args, 'huber_calibration_record', None) is not None:
+        config['optim'].pop('huber_delta_ev', None)
+        config['optim']['huber_calibration'] = copy.deepcopy(args.huber_calibration_record)
     if args.train_batch_size is not None:
         config['model']['train_batch_size'] = args.train_batch_size
     if args.test_batch_size is not None:
@@ -548,13 +554,10 @@ def iter_concentration_transfer_splits(
         }
 
 
-def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
-                      model_name, dataset_name, log_dir='logs', explain_options=None,
-                      run_label=None, cv5=False, resume=False, protect_existing=False,
-                      native_filter_manifest=None, impurity_filter_manifest=None,
-                      split_iterator=None):
-    """Train a single mode and return per-split test losses."""
-    log_mode = run_label or mode
+def iter_mode_splits(mode, config, dataset, targets, random_seeds, dataset_name,
+                     cv5=False, native_filter_manifest=None, impurity_filter_manifest=None,
+                     split_iterator=None):
+    """Use identical cohort/split rules for reference calibration and training."""
     data = dataset[dataset_index_for_mode(mode)]
     if data is None:
         representation = representation_for_mode(mode)
@@ -564,13 +567,6 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
         raise ValueError(f'No valid structures found for mode {mode}')
     data, targets = zip(*data_targets)
     targets = torch.stack(list(targets)) if isinstance(data_targets[0][1], torch.Tensor) else list(targets)
-    losses = []
-    skipped = 0
-    trained = 0
-    monitor_only = bool(config['optim'].get('early_stopping_monitor_only', False))
-    if monitor_only and int(config['optim'].get('early_stopping_patience', 0)) <= 0:
-        raise ValueError('Early-stopping monitoring requires a positive patience')
-
     if split_iterator is not None:
         if (native_filter_manifest is not None or impurity_filter_manifest is not None
                 or config.get('native_data_filter') is not None
@@ -621,8 +617,32 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             random_seeds,
             cv5=cv5,
         )
+    return splits
+
+
+def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, device,
+                      model_name, dataset_name, log_dir='logs', explain_options=None,
+                      run_label=None, cv5=False, resume=False, protect_existing=False,
+                      native_filter_manifest=None, impurity_filter_manifest=None,
+                      split_iterator=None):
+    """Train a single mode and return per-split test losses."""
+    log_mode = run_label or mode
+    losses, skipped, trained = [], 0, 0
+    monitor_only = bool(config['optim'].get('early_stopping_monitor_only', False))
+    if monitor_only and int(config['optim'].get('early_stopping_patience', 0)) <= 0:
+        raise ValueError('Early-stopping monitoring requires a positive patience')
+    splits = iter_mode_splits(
+        mode, config, dataset, targets, random_seeds, dataset_name, cv5,
+        native_filter_manifest, impurity_filter_manifest, split_iterator,
+    )
 
     for split in splits:
+        trainer_config = config
+        if 'huber_calibration' in config['optim']:
+            delta = resolved_delta(config, split, dataset_name)
+            trainer_config = copy.deepcopy(config)
+            trainer_config['optim']['huber_delta_ev'] = delta
+            print(f'  [{split["display"]}] Shared calibrated Huber delta={delta:.8g}', flush=True)
         if 'impurity_filter_counts' in split:
             counts = split['impurity_filter_counts']
             print(f'  [{split["display"]}] {dataset_name} physical filter (split membership preserved): '
@@ -648,7 +668,7 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             continue
 
         set_seed(split['seed'])
-        trainer = MEGNetTrainer(config, device, seed=split['seed'])
+        trainer = MEGNetTrainer(trainer_config, device, seed=split['seed'])
         trainer.prepare_data(
             split['train_X'],
             split['train_y'],
@@ -681,6 +701,9 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             'selection': 'minimum validation MAE up to each evaluation stage',
             'early_stopping': None, 'final': None,
         }
+        if 'huber_calibration' in config['optim']:
+            evaluation_record['huber_delta_ev'] = trainer_config['optim']['huber_delta_ev']
+            evaluation_record['huber_calibration_sha256'] = config['optim']['huber_calibration']['sha256']
         if monitor_only:
             # An incomplete split restarts from epoch one. Preserve previous
             # monitoring artifacts so a new attempt cannot expose stale results.
@@ -931,6 +954,8 @@ def save_best_checkpoint(path, trainer, model_state_dict, config, split,
             'model': model_state_dict,
             'scaler': trainer.scaler.state_dict(),
             'config': copy.deepcopy(config),
+            **({'resolved_huber_delta_ev': trainer.config['optim']['huber_delta_ev']}
+               if 'huber_calibration' in config['optim'] else {}),
             'model_name': model_name,
             'dataset_name': dataset_name,
             'mode': mode,
@@ -1295,6 +1320,12 @@ def main():
                         help='Point loss override; huber_ev uses 2*Huber with an eV transition')
     parser.add_argument('--huber-delta-ev', type=float, default=None,
                         help='Positive physical-energy transition for --point-loss huber_ev (default: 1 eV)')
+    parser.add_argument('--huber-calibration-manifest',
+                        help='Frozen training-only OOF calibration, shared across modes for each seed')
+    parser.add_argument('--calibrate-huber-only', metavar='OUTPUT_DIR',
+                        help='Calibrate with ALIGNN WAS-X/MSE on training-only folds, then exit')
+    parser.add_argument('--huber-calibration-folds', type=int, default=3)
+    parser.add_argument('--huber-calibration-multiplier', type=float, default=1.345)
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=None,
                         help=('Minimum relative validation MAE decrease that resets '
                               'early stopping patience, in percent (default: 0.5)'))
@@ -1401,6 +1432,18 @@ def main():
                         help='Stop immediately if any sample explanation fails')
 
     args = parser.parse_args()
+    if args.huber_calibration_manifest and (args.point_loss != 'huber_ev'
+                                           or args.huber_delta_ev is not None
+                                           or args.calibrate_huber_only):
+        parser.error('--huber-calibration-manifest requires huber_ev and no manual delta/calibration job')
+    if args.calibrate_huber_only:
+        if (args.model != 'alignn' or args.mode != ['was_x'] or args.cv5
+                or args.point_loss not in (None, 'mse') or args.early_stopping_monitor_only):
+            parser.error('Calibration requires ALIGNN --mode was_x, MSE, no cv5 or monitor-only')
+        if (args.epochs < 1 or args.huber_calibration_folds < 2
+                or not np.isfinite(args.huber_calibration_multiplier)
+                or args.huber_calibration_multiplier <= 0):
+            parser.error('Calibration requires positive epochs/multiplier and at least two folds')
     if args.huber_delta_ev is not None:
         if args.point_loss != 'huber_ev':
             parser.error('--huber-delta-ev requires --point-loss huber_ev')
@@ -1502,6 +1545,18 @@ def main():
         dataset_names = list(VALID_DATASETS)
     else:
         dataset_names = list(dict.fromkeys(args.dataset))
+    if args.calibrate_huber_only or args.huber_calibration_manifest:
+        if (len(dataset_names) != 1 or args.cv5
+                or dataset_names[0] not in ('native', 'semi', 'imp2d', '2dmd_low', '2dmd_high')):
+            parser.error('Huber calibration requires one benchmark dataset and ordinary seeded splits')
+    if args.huber_calibration_manifest:
+        try:
+            args.huber_calibration_record = calibration_identity(read_calibration(args.huber_calibration_manifest))
+            if (args.huber_calibration_record['dataset'] != dataset_names[0]
+                    or any(str(seed) not in args.huber_calibration_record['splits'] for seed in args.seeds)):
+                raise ValueError('Huber calibration dataset/seeds differ from this invocation')
+        except (OSError, ValueError, KeyError) as exc:
+            parser.error(str(exc))
     if args.native_split != 'random':
         if args.cv5 or 'native' not in dataset_names:
             parser.error('--native-split family/material requires native and cannot combine with --cv5')
@@ -1752,7 +1807,11 @@ def main():
                             run['label'] += '_' + '_'.join(parts)
                     preprocessing_parts = native_run_components(run['config']) + impurity_run_components(run['config'])
                     if run['config']['optim'].get('point_loss') == 'huber_ev':
-                        preprocessing_parts.append(f'huber_ev_d{run["config"]["optim"]["huber_delta_ev"]:g}')
+                        calibration = run['config']['optim'].get('huber_calibration')
+                        preprocessing_parts.append(
+                            f'huber_oof_{calibration["sha256"][:8]}' if calibration else
+                            f'huber_ev_d{run["config"]["optim"]["huber_delta_ev"]:g}'
+                        )
                     if run['config'].get('ood_split'):
                         preprocessing_parts.append('ood_' + run['config']['ood_split']['grouping'])
                     if run['config'].get('native_data_filter'):
@@ -1785,6 +1844,27 @@ def main():
                         'dataset_name': dataset_name, 'mode': train_mode,
                     }
                     run_specs.append(run)
+
+            if args.calibrate_huber_only:
+                if len(run_specs) != 1:
+                    parser.error('Calibration requires exactly one reference configuration')
+                run = run_specs[0]
+                loaded = dataset_for_run(run['local_cutoff'], run['mode'], run['config'])
+                splits = iter_mode_splits(
+                    run['mode'], run['config'], loaded[:-1], loaded[-1], args.seeds, dataset_name,
+                    native_filter_manifest=native_filter_manifest,
+                    impurity_filter_manifest=impurity_manifest,
+                )
+                groups = {str(r['source_id']): str(r['structure_group'])
+                          for r in (impurity_manifest or {}).get('records', [])
+                          if r.get('structure_group') is not None}
+                calibrate_huber(
+                    splits, run['config'], dataset_name, args.calibrate_huber_only,
+                    args.epochs, args.huber_calibration_folds, args.huber_calibration_multiplier,
+                    args.device, trainer_factory=MEGNetTrainer, seed_fn=set_seed,
+                    weights_fn=cpu_state_dict, clear_fn=clear_cuda_cache, group_by_source=groups,
+                )
+                return
 
             if args.compact_logs:
                 seen_directories = set()

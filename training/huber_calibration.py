@@ -145,9 +145,13 @@ def calibrate(splits, config, dataset_name, output, epochs, folds, multiplier, d
     if epochs < 1 or folds < 2:
         raise ValueError('Calibration epochs must be positive and folds >= 2')
     residual_threshold([0.], multiplier)  # Validate the coefficient before fitting.
+    splits = list(splits)
+    if not splits or len({int(s['seed']) for s in splits}) != len(splits):
+        raise ValueError('Calibration requires distinct, nonempty seeded splits')
     output = Path(output)
     protocol = dict(schema=SCHEMA, dataset=dataset_name, reference='alignn/was_x',
                     config=copy.deepcopy(config), epochs=epochs, folds=folds,
+                    seeds=[int(s['seed']) for s in splits],
                     multiplier=multiplier, floor_ev=1e-6,
                     inner_validation_fraction=.1, selection='inner validation MAE only',
                     groups='known structure_group; otherwise source identity')

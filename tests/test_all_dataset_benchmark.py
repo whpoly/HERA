@@ -165,7 +165,7 @@ class AllDatasetBenchmarkTests(unittest.TestCase):
             self.assertEqual(row['early_test_mae']['mean'], .2)
             self.assertEqual(row['final_test_mae']['mean'], .2)
             self.assertAlmostEqual(row['paired_delta']['mean'], -.1)
-            self.assertEqual(len(result['missing']), 28)
+            self.assertEqual(len(result['missing']), 25)
             self.assertTrue((args.run_dir / 'early_stopping_comparison.md').exists())
 
     def test_invalid_patience_rejected(self):
