@@ -52,6 +52,80 @@ class AllDatasetBenchmarkTests(unittest.TestCase):
             self.assertEqual(command[command.index('--huber-delta-ev') + 1], '0.2')
             self.assertEqual(command[command.index('--early-stopping-patience') + 1], '25')
 
+    def test_per_dataset_huber_transitions_and_global_fallback_reach_training(self):
+        args = runner.parse_args([
+            '--point-loss', 'huber_ev', '--huber-delta-ev', '.5',
+            '--huber-delta-ev-by-dataset', 'native=1', 'semi=.1',
+            '--huber-delta-ev-by-dataset', '2dmd_low=.01', '2dmd_high=.1',
+        ])
+        expected = dict(native=1., semi=.1, imp2d=.5, **{'2dmd_low': .01, '2dmd_high': .1})
+        commands = runner.build_commands(args)
+        self.assertNotIn('--huber-delta-ev', commands[0])  # Preparation is loss-independent.
+        for command, dataset in zip(commands[1:], runner.DATASETS):
+            self.assertEqual(float(command[command.index('--huber-delta-ev') + 1]), expected[dataset])
+            self.assertNotIn('--huber-delta-ev-by-dataset', command)
+        protocol = runner.benchmark_protocol(args)
+        self.assertEqual(protocol['huber_delta_ev_by_dataset'], expected)
+
+    def test_invalid_dataset_transitions_rejected(self):
+        cases = [
+            ['--huber-delta-ev-by-dataset', 'native=.1'],
+            ['--point-loss', 'huber_ev', '--huber-delta-ev-by-dataset', 'native'],
+            ['--point-loss', 'huber_ev', '--huber-delta-ev-by-dataset', '2dmd_lo=.01'],
+            ['--point-loss', 'huber_ev', '--huber-delta-ev-by-dataset', 'native=.1', 'native=.2'],
+            ['--point-loss', 'huber_ev', '--dataset', 'native',
+             '--huber-delta-ev-by-dataset', 'semi=.1'],
+        ]
+        cases += [['--point-loss', 'huber_ev', '--huber-delta-ev-by-dataset', f'native={value}']
+                  for value in ('0', '-1', 'nan', 'inf', 'abc', '')]
+        with redirect_stderr(io.StringIO()):
+            for flags in cases:
+                with self.subTest(flags=flags), self.assertRaises(SystemExit):
+                    runner.parse_args(flags)
+
+    def test_equivalent_uniform_thresholds_keep_legacy_protocol_identity(self):
+        global_args = runner.parse_args(['--point-loss', 'huber_ev', '--huber-delta-ev', '.1'])
+        mapped_args = runner.parse_args([
+            '--point-loss', 'huber_ev', '--huber-delta-ev', '5',
+            '--huber-delta-ev-by-dataset', *[f'{dataset}=.1' for dataset in runner.DATASETS],
+        ])
+        protocol = runner.benchmark_protocol(global_args)
+        self.assertEqual(runner.benchmark_protocol(mapped_args), protocol)
+        self.assertNotIn('huber_delta_ev_by_dataset', protocol)
+        self.assertEqual(protocol['huber_delta_ev'], .1)
+
+    def test_changed_dataset_threshold_blocks_training_and_summary_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            flags = ['--run-dir', directory, '--point-loss', 'huber_ev',
+                     '--huber-delta-ev-by-dataset', 'native=.1', '2dmd_low=.01']
+            with patch.object(runner.subprocess, 'run'), patch.object(runner, 'summarize'):
+                runner.main(flags)
+            root = Path(directory)
+            saved_protocol = (root / 'benchmark_protocol.json').read_bytes()
+            saved_summary = root / 'early_stopping_comparison.json'
+            saved_summary.write_text('original report')
+            changed = [arg if arg != 'native=.1' else 'native=.2' for arg in flags]
+            with patch.object(runner.subprocess, 'run') as run:
+                for extra in ([], ['--summary-only']):
+                    with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, 'protocol differs'):
+                        runner.main(changed + extra)
+                run.assert_not_called()
+            self.assertEqual((root / 'benchmark_protocol.json').read_bytes(), saved_protocol)
+            self.assertEqual(saved_summary.read_text(), 'original report')
+
+    def test_summary_records_resolved_thresholds(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args = runner.parse_args([
+                '--run-dir', directory, '--point-loss', 'huber_ev',
+                '--huber-delta-ev-by-dataset', 'native=.1', '2dmd_low=.01',
+            ])
+            result = runner.summarize(args)
+            deltas = result['protocol']['huber_delta_ev_by_dataset']
+            self.assertEqual(deltas['native'], .1)
+            self.assertEqual(deltas['imp2d'], 1.)
+            self.assertIn('2dmd_low=0.01',
+                          (args.run_dir / 'early_stopping_comparison.md').read_text(encoding='utf-8'))
+
     def test_dry_run_never_prepares_data_trains_or_writes_files(self):
         with patch.object(runner.subprocess, 'run') as run, patch.object(Path, 'mkdir') as mkdir, \
                 patch.object(Path, 'write_text') as write, redirect_stdout(io.StringIO()):

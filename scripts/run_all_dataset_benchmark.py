@@ -30,7 +30,11 @@ def parse_args(argv=None):
     parser.add_argument('--early-stopping-patience', type=int, default=50)
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=0.5)
     parser.add_argument('--point-loss', choices=('mse', 'huber_ev'), default='mse')
-    parser.add_argument('--huber-delta-ev', type=float, default=1.0)
+    parser.add_argument('--huber-delta-ev', type=float, default=1.0,
+                        help='Global Huber transition in eV; fallback for datasets without an override')
+    parser.add_argument('--huber-delta-ev-by-dataset', nargs='+', action='extend', default=[],
+                        metavar='DATASET=EV',
+                        help='Per-dataset transitions, e.g. native=1 2dmd_low=0.01; requires huber_ev')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--run-dir', type=Path,
                         default=ROOT / 'logs/all5_3seeds_early_stop_monitor')
@@ -48,12 +52,62 @@ def parse_args(argv=None):
         parser.error('--huber-delta-ev must be finite and positive')
     args.seed = list(dict.fromkeys(args.seed))
     args.dataset = list(dict.fromkeys(args.dataset))
+    if args.huber_delta_ev_by_dataset and args.point_loss != 'huber_ev':
+        parser.error('--huber-delta-ev-by-dataset requires --point-loss huber_ev')
+    overrides = {}
+    for item in args.huber_delta_ev_by_dataset:
+        dataset, separator, value = item.partition('=')
+        if not separator or dataset not in args.dataset:
+            parser.error(f'Expected selected DATASET=EV for --huber-delta-ev-by-dataset: {item!r}')
+        if dataset in overrides:
+            parser.error(f'Duplicate Huber transition for dataset {dataset!r}')
+        try:
+            delta = float(value)
+        except ValueError:
+            parser.error(f'Invalid Huber transition: {item!r}')
+        if not math.isfinite(delta) or delta <= 0:
+            parser.error(f'Huber transition must be finite and positive: {item!r}')
+        overrides[dataset] = delta
+    args.huber_delta_ev_by_dataset = overrides
     args.run_dir = args.run_dir.resolve()
     args.native_preparation_dir = (
         args.native_preparation_dir.resolve() if args.native_preparation_dir
         else args.run_dir / 'native_preparation'
     )
     return args
+
+
+def huber_deltas(args):
+    """Resolve physical thresholds once per dataset, shared by all modes/seeds."""
+    if args.point_loss != 'huber_ev':
+        return {}
+    return {dataset: args.huber_delta_ev_by_dataset.get(dataset, args.huber_delta_ev)
+            for dataset in args.dataset}
+
+
+def benchmark_protocol(args):
+    protocol = dict(
+        schema='all5_no_hypergraph_monitor_v1', datasets=args.dataset, modes=list(MODES),
+        seeds=args.seed, epochs=args.epochs, patience=args.early_stopping_patience,
+        min_delta_percent=args.early_stopping_min_delta_percent, point_loss=args.point_loss,
+        huber_delta_ev=None,
+    )
+    deltas = huber_deltas(args)
+    if deltas:
+        if len(set(deltas.values())) == 1:
+            # Keep existing uniform-Huber protocol files compatible.
+            protocol['huber_delta_ev'] = next(iter(deltas.values()))
+        else:
+            protocol['huber_delta_ev_by_dataset'] = deltas
+    return protocol
+
+
+def validate_protocol(args):
+    protocol = benchmark_protocol(args)
+    path = args.run_dir / 'benchmark_protocol.json'
+    if path.exists() and json.loads(path.read_text(encoding='utf-8')) != protocol:
+        raise ValueError(f'Existing benchmark protocol differs; choose another --run-dir: {path}')
+    return protocol
 
 
 def modes_for_dataset(dataset):
@@ -68,6 +122,7 @@ def mode_directory(args, dataset, mode):
 
 def build_commands(args):
     commands = []
+    deltas = huber_deltas(args)
     if 'native' in args.dataset:
         commands.append([
             sys.executable, '-u', '-m', 'HERA.scripts.run_native_filter_benchmark',
@@ -94,7 +149,7 @@ def build_commands(args):
             '--run-dir', str(args.run_dir), '--compact-logs', '--resume',
         ]
         if args.point_loss == 'huber_ev':
-            command += ['--huber-delta-ev', str(args.huber_delta_ev)]
+            command += ['--huber-delta-ev', str(deltas[dataset])]
         if dataset in ('native', 'semi', 'imp2d'):
             command += [
                 f'--{dataset}-preprocessing', 'reference_v1',
@@ -162,6 +217,8 @@ def _display(stats):
 def summarize(args):
     from ..training.results import atomic_write_text
 
+    protocol = validate_protocol(args)
+    deltas = huber_deltas(args)
     records, missing = [], []
     groups = defaultdict(list)
     for dataset in args.dataset:
@@ -197,12 +254,17 @@ def summarize(args):
                 r['final']['test_mae'] - r['early_stopping']['test_mae'] for r in paired
             ]),
         ))
-    output = dict(schema='all_dataset_early_stopping_summary_v1', records=records,
-                  summary=rows, missing=missing)
+    output = dict(schema='all_dataset_early_stopping_summary_v1', protocol=protocol,
+                  records=records, summary=rows, missing=missing)
     atomic_write_text(args.run_dir / 'early_stopping_comparison.json',
                       json.dumps(output, indent=2, allow_nan=False) + '\n')
     lines = [
         '# Early-stopping monitor versus full training', '',
+        f'Point loss: `{args.point_loss}`.',
+        'Huber transitions (eV): ' + (
+            ', '.join(f'{dataset}={delta:g}' for dataset, delta in deltas.items())
+            if deltas else 'not used'
+        ) + '.', '',
         'Both stages select weights using validation MAE only. Test scores do not affect training.',
         'Final means the best validation checkpoint over the entire training budget, not the last-epoch weights.',
         'Early-stage means include only triggered seeds; paired delta uses those same seeds (final minus early).',
@@ -239,21 +301,16 @@ def main(argv=None):
     commands = build_commands(args)
     print(f'Datasets: {args.dataset}; seeds: {args.seed}; epochs: {args.epochs}; '
           f'loss: {args.point_loss}; Hypergraph disabled; early stopping only records/tests.', flush=True)
+    if args.point_loss == 'huber_ev':
+        print(f'Huber transitions (eV): {huber_deltas(args)}', flush=True)
     if args.dry_run:
         for command in commands:
             print(subprocess.list2cmdline(command) if os.name == 'nt' else shlex.join(command))
         return
     from ..training.results import atomic_write_text
 
-    protocol = dict(
-        schema='all5_no_hypergraph_monitor_v1', datasets=args.dataset, modes=list(MODES),
-        seeds=args.seed, epochs=args.epochs, patience=args.early_stopping_patience,
-        min_delta_percent=args.early_stopping_min_delta_percent, point_loss=args.point_loss,
-        huber_delta_ev=args.huber_delta_ev if args.point_loss == 'huber_ev' else None,
-    )
+    protocol = validate_protocol(args)
     path = args.run_dir / 'benchmark_protocol.json'
-    if path.exists() and json.loads(path.read_text(encoding='utf-8')) != protocol:
-        raise ValueError(f'Existing benchmark protocol differs; choose another --run-dir: {path}')
     atomic_write_text(path, json.dumps(protocol, indent=2) + '\n')
     for index, command in enumerate(commands, 1):
         print(f'[{index}/{len(commands)}] '

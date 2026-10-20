@@ -13,6 +13,62 @@ has 48 dataset/mode combinations and 144 training runs across three seeds.
 The loss remains MSE; Huber is optional with `--point-loss huber_ev
 --huber-delta-ev 1.0`. Nothing trains locally merely by preparing this command.
 
+## Per-dataset Huber thresholds
+
+`--huber-delta-ev-by-dataset DATASET=EV ...` overrides the global
+`--huber-delta-ev` separately for each selected dataset. The flag requires
+`--point-loss huber_ev`. All modes and seeds within a dataset share its threshold.
+Unspecified datasets use the global value (default 1 eV). Values must be finite
+and positive; duplicate or unselected dataset names are rejected.
+
+For example, the following is a **prospective experiment**, not a set of
+validated optimal thresholds:
+
+```bash
+python -m HERA.scripts.run_all_dataset_benchmark --seed 11 42 1245 --epochs 500 --early-stopping-patience 50 --early-stopping-min-delta-percent 0.5 --point-loss huber_ev --huber-delta-ev-by-dataset native=1 semi=0.1 imp2d=1 2dmd_low=0.01 2dmd_high=0.1 --device cuda:0 --native-preparation-dir HERA/logs/native_filter_le15_no_poscar0_3seeds --run-dir HERA/logs/all5_3seeds_huber_per_dataset_v1
+```
+
+Native keeps the 1 eV threshold from the existing paired experiment. The other
+thresholds are exploratory starting values at different error scales; no
+completed comparison establishes that they improve these datasets. They are
+explicit CLI choices, not new defaults or automatic estimates from held-out
+labels. Choose any subsequent tuning using validation MAE, keep the tuning
+budget comparable across models, and report test MAE and RMSE for matched seeds.
+The runner does not search thresholds automatically.
+
+The threshold acts on the **prediction residual**, not the target energy itself,
+and does not filter or delete samples. The loss remains `2 * Huber` in normalized
+target space, with `delta_scaled = delta_eV / training_target_std`. Small errors
+retain the existing MSE value and gradient. Lowering delta also reduces the
+gradient cap for large errors; it is not simply an MAE switch.
+
+Resolved thresholds appear in the launch output, `benchmark_protocol.json`,
+the per-mode training config/checkpoints, and the aggregate JSON/Markdown
+report. Changing a threshold requires a new `--run-dir`; both training and
+`--summary-only` reject a different saved protocol. Equivalent uniform
+thresholds remain compatible with existing global-Huber protocol files.
+
+### What the existing evidence supports
+
+The local native experiment at `logs/native_filter_then_split_le15_no_poscar0_v4/`
+used the same filtered population, seed 123, and delta 1 eV:
+
+| Model | MSE test MAE | Huber test MAE | MSE test RMSE | Huber test RMSE |
+|---|---:|---:|---:|---:|
+| Hetero-WAS | 0.050772 | 0.049216 | 0.161694 | 0.166580 |
+| WAS-X | 0.058039 | 0.055427 | 0.152409 | 0.142423 |
+
+MAE fell about 3.1% and 4.5%, respectively, but Hetero-WAS RMSE worsened.
+This is one-seed evidence for those two models on native, not evidence of a
+universal improvement or of an improvement for plain Hetero.
+
+[PyTorch's HuberLoss documentation](https://docs.pytorch.org/docs/2.14/generated/torch.nn.HuberLoss.html)
+explains the quadratic/linear transition and reduced sensitivity to outliers.
+That mechanism does not guarantee lower held-out MAE for these graph models.
+Use paired MSE/Huber runs on the same data splits and three seeds to assess
+whether any gain persists. Current results do not establish statistical
+significance.
+
 ## What the two evaluations mean
 
 - The first time validation MAE fails to improve meaningfully for `patience`
@@ -94,4 +150,4 @@ snapshots or resume as this different protocol.
 
 `--dry-run` prints commands without preparing data, training or creating files.
 `--summary-only` reads saved results without training. Supply the same
-dataset/seed/epoch/patience arguments when summarizing a customized run.
+dataset/seed/epoch/patience/loss/threshold arguments when summarizing a customized run.

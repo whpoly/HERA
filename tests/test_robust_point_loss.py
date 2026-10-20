@@ -27,13 +27,15 @@ class RobustPointLossTests(unittest.TestCase):
 
     def test_caps_large_error_gradients_and_scales_transition_in_ev(self):
         for scale in (1., 4., 10.):
-            physical = torch.tensor([-.5, 1., 2., 100.], dtype=torch.float64)
-            predictions = (physical/scale).requires_grad_()
-            loss = huber_ev_loss(predictions, torch.zeros_like(predictions), scale, 1.)
-            loss.backward()
-            # Gradient is 2*clamp(residual_eV, -delta, delta)/scale / N.
-            expected = 2*physical.clamp(-1., 1.)/scale/len(physical)
-            torch.testing.assert_close(predictions.grad, expected)
+            for delta in (.01, .1, 1.):
+                with self.subTest(scale=scale, delta=delta):
+                    physical = delta * torch.tensor([-.5, 1., 2., 100.], dtype=torch.float64)
+                    predictions = (physical/scale).requires_grad_()
+                    loss = huber_ev_loss(predictions, torch.zeros_like(predictions), scale, delta)
+                    loss.backward()
+                    # Gradient is 2*clamp(residual_eV, -delta, delta)/scale / N.
+                    expected = 2*physical.clamp(-delta, delta)/scale/len(physical)
+                    torch.testing.assert_close(predictions.grad, expected)
 
     def test_constant_target_fallback_and_invalid_values(self):
         predictions, target = torch.tensor([2.]), torch.tensor([0.])
