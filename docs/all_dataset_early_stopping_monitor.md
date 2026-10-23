@@ -14,6 +14,53 @@ has 43 distinct dataset/mode combinations and 129 training runs across three see
 The loss remains MSE; Huber is optional with `--point-loss huber_ev
 --huber-delta-ev 1.0`. Nothing trains locally merely by preparing this command.
 
+## GPU throughput and batch profiles
+
+`--batch-profile low|medium|high` selects fixed batches for every model/seed in
+each dataset. The default `low` preserves the previous command and protocol.
+
+| Profile | native | semi | imp2d | 2dmd_low | 2dmd_high | Validation/test |
+|---|---:|---:|---:|---:|---:|---:|
+| low | 16 | 64 | 64 | 8 | 16 | 1 |
+| medium | 32 | 128 | 128 | 16 | 32 | 4 |
+| high | 64 | 256 | 256 | 32 | 64 | 8 |
+
+After syncing the updated source, run from HERA's parent directory:
+
+```bash
+python -m HERA.scripts.run_all_dataset_benchmark --batch-profile medium --seed 11 42 1245 --epochs 500 --point-loss mse --early-stopping-patience 50 --early-stopping-min-delta-percent 0.5 --device cuda:0 --native-preparation-dir HERA/logs/native_filter_le15_no_poscar0_3seeds --run-dir HERA/logs/all5_3seeds_mse_medium_v1
+```
+
+Use the same profile for `--summary-only`. Changing profile requires a new run
+directory; the runner rejects mismatched protocols before launching training or
+rewriting a summary. Native preparation can be reused because filtering and
+split membership do not depend on the batch size. Profiles also apply to optional
+Huber reference fits. No Hypergraph is added; DD is still dropped for
+native/semi/imp2d Hetero modes and kept for 2DMD-low/high.
+
+These are explicit batch presets, not a GPU-memory detector. Start with medium
+if memory permits; graph size and angle count also affect peak memory. There is
+no silent fallback after OOM. Changing training batch changes optimizer updates
+per epoch and BatchNorm statistics, so it may change MAE; learning rate is not
+automatically rescaled. Compare matched profiles across models.
+
+Independent of the profile, ALIGNN now constructs line-graph connections with
+device tensor operations instead of copying edge lists to CPU and executing
+Python loops every forward pass. Stable sorting retains incoming/outgoing bond
+order, parallel periodic bonds, zero-length exclusions and node-type namespaces.
+Metric scalar transfers are deferred to epoch end, preserving their previous
+NumPy reduction order and precision. Model sizes, weights, FP32/AMP settings and
+validation frequency are unchanged. Dynamic-size tensor operations can still
+synchronize; this does not eliminate all host/device waits.
+
+CPU/CUDA regression checks compare topology, angles, coordinate gradients and
+Full/Hetero model predictions/parameter gradients with the old loop algorithm.
+A local synthetic RTX 5060 Ti measurement (40 angle features, median of 15 runs)
+gave 2.386 vs 1.396 ms at 768 bonds, and 29.769 vs 1.717 ms at 12,288 bonds.
+These measure line-graph construction only, not full-epoch speed or server GPU
+utilization. No dataset benchmark was trained for these measurements. Evaluate
+server throughput using seconds per epoch as well as GPU utilization.
+
 ## Automatic thresholds without extra training
 
 Use `train_mad` to compute thresholds directly from training labels, with no

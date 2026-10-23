@@ -12,6 +12,42 @@ from HERA.scripts import run_all_dataset_benchmark as runner
 
 
 class AllDatasetBenchmarkTests(unittest.TestCase):
+    def test_batch_profiles_reach_all_modes_and_keep_preparation_independent(self):
+        original = runner.build_commands(runner.parse_args([]))[0]
+        for profile, multiplier, evaluation in [('low', 1, 1), ('medium', 2, 4), ('high', 4, 8)]:
+            with self.subTest(profile=profile):
+                args = runner.parse_args(['--batch-profile', profile])
+                commands = runner.build_commands(args)
+                self.assertEqual(commands[0], original)
+                for dataset, command in zip(runner.DATASETS, commands[1:]):
+                    self.assertEqual(int(command[command.index('--alignn-train-batch-size') + 1]),
+                                     runner.BASE_TRAIN_BATCHES[dataset] * multiplier)
+                    self.assertEqual(int(command[command.index('--alignn-test-batch-size') + 1]), evaluation)
+                    self.assertIn('--early-stopping-monitor-only', command)
+                    dd = 'keep' if dataset.startswith('2dmd_') else 'drop'
+                    self.assertEqual(command[command.index('--alignn-hetero-dd') + 1], dd)
+                protocol = runner.benchmark_protocol(args)
+                if profile == 'low':
+                    self.assertNotIn('batch_profile', protocol)  # Keep old default roots compatible.
+                else:
+                    self.assertEqual(protocol['batch_profile'], profile)
+                    self.assertEqual(protocol['test_batch_size'], evaluation)
+
+    def test_changed_batch_profile_rejects_resume_and_summary_before_writes(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            flags = ['--run-dir', directory, '--batch-profile', 'medium']
+            with patch.object(runner.subprocess, 'run'), patch.object(runner, 'summarize'):
+                runner.main(flags)
+            path = Path(directory) / 'benchmark_protocol.json'
+            saved = path.read_bytes()
+            with patch.object(runner.subprocess, 'run') as run:
+                for profile in ('low', 'high'):
+                    for extra in ([], ['--summary-only']):
+                        with self.assertRaisesRegex(ValueError, 'protocol differs'):
+                            runner.main(['--run-dir', directory, '--batch-profile', profile, *extra])
+                run.assert_not_called()
+            self.assertEqual(path.read_bytes(), saved)
+
     def test_commands_preserve_data_policies_and_architectures_without_hypergraph(self):
         args = runner.parse_args([])
         commands = runner.build_commands(args)

@@ -20,6 +20,14 @@ DATASETS = ('native', 'semi', 'imp2d', '2dmd_low', '2dmd_high')
 MODES = ('full', 'full_x', 'attention', 'attention_was', 'hetero',
          'hetero_fixed_pool', 'hetero_was', 'was_x', 'definet', 'definet_was')
 HETERO_MODES = ('hetero', 'hetero_fixed_pool', 'hetero_was')
+BASE_TRAIN_BATCHES = dict(native=16, semi=64, imp2d=64, **{'2dmd_low': 8, '2dmd_high': 16})
+BATCH_PROFILES = {'low': (1, 1), 'medium': (2, 4), 'high': (4, 8)}
+
+
+def batch_sizes(args):
+    multiplier, evaluation = BATCH_PROFILES[args.batch_profile]
+    return ({dataset: BASE_TRAIN_BATCHES[dataset] * multiplier for dataset in args.dataset},
+            evaluation)
 
 
 def parse_args(argv=None):
@@ -27,6 +35,8 @@ def parse_args(argv=None):
     parser.add_argument('--dataset', nargs='+', choices=DATASETS, default=list(DATASETS))
     parser.add_argument('--seed', nargs='+', type=int, default=[11, 42, 1245])
     parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--batch-profile', choices=tuple(BATCH_PROFILES), default='low',
+                        help='low: original batches; medium: 2x train/val-test 4; high: 4x train/val-test 8')
     parser.add_argument('--early-stopping-patience', type=int, default=50)
     parser.add_argument('--early-stopping-min-delta-percent', type=float, default=0.5)
     parser.add_argument('--point-loss', choices=('mse', 'huber_ev'), default='mse')
@@ -111,6 +121,11 @@ def benchmark_protocol(args):
         min_delta_percent=args.early_stopping_min_delta_percent, point_loss=args.point_loss,
         huber_delta_ev=None,
     )
+    if args.batch_profile != 'low':
+        train_batches, evaluation_batch = batch_sizes(args)
+        protocol['batch_profile'] = args.batch_profile
+        protocol['train_batch_sizes'] = train_batches
+        protocol['test_batch_size'] = evaluation_batch
     deltas = huber_deltas(args)
     if args.huber_auto_calibrate:
         if args.huber_calibration_method == 'train_mad':
@@ -191,6 +206,7 @@ def calibration_command(command, args, dataset):
 def build_commands(args):
     commands = []
     deltas = huber_deltas(args)
+    train_batches, evaluation_batch = batch_sizes(args)
     if 'native' in args.dataset:
         commands.append([
             sys.executable, '-u', '-m', 'HERA.scripts.run_native_filter_benchmark',
@@ -204,9 +220,8 @@ def build_commands(args):
             '--dataset', dataset, '--mode', *modes_for_dataset(dataset), '--r', '0',
             '--alignn-embedding-size', '64', '--alignn-cutoff', '6',
             '--alignn-max-neighbors', '12', '--alignn-nblocks', '3',
-            '--alignn-gcn-blocks', '3', '--alignn-test-batch-size', '1',
-            '--alignn-train-batch-size',
-            str({'native': 16, 'semi': 64, 'imp2d': 64, '2dmd_low': 8, '2dmd_high': 16}[dataset]),
+            '--alignn-gcn-blocks', '3', '--alignn-test-batch-size', str(evaluation_batch),
+            '--alignn-train-batch-size', str(train_batches[dataset]),
             '--alignn-hetero-node-norm', 'layernorm',
             '--point-loss', args.point_loss, '--seed', *map(str, args.seed),
             '--epochs', str(args.epochs),
@@ -360,6 +375,8 @@ def summarize(args):
     lines = [
         '# Early-stopping monitor versus full training', '',
         f'Point loss: `{args.point_loss}`.',
+        f'Batch profile: `{args.batch_profile}`; train={batch_sizes(args)[0]}; '
+        f'validation/test={batch_sizes(args)[1]}.',
         'Huber transitions (eV): ' + (
             ', '.join(f'{dataset}={delta:g}' for dataset, delta in deltas.items())
             if deltas else ('calibrated per dataset/seed (see table below)'
@@ -410,6 +427,9 @@ def main(argv=None):
     commands = build_commands(args)
     print(f'Datasets: {args.dataset}; seeds: {args.seed}; epochs: {args.epochs}; '
           f'loss: {args.point_loss}; Hypergraph disabled; early stopping only records/tests.', flush=True)
+    train_batches, evaluation_batch = batch_sizes(args)
+    print(f'Batch profile: {args.batch_profile}; train={train_batches}; '
+          f'val/test={evaluation_batch}.', flush=True)
     if args.huber_auto_calibrate:
         if args.huber_calibration_method == 'train_mad':
             print('Huber: training-label MAD; no reference-model training; '

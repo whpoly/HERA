@@ -1,6 +1,5 @@
 """ALIGNN variants, including heterogeneous and region-hypergraph hybrids."""
 
-from collections import defaultdict
 import math
 
 import torch
@@ -161,35 +160,57 @@ def _embed_distance_edges(edge_attr, edge_vec, distance_expansion, edge_embeddin
     return edge_embedding(edge_attr)
 
 
-def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion):
+def _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion,
+                               valid_pairs=False):
     if len(pair_src) == 0:
         return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
 
-    src = torch.tensor(pair_src, dtype=torch.long, device=edge_vec.device)
-    dst = torch.tensor(pair_dst, dtype=torch.long, device=edge_vec.device)
+    src = torch.as_tensor(pair_src, dtype=torch.long, device=edge_vec.device)
+    dst = torch.as_tensor(pair_dst, dtype=torch.long, device=edge_vec.device)
     if edge_vec.numel() == 0:
         return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
 
     v_in = -edge_vec[src]
     v_out = edge_vec[dst]
-    in_norm = v_in.norm(dim=-1)
-    out_norm = v_out.norm(dim=-1)
-    valid = (in_norm > 1e-8) & (out_norm > 1e-8)
-    if valid.sum().item() == 0:
-        return _empty_index(edge_vec), edge_vec.new_empty((0, angle_expansion.out_features))
-
-    src = src[valid]
-    dst = dst[valid]
-    v_in = v_in[valid]
-    v_out = v_out[valid]
+    if not valid_pairs:
+        valid = (v_in.norm(dim=-1) > 1e-8) & (v_out.norm(dim=-1) > 1e-8)
+        src = src[valid]
+        dst = dst[valid]
+        v_in = v_in[valid]
+        v_out = v_out[valid]
     cos_angle = F.cosine_similarity(v_in, v_out, dim=-1).clamp(-1.0, 1.0)
     return torch.stack([src, dst], dim=0), angle_expansion(cos_angle)
 
 
-def _valid_edge_mask(edge_vec):
-    if edge_vec.numel() == 0:
-        return []
-    return (edge_vec.detach().norm(dim=-1) > 1e-8).cpu().tolist()
+def _directed_line_pairs(sources, targets, edge_ids, edge_vec):
+    """Join incoming/outgoing bonds on device, preserving the legacy pair order.
+
+    Stable sorting preserves outgoing edge order, while repeat_interleave
+    visits incoming edges in their original order. Edge IDs, rather than node
+    pairs, distinguish periodic parallel edges and exclude only the same bond.
+    """
+    valid = (edge_vec.detach().norm(dim=-1) > 1e-8)[edge_ids]
+    positions = valid.nonzero(as_tuple=False).flatten()
+    sources, targets, edge_ids = sources[positions], targets[positions], edge_ids[positions]
+    if edge_ids.numel() == 0:
+        return _empty_index(edge_ids)
+
+    order = torch.argsort(sources, stable=True)
+    sorted_sources = sources[order]
+    begin = torch.searchsorted(sorted_sources, targets, right=False)
+    end = torch.searchsorted(sorted_sources, targets, right=True)
+    counts = end - begin
+    incoming = torch.repeat_interleave(
+        torch.arange(edge_ids.numel(), device=edge_ids.device), counts,
+    )
+    starts = counts.cumsum(0) - counts
+    outgoing_position = (
+        torch.arange(incoming.numel(), device=edge_ids.device)
+        - starts[incoming] + begin[incoming]
+    )
+    first, second = edge_ids[incoming], edge_ids[order[outgoing_position]]
+    keep = (first != second).nonzero(as_tuple=False).flatten()
+    return torch.stack((first[keep], second[keep]))
 
 
 def build_line_graph(edge_index, edge_vec, angle_expansion):
@@ -198,26 +219,11 @@ def build_line_graph(edge_index, edge_vec, angle_expansion):
     if edge_index.size(1) == 0:
         return _empty_index(edge_index), edge_index.new_empty((0, angle_expansion.out_features), dtype=torch.float)
 
-    sources = edge_index[0].detach().cpu().tolist()
-    targets = edge_index[1].detach().cpu().tolist()
-    valid_edges = _valid_edge_mask(edge_vec)
-    outgoing = defaultdict(list)
-    for edge_id, src in enumerate(sources):
-        if valid_edges[edge_id]:
-            outgoing[int(src)].append(edge_id)
-
-    pair_src = []
-    pair_dst = []
-    for first_edge, shared_node in enumerate(targets):
-        if not valid_edges[first_edge]:
-            continue
-        for second_edge in outgoing.get(int(shared_node), []):
-            if first_edge == second_edge:
-                continue
-            pair_src.append(first_edge)
-            pair_dst.append(second_edge)
-
-    return _angle_features_from_pairs(pair_src, pair_dst, edge_vec, angle_expansion)
+    pairs = _directed_line_pairs(
+        edge_index[0], edge_index[1],
+        torch.arange(edge_index.size(1), device=edge_index.device), edge_vec,
+    )
+    return _angle_features_from_pairs(*pairs, edge_vec, angle_expansion, valid_pairs=True)
 
 
 def build_hetero_line_graph(
@@ -234,41 +240,23 @@ def build_hetero_line_graph(
         angle_attr = edge_vec_all.new_empty((0, angle_expansion.out_features))
         return line_edge_index, angle_attr
 
-    valid_edges = _valid_edge_mask(edge_vec_all)
-    outgoing = defaultdict(list)
-    edge_targets = []
-
+    # Node indices are local to each node type. Encode (type, index) without
+    # reading tensor values back to the host to calculate node-count offsets.
+    node_types = dict.fromkeys(node for edge_type in edge_types for node in (edge_type[0], edge_type[2]))
+    type_ids = {node: index for index, node in enumerate(node_types)}
+    stride = len(type_ids)
+    sources, targets, edge_ids = [], [], []
     for edge_type in edge_types:
         edge_index = edge_index_dict[edge_type]
         src_type, _, dst_type = edge_type
         offset = edge_offsets[edge_type]
-        sources = edge_index[0].detach().cpu().tolist()
-        targets = edge_index[1].detach().cpu().tolist()
-
-        for local_edge, src in enumerate(sources):
-            global_edge = offset + local_edge
-            if valid_edges[global_edge]:
-                outgoing[(src_type, int(src))].append(global_edge)
-        for local_edge, dst in enumerate(targets):
-            global_edge = offset + local_edge
-            if valid_edges[global_edge]:
-                edge_targets.append(((dst_type, int(dst)), global_edge))
-
-    pair_src = []
-    pair_dst = []
-    for shared_node, first_edge in edge_targets:
-        for second_edge in outgoing.get(shared_node, []):
-            if first_edge == second_edge:
-                continue
-            pair_src.append(first_edge)
-            pair_dst.append(second_edge)
-
-    return _angle_features_from_pairs(
-        pair_src,
-        pair_dst,
-        edge_vec_all,
-        angle_expansion,
+        sources.append(edge_index[0] * stride + type_ids[src_type])
+        targets.append(edge_index[1] * stride + type_ids[dst_type])
+        edge_ids.append(torch.arange(edge_index.size(1), device=edge_index.device) + offset)
+    pairs = _directed_line_pairs(
+        torch.cat(sources), torch.cat(targets), torch.cat(edge_ids), edge_vec_all,
     )
+    return _angle_features_from_pairs(*pairs, edge_vec_all, angle_expansion, valid_pairs=True)
 
 
 class GatedGraphConv(nn.Module):

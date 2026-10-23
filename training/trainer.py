@@ -853,15 +853,21 @@ class MEGNetTrainer:
                 else:
                     self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none=True)
-            mses.append(mse.detach().to("cpu").numpy())
-            rank_losses.append(rank_loss.detach().to("cpu").numpy())
+            mses.append(mse.detach())
+            rank_losses.append(rank_loss.detach())
             with torch.no_grad():
                 maes.append(
                     MAELoss(self.scaler.inverse_transform(preds), batch.y,
-                            weights=batch.weight, reduction='sum').to('cpu').numpy()
+                            weights=batch.weight, reduction='sum').detach()
                 )
+        # Copy scalar metric series at epoch end, not after every GPU batch. Keep
+        # the existing NumPy reduction order/precision used by checkpointing.
+        if mses:
+            mses = torch.stack(mses).cpu().numpy()
+            rank_losses = torch.stack(rank_losses).cpu().numpy()
+            maes = torch.stack(maes).cpu().numpy()
         train_mae = sum(maes) / len(self.train_structures)
-        self.last_train_rank_loss = float(np.mean(rank_losses)) if rank_losses else 0.0
+        self.last_train_rank_loss = float(np.mean(rank_losses)) if len(rank_losses) else 0.0
         return train_mae, np.mean(mses)
 
     def step_scheduler(self, validation_loss):
@@ -878,10 +884,11 @@ class MEGNetTrainer:
                     preds = self._forward(batch)
                 total.append(
                     MAELoss(self.scaler.inverse_transform(preds), batch.y,
-                            weights=batch.weight, reduction='sum').to('cpu').data.numpy()
+                            weights=batch.weight, reduction='sum').detach()
                 )
-                results.append(self.scaler.inverse_transform(preds))
-            cur_test_loss = sum(total) / len(self.test_structures)
+                if return_predictions:
+                    results.append(self.scaler.inverse_transform(preds))
+            cur_test_loss = sum(torch.stack(total).cpu().numpy()) / len(self.test_structures)
         if not return_predictions:
             return cur_test_loss
         return cur_test_loss, torch.concat(results).to('cpu').data.reshape(-1, 1)
@@ -909,13 +916,14 @@ class MEGNetTrainer:
                 preds = self.scaler.inverse_transform(preds)
                 total.append(
                     MAELoss(preds, batch.y,
-                            weights=batch.weight, reduction='sum').to('cpu').data.numpy()
+                            weights=batch.weight, reduction='sum').detach()
                 )
-                results.append(preds.detach().to('cpu').reshape(-1, 1))
-        mae = sum(total) / len(self.test_structures)
+                if return_predictions:
+                    results.append(preds.detach().reshape(-1, 1))
+        mae = sum(torch.stack(total).cpu().numpy()) / len(self.test_structures)
         if not return_predictions:
             return mae
-        return mae, torch.concat(results).numpy().reshape(-1)
+        return mae, torch.concat(results).cpu().numpy().reshape(-1)
 
     # -------------------------------------------------------------- #
     #  Save / load
