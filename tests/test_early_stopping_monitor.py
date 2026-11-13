@@ -78,7 +78,7 @@ class TinyTrainer:
 
 class EarlyStoppingMonitorTests(unittest.TestCase):
     def run_training(self, directory, monitor=True, patience=2, values=None,
-                     min_delta=0., fail_epoch=None, test_bias=0.):
+                     min_delta=0., fail_epoch=None, test_bias=0., validation_score=None):
         values = values or [1., .8, .81, .82, .7, .72, .73]
         config = dict(task='alignn_hetero', model={}, optim=dict(
             early_stopping_patience=patience,
@@ -103,11 +103,26 @@ class EarlyStoppingMonitorTests(unittest.TestCase):
             cli.train_single_mode(
                 'hetero', config, [structures] * 4, [0.] * len(structures),
                 [11], len(values), 'cpu', 'alignn', 'native', log_dir=directory,
-                split_iterator=lambda *args, **kwargs: iter([split]),
+                split_iterator=lambda *args, **kwargs: iter([split]), validation_score=validation_score,
             )
         checkpoint = torch.load(Path(directory) / 'seed11_best_checkpoint.pth',
                                 map_location='cpu', weights_only=False)
         return instances[0], checkpoint
+
+    def test_custom_validation_score_selects_weights_and_controls_the_plateau(self):
+        curve = [1.0, .6, .25, .4, .5, .6, .7]
+
+        def score(trainer, validation_structures, validation_targets):
+            self.assertIs(validation_structures, trainer.validation_data)
+            self.assertEqual(len(validation_structures), len(validation_targets))
+            return curve[trainer.epoch-1]
+
+        with tempfile.TemporaryDirectory() as directory:
+            trainer, saved = self.run_training(directory, monitor=False, patience=2, validation_score=score)
+        self.assertEqual(trainer.scheduled, curve[:5])
+        self.assertEqual(saved['best_epoch'], 3)
+        self.assertEqual(saved['best_val_mae'], .25)
+        self.assertTrue(saved['stopped_early'])
 
     def test_first_trigger_and_final_use_validation_best_weights_and_distinct_outputs(self):
         with tempfile.TemporaryDirectory() as directory:

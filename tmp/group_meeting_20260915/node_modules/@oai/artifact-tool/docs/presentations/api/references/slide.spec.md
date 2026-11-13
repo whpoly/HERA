@@ -1,5 +1,17 @@
 # Slide Facade
 
+## Slide size
+
+```ts
+const slide = presentation.slides.add({ width: 1280, height: 720 });
+const { width, height } = slide.size;
+slide.size = { width: 1920, height: 1080 };
+slide.size = { height: 900 }; // Keep the current width.
+slide.size = { width: 1600 }; // Keep the current height.
+```
+
+Use finite pixel numbers. An invalid size throws before either dimension changes.
+
 ## Slide Show Visibility
 
 ```ts
@@ -196,3 +208,14 @@ const next = sourceSlide.duplicate();
 next.moveTo(3);
 next.placeholders.getItem("title").text = "Updated section title";
 ```
+
+```ts
+// Capture content now, then append independent copies to the same presentation.
+const copy = sourceSlide.copy();
+const first = presentation.slides.addCopy(copy);
+const second = presentation.slides.addCopy(copy);
+```
+
+`duplicate()` inserts immediately after the source. `copy()` captures the current
+slide content, charts and images; each `addCopy()` uses that captured content and
+creates independent editable assets. Layouts and themes remain shared.

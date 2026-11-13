@@ -625,8 +625,8 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
                       model_name, dataset_name, log_dir='logs', explain_options=None,
                       run_label=None, cv5=False, resume=False, protect_existing=False,
                       native_filter_manifest=None, impurity_filter_manifest=None,
-                      split_iterator=None):
-    """Train a single mode and return per-split test losses."""
+                      split_iterator=None, validation_score=None):
+    """Train a mode. A custom selection score receives only the trainer and validation X/y."""
     log_mode = run_label or mode
     losses, skipped, trained = [], 0, 0
     monitor_only = bool(config['optim'].get('early_stopping_monitor_only', False))
@@ -720,7 +720,10 @@ def train_single_mode(mode, config, dataset, targets, random_seeds, epochs, devi
             write_evaluation_comparison(log_dir, split['logger_id'], evaluation_record)
         for epoch in range(epochs):
             mae, mse = trainer.train_one_epoch()
-            loss = trainer.evaluate_on_test()
+            if validation_score is None:
+                loss = trainer.evaluate_on_test()
+            else:
+                loss = validation_score(trainer, split['val_X'], split['val_y'])
             trainer.step_scheduler(loss)
             cur_lr = trainer.optimizer.param_groups[0]['lr']
             print(f'  [{split["display"]}] Epoch {epoch + 1}/{epochs}  train_mae={mae:.4f}  val_mae={loss:.4f}')
